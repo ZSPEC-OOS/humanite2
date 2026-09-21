@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useHumanizeStore } from '@/stores/humanizeStore'
 import { apiListPresets, apiCreatePreset, apiDeletePreset, Preset, APIError } from '@/lib/api'
-import { darkSelectCls, darkInputCls } from '@/components/ui/styles'
+import { selectCls, inputCls } from '@/components/ui/styles'
 
 export function PresetSelector() {
   const { settings, setSettings }         = useHumanizeStore()
@@ -63,12 +63,11 @@ export function PresetSelector() {
             e.target.value = ''
           }}
           defaultValue=""
-          className={`${darkSelectCls} max-w-[140px]`}
-          style={{ background: '#0f0f1c' }}
+          className={`${selectCls} max-w-[140px]`}
         >
-          <option value="" disabled style={{ background: '#0f0f1c' }}>Load preset…</option>
+          <option value="" disabled>Load preset…</option>
           {presets.map(p => (
-            <option key={p.id} value={p.id} style={{ background: '#0f0f1c' }}>{p.name}</option>
+            <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
       )}
@@ -82,27 +81,27 @@ export function PresetSelector() {
             onKeyDown={(e) => { if (e.key === 'Enter') handleSave() }}
             placeholder="Preset name…"
             maxLength={100}
-            className={`${darkInputCls} w-28`}
+            className={`${inputCls} w-28`}
             autoFocus
           />
           <button
             onClick={handleSave}
             disabled={!saveName.trim() || saving}
-            className="text-xs px-2.5 py-1.5 rounded-lg bg-brand-violet text-white
-                       hover:opacity-90 disabled:opacity-40 transition-opacity"
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-gray-900 text-white
+                       hover:bg-gray-800 disabled:opacity-40 transition-colors"
           >
             {saving ? '…' : 'Save'}
           </button>
           <button
             onClick={() => { setShowSaveForm(false); setSaveName(''); setError(null) }}
-            className="text-xs text-white/30 hover:text-white/60 px-1"
+            className="text-xs text-gray-400 hover:text-gray-700 px-1"
           >✕</button>
-          {error && <span className="text-xs text-red-400">{error}</span>}
+          {error && <span className="text-xs text-red-500">{error}</span>}
         </div>
       ) : (
         <button
           onClick={() => setShowSaveForm(true)}
-          className="text-xs text-white/30 hover:text-brand-violet transition-colors"
+          className="text-xs text-gray-400 hover:text-gray-900 transition-colors"
           title="Save current settings as preset"
         >
           + Save preset

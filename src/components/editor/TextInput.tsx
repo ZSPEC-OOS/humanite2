@@ -8,16 +8,16 @@ export function TextInput() {
   const overLimit = text.length > MAX_CHARS
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0a18]">
+    <div className="flex flex-col h-full bg-white">
       <textarea
         value={text}
         onChange={e => setText(e.target.value.slice(0, MAX_CHARS))}
         placeholder="Paste your AI-generated text here…"
-        className="flex-1 bg-transparent resize-none text-sm text-white/80 leading-relaxed
-                   px-4 py-4 outline-none placeholder-white/20 font-sans"
+        className="flex-1 bg-transparent resize-none text-sm text-gray-800 leading-relaxed
+                   px-4 py-4 outline-none placeholder-gray-400 font-sans"
       />
-      <div className="flex items-center justify-end px-4 py-2 border-t border-white/6 shrink-0">
-        <span className={`text-xs tabular-nums ${overLimit ? 'text-red-400 font-semibold' : 'text-white/25'}`}>
+      <div className="flex items-center justify-end px-4 py-2 border-t border-gray-200 shrink-0">
+        <span className={`text-xs tabular-nums ${overLimit ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>
           {text.length.toLocaleString()} / {MAX_CHARS.toLocaleString()}
         </span>
       </div>

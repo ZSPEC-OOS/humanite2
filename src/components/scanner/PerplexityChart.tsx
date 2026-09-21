@@ -42,13 +42,13 @@ export function PerplexityChart({ scores }: PerplexityChartProps) {
         )}
       </div>
 
-      <div className="flex justify-between mt-1.5 text-xs text-white/25">
+      <div className="flex justify-between mt-1.5 text-xs text-gray-400">
         <span>Sentence 1</span>
         <span>Avg: {avg.toFixed(0)}</span>
         <span>Sentence {Math.min(scores.length, 30)}</span>
       </div>
 
-      <div className="flex gap-3 mt-2 text-xs text-white/30">
+      <div className="flex gap-3 mt-2 text-xs text-gray-400">
         <span className="flex items-center gap-1">
           <span className="w-2 h-2 rounded-sm bg-green-500" />
           High (human-like)

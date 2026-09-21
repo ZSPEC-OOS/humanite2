@@ -1,12 +1,12 @@
-/** Shared Tailwind class strings for dark-theme form controls */
+/** Shared Tailwind class strings for form controls */
 
-export const darkSelectCls =
+export const selectCls =
   'text-xs rounded-lg px-2.5 py-1.5 border ' +
-  'bg-white/5 border-white/10 text-white/70 ' +
-  'focus:outline-none focus:border-brand-violet/60 focus:ring-1 focus:ring-brand-violet/40 ' +
+  'bg-white border-gray-300 text-gray-700 ' +
+  'focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900/20 ' +
   'appearance-none cursor-pointer'
 
-export const darkInputCls =
+export const inputCls =
   'text-xs rounded-lg px-2.5 py-1.5 border ' +
-  'bg-white/5 border-white/10 text-white/70 placeholder-white/25 ' +
-  'focus:outline-none focus:border-brand-violet/60 focus:ring-1 focus:ring-brand-violet/40'
+  'bg-white border-gray-300 text-gray-700 placeholder-gray-400 ' +
+  'focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900/20'

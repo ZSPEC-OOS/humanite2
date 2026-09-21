@@ -5,24 +5,24 @@ import { Spinner } from '@/components/ui/Spinner'
 
 const CLASS_CONFIG = {
   'human-written': {
-    bg: 'bg-green-500/10', border: 'border-green-500/25',
-    badge: 'bg-green-500/15 text-green-400 border border-green-500/30',
-    bar: 'bg-green-400', label: 'Human Written', icon: '✓',
+    bg: 'bg-green-50', border: 'border-green-200',
+    badge: 'bg-green-100 text-green-700 border border-green-300',
+    bar: 'bg-green-500', label: 'Human Written', icon: '✓',
   },
   'ai-generated': {
-    bg: 'bg-red-500/10', border: 'border-red-500/25',
-    badge: 'bg-red-500/15 text-red-400 border border-red-500/30',
-    bar: 'bg-red-400', label: 'AI Generated', icon: '⚠',
+    bg: 'bg-red-50', border: 'border-red-200',
+    badge: 'bg-red-100 text-red-700 border border-red-300',
+    bar: 'bg-red-500', label: 'AI Generated', icon: '⚠',
   },
   mixed: {
-    bg: 'bg-amber-500/10', border: 'border-amber-500/25',
-    badge: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',
-    bar: 'bg-amber-400', label: 'Mixed', icon: '◑',
+    bg: 'bg-amber-50', border: 'border-amber-200',
+    badge: 'bg-amber-100 text-amber-700 border border-amber-300',
+    bar: 'bg-amber-500', label: 'Mixed', icon: '◑',
   },
   uncertain: {
-    bg: 'bg-white/5', border: 'border-white/10',
-    badge: 'bg-white/8 text-white/50 border border-white/15',
-    bar: 'bg-white/30', label: 'Uncertain', icon: '?',
+    bg: 'bg-gray-50', border: 'border-gray-200',
+    badge: 'bg-gray-100 text-gray-600 border border-gray-300',
+    bar: 'bg-gray-400', label: 'Uncertain', icon: '?',
   },
 } as const
 
@@ -33,7 +33,7 @@ export function ScanReport() {
 
   if (status === 'idle') {
     return (
-      <div className="h-full flex items-center justify-center p-6 text-sm text-white/25 italic">
+      <div className="h-full flex items-center justify-center p-6 text-sm text-gray-400 italic">
         Run a scan to see results.
       </div>
     )
@@ -43,8 +43,8 @@ export function ScanReport() {
     return (
       <div className="h-full flex items-center justify-center p-6">
         <div className="text-center">
-          <Spinner className="w-8 h-8 border-brand-violet/30 border-t-brand-violet block mx-auto mb-3" />
-          <p className="text-sm text-white/40">Analyzing…</p>
+          <Spinner className="w-8 h-8 border-gray-200 border-t-gray-700 block mx-auto mb-3" />
+          <p className="text-sm text-gray-500">Analyzing…</p>
         </div>
       </div>
     )
@@ -52,8 +52,8 @@ export function ScanReport() {
 
   if (status === 'error') {
     return (
-      <div className="p-4 m-3 text-sm text-red-400 bg-red-500/10
-                      border border-red-500/25 rounded-xl">
+      <div className="p-4 m-3 text-sm text-red-600 bg-red-50
+                      border border-red-200 rounded-xl">
         {error}
       </div>
     )
@@ -77,13 +77,13 @@ export function ScanReport() {
             {cfg.icon} {cfg.label.toUpperCase()}
           </span>
           <div className="text-right">
-            <span className="text-2xl font-bold text-white">
+            <span className="text-2xl font-bold text-gray-900">
               {(conf * 100).toFixed(0)}%
             </span>
-            <p className="text-xs text-white/35">confidence</p>
+            <p className="text-xs text-gray-500">confidence</p>
           </div>
         </div>
-        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+        <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
           <div className={`h-full rounded-full transition-all ${cfg.bar}`}
                style={{ width: `${conf * 100}%` }} />
         </div>
@@ -91,20 +91,20 @@ export function ScanReport() {
 
       {/* Probability breakdown */}
       <div className="space-y-2.5">
-        <p className="text-xs font-semibold text-white/30 uppercase tracking-wider">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
           Probability Breakdown
         </p>
         {[
-          { label: 'Human', value: hProb,  color: 'bg-green-400' },
-          { label: 'AI',    value: aiProb, color: 'bg-red-400' },
+          { label: 'Human', value: hProb,  color: 'bg-green-500' },
+          { label: 'AI',    value: aiProb, color: 'bg-red-500' },
         ].map(({ label, value, color }) => (
           <div key={label} className="flex items-center gap-3">
-            <span className="text-xs text-white/40 w-10">{label}</span>
-            <div className="flex-1 h-1.5 bg-white/8 rounded-full overflow-hidden">
+            <span className="text-xs text-gray-500 w-10">{label}</span>
+            <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
               <div className={`h-full rounded-full transition-all ${color}`}
                    style={{ width: `${value * 100}%` }} />
             </div>
-            <span className="text-xs font-medium text-white/60 w-9 text-right tabular-nums">
+            <span className="text-xs font-medium text-gray-700 w-9 text-right tabular-nums">
               {(value * 100).toFixed(0)}%
             </span>
           </div>
@@ -114,7 +114,7 @@ export function ScanReport() {
       {/* Perplexity chart */}
       {response.per_sentence_perplexity.length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-white/30 uppercase tracking-wider mb-2">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
             Per-Sentence Perplexity
           </p>
           <PerplexityChart scores={response.per_sentence_perplexity} />
@@ -124,21 +124,21 @@ export function ScanReport() {
       {/* Top features */}
       {response.top_features.length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-white/30 uppercase tracking-wider mb-2.5">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2.5">
             Top Signals
           </p>
           <div className="space-y-2">
             {response.top_features.map((f, i) => (
               <div key={i} className="flex items-center gap-2.5">
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                  f.direction === 'ai_indicator' ? 'bg-red-400' : 'bg-green-400'
+                  f.direction === 'ai_indicator' ? 'bg-red-500' : 'bg-green-500'
                 }`} />
-                <span className="text-xs text-white/50 flex-1 truncate">
+                <span className="text-xs text-gray-500 flex-1 truncate">
                   {f.feature.replace(/_/g, ' ')}
                 </span>
-                <div className="w-16 h-1 bg-white/8 rounded-full overflow-hidden">
+                <div className="w-16 h-1 bg-gray-200 rounded-full overflow-hidden">
                   <div className={`h-full rounded-full ${
-                    f.direction === 'ai_indicator' ? 'bg-red-400' : 'bg-green-400'
+                    f.direction === 'ai_indicator' ? 'bg-red-500' : 'bg-green-500'
                   }`} style={{ width: `${f.contribution * 100}%` }} />
                 </div>
               </div>
@@ -149,11 +149,11 @@ export function ScanReport() {
 
       {/* Explanation */}
       {response.explanation && (
-        <div className="bg-white/5 border border-white/8 rounded-xl p-3.5 space-y-1.5">
-          <p className="text-xs font-medium text-white/70">
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-3.5 space-y-1.5">
+          <p className="text-xs font-medium text-gray-700">
             {response.explanation.summary}
           </p>
-          <p className="text-xs text-white/40 leading-relaxed">
+          <p className="text-xs text-gray-500 leading-relaxed">
             {response.explanation.detail}
           </p>
         </div>
@@ -161,7 +161,7 @@ export function ScanReport() {
 
       {/* Model info */}
       {response.model_used && (
-        <p className="text-xs text-white/25">
+        <p className="text-xs text-gray-400">
           Model: {response.model_used}
           {response.processing_duration_ms != null
             ? ` · ${response.processing_duration_ms}ms` : ''}
