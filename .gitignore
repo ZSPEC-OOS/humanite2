@@ -1,0 +1,44 @@
+# Environment
+.env.local
+.env.*.local
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.pnpm-store/
+*.tsbuildinfo
+
+# Go
+tmp/
+*.exe
+
+# ML models (large binaries)
+ml/models/
+ml/datasets/*.parquet
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# JWT keys (never commit)
+jwt_private.pem
+jwt_public.pem
