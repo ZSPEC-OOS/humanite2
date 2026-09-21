@@ -29,3 +29,18 @@ export function db(): Firestore {
   }
   return _db
 }
+
+// Wraps a Firestore write so a missing/misconfigured backing store degrades
+// job tracking instead of crashing the request — humanize/scan results
+// don't depend on this succeeding, only async job polling does.
+export async function tryPersist(op: () => Promise<unknown>, context: string): Promise<boolean> {
+  try {
+    await op()
+    return true
+  } catch (err) {
+    console.warn(`Job persistence unavailable (${context}) — continuing without it`, {
+      type: err instanceof Error ? err.constructor.name : typeof err,
+    })
+    return false
+  }
+}

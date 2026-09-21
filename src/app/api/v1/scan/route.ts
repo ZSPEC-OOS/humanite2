@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { randomUUID, createHash } from 'crypto'
-import { db } from '@/lib/firestore'
+import { db, tryPersist } from '@/lib/firestore'
 import { requireAuth, isAuthFailure } from '@/lib/require-auth'
 import { preprocess } from '@/lib/preprocess'
 
@@ -188,7 +188,7 @@ export async function POST(req: NextRequest) {
   const inputHash = createHash('sha256').update(text).digest('hex')
   const now = new Date()
 
-  await db().collection('jobs').doc(jobId).set({
+  await tryPersist(() => db().collection('jobs').doc(jobId).set({
     userId: auth.claims.sub,
     jobType: 'scan',
     status: 'processing',
@@ -198,7 +198,7 @@ export async function POST(req: NextRequest) {
     updatedAt: now,
     completedAt: null,
     errorCode: null,
-  })
+  }), 'create scan job')
 
   try {
     // Fast rule-based pass first
@@ -252,7 +252,7 @@ export async function POST(req: NextRequest) {
       result = await classifyWithOpenAI(sanitized, mode, body.api_config)
     }
 
-    await db().collection('jobs').doc(jobId).update({ status: 'completed', completedAt: new Date(), updatedAt: new Date() })
+    await tryPersist(() => db().collection('jobs').doc(jobId).update({ status: 'completed', completedAt: new Date(), updatedAt: new Date() }), 'complete scan job')
 
     return NextResponse.json({
       job_id: jobId,
@@ -272,7 +272,7 @@ export async function POST(req: NextRequest) {
       warning: null,
     })
   } catch (err) {
-    await db().collection('jobs').doc(jobId).update({ status: 'failed', errorCode: 'INTERNAL_PIPELINE_ERROR', updatedAt: new Date() })
+    await tryPersist(() => db().collection('jobs').doc(jobId).update({ status: 'failed', errorCode: 'INTERNAL_PIPELINE_ERROR', updatedAt: new Date() }), 'mark scan job failed')
     console.error('Scan failed', { jobId, err })
     return NextResponse.json(
       { error: { code: 'DEPENDENCY_UPSTREAM_ERROR', message: 'An upstream service failed. Please retry.' } },
