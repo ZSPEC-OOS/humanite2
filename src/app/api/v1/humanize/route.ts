@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { randomUUID, createHash } from 'crypto'
 import { waitUntil } from '@vercel/functions'
-import { db } from '@/lib/firestore'
+import { db, tryPersist } from '@/lib/firestore'
 import { requireAuth, isAuthFailure } from '@/lib/require-auth'
 import { preprocess, FactLock } from '@/lib/preprocess'
 import { generateWatermark } from '@/lib/watermark'
@@ -93,7 +93,7 @@ async function processHumanizeJobAsync(
     const output = buildOutput(postText, results, watermark)
     const durationMs = Date.now() - start
 
-    await db().collection('jobs').doc(jobId).update({
+    await tryPersist(() => db().collection('jobs').doc(jobId).update({
       status: 'completed',
       completedAt: new Date(),
       updatedAt: new Date(),
@@ -107,18 +107,18 @@ async function processHumanizeJobAsync(
           chunk_count: chunks.length,
         },
       },
-    })
+    }), 'complete async humanize job')
   } catch (err) {
     console.error('Async humanize job failed', {
       jobId,
       type: err instanceof Error ? err.constructor.name : typeof err,
     })
-    await db().collection('jobs').doc(jobId).update({
+    await tryPersist(() => db().collection('jobs').doc(jobId).update({
       status: 'failed',
       errorCode: 'INTERNAL_PIPELINE_ERROR',
       errorType: err instanceof Error ? err.constructor.name : 'UnknownError',
       updatedAt: new Date(),
-    })
+    }), 'mark async humanize job failed')
   }
 }
 
@@ -179,7 +179,7 @@ export async function POST(req: NextRequest) {
   const inputHash = createHash('sha256').update(text).digest('hex')
   const now = new Date()
 
-  await db().collection('jobs').doc(jobId).set({
+  const jobPersisted = await tryPersist(() => db().collection('jobs').doc(jobId).set({
     userId: auth.claims.sub,
     jobType: 'humanize',
     status: 'processing',
@@ -189,10 +189,24 @@ export async function POST(req: NextRequest) {
     updatedAt: now,
     completedAt: null,
     errorCode: null,
-  })
+  }), 'create humanize job')
 
   // ── Long document: hand off to the background and answer immediately ──────
   if (text.length > SYNC_MAX_CHARS) {
+    // The only channel back to the client for an async job is polling the
+    // job record — if we couldn't even create it, there is no way to ever
+    // report a result, so fail fast instead of accepting work we can't return.
+    if (!jobPersisted) {
+      return NextResponse.json(
+        {
+          error: {
+            code: 'STORAGE_UNAVAILABLE',
+            message: `Background processing requires job storage, which is currently unavailable. Configure Firebase credentials, or submit text under the ${SYNC_MAX_CHARS.toLocaleString()}-character synchronous limit.`,
+          },
+        },
+        { status: 503 },
+      )
+    }
     waitUntil(processHumanizeJobAsync(jobId, prep.sanitized_text, prep.fact_locks, settings, body.api_config))
     return NextResponse.json({
       job_id: jobId,
@@ -230,12 +244,12 @@ export async function POST(req: NextRequest) {
     const watermark = generateWatermark(jobId, result.modelUsed)
     const output = buildOutput(result.text, [result], watermark)
 
-    await db().collection('jobs').doc(jobId).update({
+    await tryPersist(() => db().collection('jobs').doc(jobId).update({
       status: 'completed',
       completedAt: new Date(),
       updatedAt: new Date(),
       watermarkFingerprint: watermark.fingerprint,
-    })
+    }), 'complete humanize job')
 
     return NextResponse.json({
       job_id: jobId,
@@ -259,7 +273,7 @@ export async function POST(req: NextRequest) {
         : null,
     })
   } catch (err) {
-    await db().collection('jobs').doc(jobId).update({ status: 'failed', errorCode: 'INTERNAL_PIPELINE_ERROR', updatedAt: new Date() })
+    await tryPersist(() => db().collection('jobs').doc(jobId).update({ status: 'failed', errorCode: 'INTERNAL_PIPELINE_ERROR', updatedAt: new Date() }), 'mark humanize job failed')
     console.error('Humanize failed', { jobId, err })
     return NextResponse.json(
       { error: { code: 'DEPENDENCY_UPSTREAM_ERROR', message: 'An upstream service failed. Please retry.' } },
