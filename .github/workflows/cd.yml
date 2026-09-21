@@ -1,0 +1,25 @@
+name: CD
+
+# Vercel handles all deployments automatically on push to main.
+# This workflow is intentionally minimal — it only runs when you
+# want to manually trigger a production deployment check.
+#
+# To re-enable Kubernetes / Docker image builds, restore the jobs
+# from git history (commit before the Vercel migration).
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+
+jobs:
+  noop:
+    name: No-op (Vercel deploys on push)
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Vercel deployment is triggered automatically on push to main."

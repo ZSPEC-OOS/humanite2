@@ -1,0 +1,9 @@
+services/
+workers/
+ml/
+infra/
+scripts/
+docker-compose*.yml
+pyproject.toml
+Makefile
+DEPLOYMENT.md

@@ -1,0 +1,9 @@
+torch==2.4.1
+transformers==4.44.2
+datasets
+scikit-learn
+xgboost
+pandas
+numpy
+bert-score
+spacy==3.7.6
