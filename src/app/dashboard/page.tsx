@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import Image from 'next/image'
 import { useUserStore }     from '@/stores/userStore'
 import { useHumanizeStore } from '@/stores/humanizeStore'
 import { useScanStore }     from '@/stores/scanStore'
@@ -170,9 +171,18 @@ export default function Dashboard() {
     {/* ══════════════════════════════════════════════════════════════
         DESKTOP  (md+)
         ══════════════════════════════════════════════════════════════ */}
-    <div className="hidden md:flex flex-col items-center min-h-screen py-6 px-6 bg-white">
-      <div className="w-full max-w-6xl rounded-2xl overflow-hidden flex flex-col
-                      bg-white border border-gray-200 shadow-sm"
+    <div className="relative hidden md:flex flex-col items-center min-h-screen py-6 px-6 bg-white overflow-hidden">
+      <Image
+        src="/images/app-background.png"
+        alt=""
+        fill
+        priority
+        sizes="100vw"
+        className="object-cover"
+        aria-hidden
+      />
+      <div className="relative z-10 w-full max-w-6xl rounded-2xl overflow-hidden flex flex-col
+                      bg-white border border-gray-200 shadow-md"
         style={{ minHeight: 'calc(100vh - 3rem)' }}>
         {/* Desktop header */}
         <header className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 shrink-0">
