@@ -1,14 +1,8 @@
 import Image from 'next/image'
 import Link from 'next/link'
-
-function ArrowIcon({ className = '' }: { className?: string }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className={className} aria-hidden>
-      <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6"
-        strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
+import { SiteNav } from '@/components/marketing/SiteNav'
+import { SiteFooter } from '@/components/marketing/SiteFooter'
+import { ArrowIcon } from '@/components/marketing/icons'
 
 function AIIcon() {
   return (
@@ -32,8 +26,6 @@ function HumanIcon() {
 const AI_TEXT = `Artificial intelligence is transforming the way we work, learn, and communicate. It has the potential to increase efficiency, automate tasks, and unlock new opportunities across various industries.`
 
 const HUMAN_TEXT = `AI is changing how we work, learn, and connect. It helps us get more done, takes care of the repetitive stuff, and opens the door to new opportunities across all kinds of industries.`
-
-const NAV_LINKS = ['Product', 'Use Cases', 'Pricing', 'About']
 
 const FEATURES = [
   { icon: '⚡', label: 'More human writing' },
@@ -65,34 +57,7 @@ export default function LandingPage() {
       />
 
       <div className="relative z-10 flex min-h-screen flex-col">
-        {/* Nav */}
-        <header className="flex items-center justify-between px-6 py-6 md:px-14 md:py-7">
-          <span className="font-display text-xl text-gray-900">
-            Humanite<sup className="text-[0.55em]">™</sup>
-          </span>
-
-          <nav className="hidden items-center gap-8 md:flex">
-            {NAV_LINKS.map(item => (
-              <span key={item} className="text-sm font-medium text-gray-700 hover:text-gray-900 cursor-default">
-                {item}
-              </span>
-            ))}
-          </nav>
-
-          <div className="flex items-center gap-4">
-            <Link href="/auth/login" className="hidden text-sm font-medium text-gray-700 hover:text-gray-900 sm:block">
-              Log in
-            </Link>
-            <Link
-              href="/dashboard"
-              className="inline-flex items-center gap-2 rounded-full bg-gray-900 px-5 py-2.5
-                         text-sm font-semibold text-white transition-colors hover:bg-gray-800"
-            >
-              Get Started
-              <ArrowIcon />
-            </Link>
-          </div>
-        </header>
+        <SiteNav />
 
         {/* Hero */}
         <div className="flex flex-1 flex-col items-center px-6 pb-16 pt-4 text-center md:pt-6">
@@ -172,6 +137,8 @@ export default function LandingPage() {
             ))}
           </div>
         </div>
+
+        <SiteFooter />
       </div>
     </main>
   )
