@@ -54,6 +54,10 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
         await sleep(POLL_INTERVAL_MS)
         const job = await apiGetJob(resp.job_id)
 
+        if (job.progress) {
+          set({ progressMessage: `Processing your document — section ${job.progress.chunks_completed} of ${job.progress.chunks_total}…` })
+        }
+
         if (job.status === 'completed' && job.output) {
           set({
             response: {
@@ -70,10 +74,50 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
           })
           return
         }
+        // Processing stopped without reaching 'completed' (an error, or the
+        // background function ran out of time) — recover whatever chunks did
+        // finish instead of discarding real, already-paid-for output.
         if (job.status === 'failed') {
+          if (job.partial_output) {
+            set({
+              response: {
+                job_id: job.job_id,
+                status: 'completed',
+                output: job.partial_output,
+                preprocessing_metadata: resp.preprocessing_metadata,
+                processing_metadata: job.processing_metadata,
+                result_url: null,
+                warning: `Processing stopped early after section ${job.progress?.chunks_completed ?? '?'} of ${job.progress?.chunks_total ?? '?'} — showing the part that finished.`,
+              },
+              status: 'done',
+              progressMessage: null,
+            })
+            return
+          }
           set({ status: 'error', error: 'Humanization failed while processing your document.', progressMessage: null })
           return
         }
+      }
+
+      // Polling window exhausted without the job reaching a terminal state —
+      // one last check for whatever partial progress was recorded before
+      // giving up entirely.
+      const lastJob = await apiGetJob(resp.job_id).catch(() => null)
+      if (lastJob?.partial_output) {
+        set({
+          response: {
+            job_id: lastJob.job_id,
+            status: 'completed',
+            output: lastJob.partial_output,
+            preprocessing_metadata: resp.preprocessing_metadata,
+            processing_metadata: lastJob.processing_metadata,
+            result_url: null,
+            warning: `Processing didn't finish in time after section ${lastJob.progress?.chunks_completed ?? '?'} of ${lastJob.progress?.chunks_total ?? '?'} — showing the part that finished.`,
+          },
+          status: 'done',
+          progressMessage: null,
+        })
+        return
       }
 
       set({ status: 'error', error: 'Timed out waiting for your document to finish processing.', progressMessage: null })

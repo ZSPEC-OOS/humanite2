@@ -27,5 +27,11 @@ export async function GET(req: NextRequest, { params }: { params: { jobId: strin
     error_code: job.errorCode ?? null,
     output: job.result?.output ?? null,
     processing_metadata: job.result?.processing_metadata ?? null,
+    // Populated incrementally while a long document is still being chunked
+    // through — lets a client recover completed work even if the job never
+    // reaches 'completed' (e.g. the background function exceeded its own
+    // execution budget partway through).
+    progress: job.progress ?? null,
+    partial_output: job.partialResult?.output ?? null,
   })
 }

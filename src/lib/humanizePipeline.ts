@@ -61,10 +61,15 @@ Replace these words wherever they appear, unless inside a locked span:
 ${text}`
 }
 
+// Scaled to cover a full rewrite of CHUNK_MAX_CHARS (24,000 chars ≈ 6,000
+// tokens) worth of input, plus headroom for higher-intensity rewrites that
+// tend to run longer than the source. Provider output caps still apply on
+// top of this (e.g. some deepseek-flash deployments clamp max_tokens well
+// below its documented 384K ceiling).
 export function maxTokensForIntensity(intensity: number): number {
-  if (intensity <= 3) return 2048
-  if (intensity <= 6) return 3072
-  return 4096
+  if (intensity <= 3) return 6144
+  if (intensity <= 6) return 9216
+  return 12288
 }
 
 function buildRetryAddendum(gate: QualityScores): string {
