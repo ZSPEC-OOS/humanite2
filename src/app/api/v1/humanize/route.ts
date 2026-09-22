@@ -19,7 +19,13 @@ export const maxDuration = 300
 // below), polled via GET /v1/jobs/[jobId]. ASYNC_MAX_CHARS is chosen so the
 // total chunk count comfortably finishes inside maxDuration even with
 // retries — not a hard technical limit, just an untested-past-this-point line.
-const CHUNK_MAX_CHARS = 6_000
+//
+// Sized for a large-context model (deepseek-flash's ~1M-token window handles
+// a chunk this size with enormous headroom) — the ceiling here is really
+// "how much can finish inside maxDuration=300s", not the model's context
+// limit. A small/slow model configured via api_config will take longer per
+// chunk than this was tuned for.
+const CHUNK_MAX_CHARS = 24_000
 const MAX_GATE_RETRIES = 2
 
 interface HumanizeSettings {

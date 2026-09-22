@@ -5,7 +5,18 @@ import { db, tryPersist } from '@/lib/firestore'
 import { requireAuth, isAuthFailure } from '@/lib/require-auth'
 import { preprocess } from '@/lib/preprocess'
 
-const ABSOLUTE_MAX_CHARS = 100_000
+// A single non-chunked classification call — raised to take advantage of
+// large-context models (deepseek-flash's ~1M-token window), bounded by
+// maxDuration below rather than the model's own ceiling.
+export const maxDuration = 60
+
+const ABSOLUTE_MAX_CHARS = 300_000
+// How much of the (already-validated) input the classifier actually reads.
+// Quick mode stays small for latency; standard mode reads much further into
+// the document than before so long documents aren't judged on their first
+// page alone.
+const QUICK_MODE_ANALYSIS_CHARS = 4_000
+const STANDARD_MODE_ANALYSIS_CHARS = 40_000
 
 // ── Rule-based pre-filter (O(n), no ML needed) ──────────────────────────────
 
@@ -98,7 +109,7 @@ passive voice ratio, hedging language, first-person markers, informal contractio
 rhetorical questions, em-dash usage, paragraph opener variety.
 
 TEXT:
-${text.slice(0, mode === 'quick' ? 2000 : 6000)}`
+${text.slice(0, mode === 'quick' ? QUICK_MODE_ANALYSIS_CHARS : STANDARD_MODE_ANALYSIS_CHARS)}`
 
   const completion = await client.chat.completions.create({
     model,
