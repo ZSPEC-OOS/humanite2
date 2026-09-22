@@ -212,6 +212,13 @@ export interface JobStatus {
     processing_duration_ms: number
     chunk_count?: number
   } | null
+  // Updated after every chunk while a long document is still processing.
+  progress: { chunks_completed: number; chunks_total: number } | null
+  // Same shape as `output`, built from whatever chunks have completed so
+  // far — set even if the job never reaches 'completed' (e.g. it ran out of
+  // background processing time), so a timeout doesn't mean losing finished
+  // work.
+  partial_output: HumanizeOutput | null
 }
 
 export async function apiGetJob(jobId: string): Promise<JobStatus> {

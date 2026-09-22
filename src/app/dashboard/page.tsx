@@ -128,6 +128,11 @@ export default function Dashboard() {
           </svg>
         )}
       </div>
+      {response?.warning && hStatus === 'done' && (
+        <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-700 shrink-0">
+          ⚠ {response.warning}
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto px-4 py-3 text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">
         {hLoading ? (
           <div className="h-full flex items-center justify-center">
@@ -543,6 +548,12 @@ export default function Dashboard() {
                     {aiDetLabel}
                   </span>
                 )}
+              </div>
+            )}
+
+            {response?.warning && hStatus === 'done' && (
+              <div className="shrink-0 px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-700">
+                ⚠ {response.warning}
               </div>
             )}
 

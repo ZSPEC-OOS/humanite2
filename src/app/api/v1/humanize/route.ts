@@ -91,6 +91,21 @@ async function processHumanizeJobAsync(
         settings.intensity, settings.tone, settings.domain, MAX_GATE_RETRIES,
       )
       results.push(result)
+
+      // Persist after every chunk, not just at the end — if the function gets
+      // killed for exceeding maxDuration partway through a long document, the
+      // chunks that DID finish are recoverable instead of silently lost (the
+      // catch block below never runs on a hard platform-level timeout). Same
+      // output shape as the final result so the client can treat a recovered
+      // partial identically to a completed one.
+      const partialWatermark = generateWatermark(jobId, results.at(-1)!.modelUsed)
+      await tryPersist(() => db().collection('jobs').doc(jobId).update({
+        updatedAt: new Date(),
+        progress: { chunks_completed: results.length, chunks_total: chunks.length },
+        partialResult: {
+          output: buildOutput(results.map(r => r.text).join('\n\n'), results, partialWatermark),
+        },
+      }), 'persist humanize job progress')
     }
 
     const postText = results.map(r => r.text).join('\n\n')
