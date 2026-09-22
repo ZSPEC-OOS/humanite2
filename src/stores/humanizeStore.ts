@@ -1,8 +1,35 @@
 import { create } from 'zustand'
-import { apiHumanize, apiGetJob, HumanizeAPIResponse, HumanizeSettings } from '@/lib/api'
+import { apiHumanize, apiGetJob, HumanizeAPIResponse, HumanizeOutput, HumanizeSettings } from '@/lib/api'
+import { useScanStore } from './scanStore'
 
 const POLL_INTERVAL_MS = 3_000
 const MAX_POLLS = 100 // ~5 minutes — matches the async route's maxDuration budget
+
+// Humanize now auto-scans its own output server-side (see
+// src/app/api/v1/humanize/route.ts). Adopting that result into the scan
+// store here means every existing consumer (the AI Detection stat,
+// ScanReport) shows it immediately — no separate "Scan" click needed, and
+// no changes needed to those components.
+function applyDetectionToScanStore(output: HumanizeOutput) {
+  if (!output.detection) return
+  useScanStore.getState().applyResult({
+    job_id: output.watermark.job_id,
+    status: 'completed',
+    scan_id: null,
+    classification: output.detection.classification,
+    confidence: output.detection.confidence,
+    human_probability: output.detection.human_probability,
+    ai_probability: output.detection.ai_probability,
+    uncertain_probability: output.detection.uncertain_probability,
+    per_sentence_perplexity: [],
+    top_features: output.detection.top_features,
+    explanation: output.detection.explanation,
+    model_used: output.detection.model_used,
+    processing_duration_ms: null,
+    result_url: null,
+    warning: null,
+  })
+}
 
 interface HumanizeState {
   settings: HumanizeSettings
@@ -40,10 +67,15 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
 
   humanize: async (text) => {
     set({ status: 'loading', error: null, progressMessage: null })
+    // Clear any detection result from a previous run — otherwise the AI
+    // Detection stat would show a stale score from the last humanize while
+    // this one is still in flight.
+    useScanStore.getState().reset()
     try {
       const resp = await apiHumanize(text, get().settings)
 
       if (resp.status !== 'pending') {
+        if (resp.output) applyDetectionToScanStore(resp.output)
         set({ response: resp, status: 'done' })
         return
       }
@@ -59,6 +91,7 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
         }
 
         if (job.status === 'completed' && job.output) {
+          applyDetectionToScanStore(job.output)
           set({
             response: {
               job_id: job.job_id,
@@ -79,6 +112,7 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
         // finish instead of discarding real, already-paid-for output.
         if (job.status === 'failed') {
           if (job.partial_output) {
+            applyDetectionToScanStore(job.partial_output)
             set({
               response: {
                 job_id: job.job_id,
@@ -104,6 +138,7 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
       // giving up entirely.
       const lastJob = await apiGetJob(resp.job_id).catch(() => null)
       if (lastJob?.partial_output) {
+        applyDetectionToScanStore(lastJob.partial_output)
         set({
           response: {
             job_id: lastJob.job_id,

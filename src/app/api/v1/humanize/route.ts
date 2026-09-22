@@ -9,6 +9,7 @@ import { generateWatermark } from '@/lib/watermark'
 import { chunkFactLockedText } from '@/lib/chunk'
 import { humanizeChunk, aggregateChunkResults, ChunkResult } from '@/lib/humanizePipeline'
 import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
+import { classify, ClassifyResult } from '@/lib/detection'
 
 // Vercel clamps this to whatever the deployment's plan actually allows
 // (Hobby's ceiling is well under this) — raise it in the dashboard/CLI to
@@ -44,6 +45,7 @@ function buildOutput(
   postText: string,
   results: ChunkResult[],
   watermark: ReturnType<typeof generateWatermark>,
+  detection: ClassifyResult | null,
 ) {
   const agg = aggregateChunkResults(results)
   return {
@@ -58,8 +60,24 @@ function buildOutput(
       missing_facts: agg.missing_facts,
       entailment_issues: agg.entailment_issues,
     },
+    detection,
     watermark,
     postprocessor_substitutions: results.reduce((sum, r) => sum + r.substitutions, 0),
+  }
+}
+
+// Best-effort — a detection failure (custom endpoint hiccup, rate limit)
+// should never break the humanize response itself. Runs once against the
+// final assembled text rather than per-chunk: cheaper, and detectors read
+// documents holistically rather than fragment-by-fragment anyway.
+async function tryClassifyOutput(client: OpenAI, model: string, text: string): Promise<ClassifyResult | null> {
+  try {
+    return await classify(client, model, text, 'standard')
+  } catch (err) {
+    console.warn('Post-humanize detection scan failed — shipping without it', {
+      type: err instanceof Error ? err.constructor.name : typeof err,
+    })
+    return null
   }
 }
 
@@ -103,7 +121,9 @@ async function processHumanizeJobAsync(
         updatedAt: new Date(),
         progress: { chunks_completed: results.length, chunks_total: chunks.length },
         partialResult: {
-          output: buildOutput(results.map(r => r.text).join('\n\n'), results, partialWatermark),
+          // Detection is skipped on partial saves (only meaningful once —
+          // and cost-wise, once — on the final assembled text below).
+          output: buildOutput(results.map(r => r.text).join('\n\n'), results, partialWatermark, null),
         },
       }), 'persist humanize job progress')
     }
@@ -111,7 +131,8 @@ async function processHumanizeJobAsync(
     const postText = results.map(r => r.text).join('\n\n')
     const modelUsed = results.at(-1)?.modelUsed ?? model
     const watermark = generateWatermark(jobId, modelUsed)
-    const output = buildOutput(postText, results, watermark)
+    const detection = await tryClassifyOutput(client, modelUsed, postText)
+    const output = buildOutput(postText, results, watermark, detection)
     const durationMs = Date.now() - start
 
     await tryPersist(() => db().collection('jobs').doc(jobId).update({
@@ -263,7 +284,8 @@ export async function POST(req: NextRequest) {
     const durationMs = Date.now() - start
 
     const watermark = generateWatermark(jobId, result.modelUsed)
-    const output = buildOutput(result.text, [result], watermark)
+    const detection = await tryClassifyOutput(client, result.modelUsed, result.text)
+    const output = buildOutput(result.text, [result], watermark, detection)
 
     await tryPersist(() => db().collection('jobs').doc(jobId).update({
       status: 'completed',

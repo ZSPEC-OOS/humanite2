@@ -50,7 +50,6 @@ export default function Dashboard() {
   const [apiConfigOpen, setApiConfigOpen] = useState(false)
 
   useEffect(() => { if (hStatus === 'done') setMobileTab('output') }, [hStatus])
-  useEffect(() => { if (sStatus === 'done') setMobileTab('scan')   }, [sStatus])
 
   const output     = response?.output
   const outputText = output?.text ?? ''
@@ -250,15 +249,7 @@ export default function Dashboard() {
                   )
                 }
               </button>
-              <button
-                onClick={() => scan(text)}
-                disabled={!canSubmit || sLoading}
-                className="text-xs text-gray-400 hover:text-gray-800 transition-colors
-                           disabled:opacity-30 flex items-center gap-1.5 focus:outline-none"
-              >
-                {sLoading && <Spinner className="w-3 h-3 border-gray-200 border-t-gray-600" />}
-                Scan
-              </button>
+              <span className="text-xs text-gray-400">Humanize</span>
             </div>
 
             {outputPanel}
@@ -311,8 +302,23 @@ export default function Dashboard() {
                           : aiDetLabel === 'Detected'   ? 'text-red-500'
                           : aiDetLabel === 'Partial'    ? 'text-amber-500'
                           : 'text-gray-400'
-                        }`}>{aiDetLabel ?? 'Run scan'}</p>
+                        }`}>{aiDetLabel ?? 'Scanning…'}</p>
                       </div>
+                      {outputText && (
+                        <button
+                          onClick={() => scan(outputText)}
+                          disabled={sLoading}
+                          title="Re-check the humanized text"
+                          className="text-gray-300 hover:text-gray-700 transition-colors disabled:opacity-30"
+                        >
+                          {sLoading ? <Spinner className="w-3.5 h-3.5 border-gray-200 border-t-gray-600" /> : (
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                              <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" stroke="currentColor"
+                                strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          )}
+                        </button>
+                      )}
                     </div>
                     {output && <div className="w-px h-12 bg-gray-200" />}
                   </>
@@ -625,6 +631,19 @@ export default function Dashboard() {
         {/* Scan tab */}
         {mobileTab === 'scan' && (
           <div className="h-full overflow-y-auto">
+            {outputText && (
+              <div className="flex justify-end px-4 pt-3">
+                <button
+                  onClick={() => scan(outputText)}
+                  disabled={sLoading}
+                  className="flex items-center gap-1.5 text-xs font-medium text-gray-500
+                             hover:text-gray-800 transition-colors disabled:opacity-30"
+                >
+                  {sLoading && <Spinner className="w-3 h-3 border-gray-200 border-t-gray-600" />}
+                  Re-check
+                </button>
+              </div>
+            )}
             <ScanReport />
           </div>
         )}
@@ -633,35 +652,21 @@ export default function Dashboard() {
       {/* ── Action bar (Input tab only) ── */}
       {mobileTab === 'input' && (
         <div className="shrink-0 px-4 py-3 bg-white border-t border-gray-200">
-          <div className="flex gap-3">
-            <button
-              onClick={() => humanize(text)}
-              disabled={!canSubmit || hLoading}
-              className="flex-1 py-3.5 text-sm font-bold rounded-2xl text-white
-                         bg-gray-900
-                         disabled:opacity-30 disabled:cursor-not-allowed
-                         active:scale-[0.98] transition-transform focus:outline-none"
-            >
-              {hLoading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <Spinner className="w-4 h-4 border-white/30 border-t-white" />
-                  Humanizing…
-                </span>
-              ) : 'Humanize'}
-            </button>
-            <button
-              onClick={() => scan(text)}
-              disabled={!canSubmit || sLoading}
-              className="px-5 py-3.5 text-sm font-semibold text-gray-700
-                         bg-gray-100 border border-gray-200 rounded-2xl
-                         disabled:opacity-30 disabled:cursor-not-allowed
-                         active:scale-[0.98] transition-transform focus:outline-none"
-            >
-              {sLoading
-                ? <Spinner className="w-4 h-4 border-gray-300 border-t-gray-600" />
-                : 'Scan'}
-            </button>
-          </div>
+          <button
+            onClick={() => humanize(text)}
+            disabled={!canSubmit || hLoading}
+            className="w-full py-3.5 text-sm font-bold rounded-2xl text-white
+                       bg-gray-900
+                       disabled:opacity-30 disabled:cursor-not-allowed
+                       active:scale-[0.98] transition-transform focus:outline-none"
+          >
+            {hLoading ? (
+              <span className="flex items-center justify-center gap-2">
+                <Spinner className="w-4 h-4 border-white/30 border-t-white" />
+                Humanizing…
+              </span>
+            ) : 'Humanize'}
+          </button>
         </div>
       )}
 

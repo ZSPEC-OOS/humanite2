@@ -98,6 +98,19 @@ export interface HumanizeOutput {
     missing_facts: string[]
     entailment_issues: string[]
   }
+  // Automatic AI-detection scan run against this output text once humanize
+  // completes — null only if the scan itself failed (never blocks the
+  // humanize response). Same shape as ScanAPIResponse's core fields.
+  detection: {
+    classification: 'human-written' | 'ai-generated' | 'mixed' | 'uncertain'
+    confidence: number
+    human_probability: number
+    ai_probability: number
+    uncertain_probability: number
+    top_features: FeatureContribution[]
+    explanation: { summary: string; detail: string }
+    model_used: string
+  } | null
   watermark: {
     type: string
     fingerprint: string
