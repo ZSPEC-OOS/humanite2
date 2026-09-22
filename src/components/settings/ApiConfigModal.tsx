@@ -8,7 +8,7 @@ interface Props {
 }
 
 export function ApiConfigModal({ open, onClose }: Props) {
-  const { config, setConfig, clearConfig, hasCustomConfig } = useApiConfigStore()
+  const { config, setConfig, clearConfig, hasCustomConfig, syncFromServer } = useApiConfigStore()
   const [draft, setDraft] = useState<ApiConfig>(config)
   const [showKey, setShowKey] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -16,6 +16,12 @@ export function ApiConfigModal({ open, onClose }: Props) {
   useEffect(() => {
     if (open) { setDraft(config); setSaved(false); setShowKey(false) }
   }, [open, config])
+
+  // Pull the latest config saved from any other device — resolves into
+  // `config` above, which the effect above then reflects into `draft`.
+  useEffect(() => {
+    if (open) syncFromServer()
+  }, [open, syncFromServer])
 
   if (!open) return null
 
@@ -74,7 +80,8 @@ export function ApiConfigModal({ open, onClose }: Props) {
         <div className="px-5 py-5 space-y-4">
           <p className="text-xs text-gray-500 leading-relaxed">
             Override the server&apos;s default model. Leave blank to use the server default.
-            Your API key is stored locally in your browser only.
+            Saved on this device and synced across your other devices when
+            cloud sync is configured.
           </p>
 
           {/* Nickname */}
