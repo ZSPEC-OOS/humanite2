@@ -178,7 +178,7 @@ export default function Dashboard() {
         ══════════════════════════════════════════════════════════════ */}
     <div className="relative hidden md:flex flex-col items-center min-h-screen py-6 px-6 bg-white overflow-hidden">
       <Image
-        src="/images/app-background.png"
+        src="/images/AppDesktopBackground.PNG"
         alt=""
         fill
         priority
@@ -366,7 +366,16 @@ export default function Dashboard() {
     {/* ══════════════════════════════════════════════════════════════
         MOBILE  (<md)
         ══════════════════════════════════════════════════════════════ */}
-    <div className="md:hidden flex flex-col bg-white" style={{ height: '100dvh' }}>
+    <div className="relative md:hidden flex flex-col bg-white p-2" style={{ height: '100dvh' }}>
+      <Image
+        src="/images/AppIphoneBackground.PNG"
+        alt=""
+        fill
+        priority
+        sizes="100vw"
+        className="object-cover"
+        aria-hidden
+      />
 
       {/* ── Drawer backdrop ── */}
       {menuOpen && (
@@ -465,6 +474,9 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {/* ── Card shell — lets AppIphoneBackground peek through at the edges ── */}
+      <div className="relative z-10 flex flex-col flex-1 min-h-0 overflow-hidden rounded-3xl bg-white shadow-xl">
 
       {/* ── Mobile header ── */}
       <header className="shrink-0 flex items-center justify-between px-4 bg-white border-b border-gray-200"
@@ -700,6 +712,7 @@ export default function Dashboard() {
         })}
       </nav>
 
+      </div>
     </div>
     </>
   )
