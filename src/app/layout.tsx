@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Inter, Playfair_Display } from 'next/font/google'
+import { PositionEditor } from '@/components/dev/PositionEditor'
 import './globals.css'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
@@ -13,7 +14,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${playfair.variable}`}>
-      <body className="font-sans antialiased bg-white text-gray-900">{children}</body>
+      <body className="font-sans antialiased bg-white text-gray-900">
+        {children}
+        <PositionEditor />
+      </body>
     </html>
   )
 }
