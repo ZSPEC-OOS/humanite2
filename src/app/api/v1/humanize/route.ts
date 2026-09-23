@@ -10,6 +10,7 @@ import { chunkFactLockedText } from '@/lib/chunk'
 import { humanizeChunk, ChunkResult } from '@/lib/humanizePipeline'
 import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
 import { buildOutput, tryClassifyOutput } from '@/lib/humanizeOutput'
+import { isAllowedProviderBaseUrl } from '@/lib/providerAllowlist'
 
 // Vercel clamps this to whatever the deployment's plan actually allows
 // (Hobby's ceiling is well under this) — raise it in the dashboard/CLI to
@@ -149,6 +150,22 @@ export async function POST(req: NextRequest) {
   const tone = settingsIn.tone ?? 'balanced'
   const domain = settingsIn.domain ?? 'general'
   const settings: HumanizeSettings = { intensity, tone, domain }
+
+  // Reject a custom generation endpoint outright rather than letting the
+  // server call whatever address was supplied — see providerAllowlist.ts.
+  // Checked before any other work so a rejected request never reaches the
+  // async/job-creation path.
+  if (body.api_config?.base_url && !isAllowedProviderBaseUrl(body.api_config.base_url)) {
+    return NextResponse.json(
+      {
+        error: {
+          code: 'PROVIDER_BASE_URL_NOT_ALLOWED',
+          message: 'This base_url is not on the list of supported AI providers.',
+        },
+      },
+      { status: 400 },
+    )
+  }
 
   if (text.length < 20) {
     return NextResponse.json(

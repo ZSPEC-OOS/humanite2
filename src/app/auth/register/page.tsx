@@ -1,18 +1,9 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useUserStore } from '@/stores/userStore'
 import { authRegister, APIError } from '@/lib/api'
-import { jwtDecode } from 'jwt-decode'
 import { Spinner } from '@/components/ui/Spinner'
 import { inputCls } from '@/components/ui/styles'
-
-interface JWTClaims {
-  sub: string
-  tier: string
-  region: string
-  scopes: string[]
-}
 
 export default function RegisterPage() {
   const [email, setEmail]     = useState('')
@@ -20,7 +11,6 @@ export default function RegisterPage() {
   const [confirm, setConfirm] = useState('')
   const [error, setError]     = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const { setAuth } = useUserStore()
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -32,10 +22,8 @@ export default function RegisterPage() {
     setLoading(true)
     setError(null)
     try {
-      const data   = await authRegister(email, password)
-      const claims = jwtDecode<JWTClaims>(data.access_token)
-      setAuth(data.access_token, claims.sub, claims.tier, claims.region, claims.scopes)
-      sessionStorage.setItem('__rt', data.refresh_token)
+      // authRegister adopts the session (userStore + refresh token) itself.
+      await authRegister(email, password)
       router.push('/dashboard')
     } catch (e) {
       setError(e instanceof APIError ? e.message : 'Registration failed.')

@@ -1,25 +1,15 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useUserStore } from '@/stores/userStore'
 import { authLogin, APIError } from '@/lib/api'
-import { jwtDecode } from 'jwt-decode'
 import { Spinner } from '@/components/ui/Spinner'
 import { inputCls } from '@/components/ui/styles'
-
-interface JWTClaims {
-  sub: string
-  tier: string
-  region: string
-  scopes: string[]
-}
 
 export default function LoginPage() {
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
   const [error, setError]       = useState<string | null>(null)
   const [loading, setLoading]   = useState(false)
-  const { setAuth } = useUserStore()
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -27,10 +17,8 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
     try {
-      const data   = await authLogin(email, password)
-      const claims = jwtDecode<JWTClaims>(data.access_token)
-      setAuth(data.access_token, claims.sub, claims.tier, claims.region, claims.scopes)
-      sessionStorage.setItem('__rt', data.refresh_token)
+      // authLogin adopts the session (userStore + refresh token) itself.
+      await authLogin(email, password)
       router.push('/dashboard')
     } catch (e) {
       setError(e instanceof APIError ? e.message : 'Login failed.')

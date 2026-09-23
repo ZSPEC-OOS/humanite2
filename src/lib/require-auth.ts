@@ -12,36 +12,37 @@ export type AuthClaims = {
 type AuthSuccess = { claims: AuthClaims }
 type AuthFailure = NextResponse
 
-// Personal, single-user deployment — no login is required. A valid Bearer
-// token is still honored if one is sent, but its absence (or invalidity)
-// falls back to a fixed local identity rather than rejecting the request.
-const ANONYMOUS_CLAIMS: AuthClaims = {
-  sub: 'local',
-  tier: 'unlimited',
-  region: 'local',
-  scopes: ['*'],
-  email_hash: 'local',
-}
-
+// A valid Bearer token is required — a missing or invalid one is rejected
+// outright rather than falling back to a shared anonymous identity. Every
+// route below trusts `claims.sub` as a real per-user identity (usage quotas,
+// stored config, presets, billing); a silent anonymous fallback would let
+// all unauthenticated callers share one identity with full access instead
+// of being turned away.
 export async function requireAuth(req: NextRequest): Promise<AuthSuccess | AuthFailure> {
   const authHeader = req.headers.get('authorization') ?? ''
-  if (authHeader.startsWith('Bearer ')) {
-    try {
-      const payload = await verifyAccessToken(authHeader.slice(7))
-      return {
-        claims: {
-          sub: payload.sub as string,
-          tier: payload.tier as string,
-          region: payload.region as string,
-          scopes: payload.scopes as string[],
-          email_hash: payload.email_hash as string,
-        },
-      }
-    } catch {
-      // Fall through to anonymous access below.
-    }
+  if (!authHeader.startsWith('Bearer ')) {
+    return NextResponse.json(
+      { error: { code: 'AUTHENTICATION_REQUIRED', message: 'Authorization header with Bearer token required.' } },
+      { status: 401 },
+    )
   }
-  return { claims: ANONYMOUS_CLAIMS }
+  try {
+    const payload = await verifyAccessToken(authHeader.slice(7))
+    return {
+      claims: {
+        sub: payload.sub as string,
+        tier: payload.tier as string,
+        region: payload.region as string,
+        scopes: payload.scopes as string[],
+        email_hash: payload.email_hash as string,
+      },
+    }
+  } catch {
+    return NextResponse.json(
+      { error: { code: 'TOKEN_INVALID', message: 'Token is invalid or expired.' } },
+      { status: 401 },
+    )
+  }
 }
 
 export function isAuthFailure(result: AuthSuccess | AuthFailure): result is AuthFailure {

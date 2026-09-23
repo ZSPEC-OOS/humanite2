@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { getDetectionGateway, resetDetectionGatewayForTests } from '../gateway'
 
 const ORIGINAL_ENV = { ...process.env }
@@ -8,6 +8,7 @@ function resetEnv() {
     if (!(key in ORIGINAL_ENV)) delete process.env[key]
   }
   Object.assign(process.env, ORIGINAL_ENV)
+  vi.unstubAllEnvs()
   resetDetectionGatewayForTests()
 }
 
@@ -81,5 +82,60 @@ describe('DetectionGateway', () => {
     expect(withoutOverride.providerId).toBe('mock')
     expect(withOverride.providerId).toBe('gptzero')
     expect(stillWithoutOverride).toBe(withoutOverride)
+  })
+})
+
+describe('DetectionGateway — production fails closed on a misconfigured mock fallback', () => {
+  afterEach(resetEnv)
+
+  it('refuses to build the mock provider in production without an explicit opt-out', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    delete process.env.DETECTION_PROVIDER
+    delete process.env.ALLOW_MOCK_DETECTION
+    expect(() => getDetectionGateway()).toThrow(/not configured for production/i)
+  })
+
+  it('still refuses when DETECTION_PROVIDER is set to something other than "gptzero"', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    process.env.DETECTION_PROVIDER = 'mock'
+    delete process.env.ALLOW_MOCK_DETECTION
+    expect(() => getDetectionGateway()).toThrow(/not configured for production/i)
+  })
+
+  it('allows the mock provider in production when ALLOW_MOCK_DETECTION=true', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    delete process.env.DETECTION_PROVIDER
+    process.env.ALLOW_MOCK_DETECTION = 'true'
+    expect(getDetectionGateway().providerId).toBe('mock')
+  })
+
+  it('still selects the real provider in production when DETECTION_PROVIDER=gptzero', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    process.env.DETECTION_PROVIDER = 'gptzero'
+    expect(getDetectionGateway().providerId).toBe('gptzero')
+  })
+
+  it('a caller-supplied apiKeyOverride bypasses the production guard entirely', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    delete process.env.DETECTION_PROVIDER
+    delete process.env.ALLOW_MOCK_DETECTION
+    expect(getDetectionGateway('user-supplied-key').providerId).toBe('gptzero')
+  })
+
+  it('does not affect non-production environments (e.g. test/dev)', () => {
+    vi.stubEnv('NODE_ENV', 'test')
+    delete process.env.DETECTION_PROVIDER
+    delete process.env.ALLOW_MOCK_DETECTION
+    expect(getDetectionGateway().providerId).toBe('mock')
+  })
+
+  it('the failed build never poisons the singleton — a later valid config still works', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    delete process.env.DETECTION_PROVIDER
+    delete process.env.ALLOW_MOCK_DETECTION
+    expect(() => getDetectionGateway()).toThrow()
+
+    process.env.DETECTION_PROVIDER = 'gptzero'
+    expect(getDetectionGateway().providerId).toBe('gptzero')
   })
 })

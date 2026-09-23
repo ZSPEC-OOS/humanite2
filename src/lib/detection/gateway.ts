@@ -1,4 +1,4 @@
-import { DetectionOptions, DetectionResult } from './contracts'
+import { DetectionOptions, DetectionProviderError, DetectionResult } from './contracts'
 import { calculateLocalDiagnostics } from './diagnostics'
 import { DetectionProvider } from './providers/provider'
 import { GPTZeroProvider } from './providers/gptzero'
@@ -50,9 +50,21 @@ function buildProvider(apiKeyOverride?: string): DetectionProvider {
   if (process.env.DETECTION_PROVIDER === 'gptzero') {
     return new GPTZeroProvider()
   }
-  // Default: mock. Production deployments must set DETECTION_PROVIDER=gptzero
-  // explicitly — an unset var failing toward obviously-fake results is safer
-  // than silently defaulting to a live, billable API call.
+
+  // A misconfigured production deployment must never silently serve
+  // fabricated detection results — fail loudly instead of falling back to
+  // mock. ALLOW_MOCK_DETECTION=true is the explicit opt-out, for a
+  // staging/demo instance intentionally running in production mode without
+  // a live key.
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_MOCK_DETECTION !== 'true') {
+    throw new DetectionProviderError(
+      'PROVIDER_UNAVAILABLE',
+      'AI detection is not configured for production — DETECTION_PROVIDER must be "gptzero". ' +
+        'Set ALLOW_MOCK_DETECTION=true to intentionally run the mock provider instead.',
+    )
+  }
+
+  // Default: mock. Local dev and CI never spend a real GPTZero request.
   const fixture = process.env.MOCK_DETECTION_FIXTURE ?? 'human'
   return new MockDetectionProvider(isMockFixtureName(fixture) ? fixture : 'human')
 }

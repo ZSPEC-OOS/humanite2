@@ -1,3 +1,4 @@
+import { jwtDecode } from 'jwt-decode'
 import { useUserStore } from '@/stores/userStore'
 import { useApiConfigStore } from '@/stores/apiConfigStore'
 import type { DetectionResult, DetectionSegment, LocalDiagnostics } from '@/lib/detection/contracts'
@@ -20,6 +21,8 @@ export class APIError extends Error {
   }
 }
 
+const REFRESH_TOKEN_KEY = '__rt'
+
 export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
@@ -35,7 +38,19 @@ export async function apiFetch<T>(
   }
 
   const url = path.startsWith('http') ? path : `${API_BASE}/api${path}`
-  const resp = await fetch(url, { ...options, headers })
+  let resp = await fetch(url, { ...options, headers })
+
+  // Access tokens are short-lived (15 min) — a 401 mid-session most likely
+  // means it just expired, not that the user was never logged in. Retry
+  // exactly once after a silent refresh so routine expiry doesn't interrupt
+  // whatever the user was doing. skipAuth calls (login/register/refresh
+  // itself) never enter this branch, so there's no retry loop.
+  if (resp.status === 401 && !skipAuth && token) {
+    const refreshedToken = await restoreSession()
+    if (refreshedToken) {
+      resp = await fetch(url, { ...options, headers: { ...headers, Authorization: `Bearer ${refreshedToken}` } })
+    }
+  }
 
   if (!resp.ok) {
     let errorBody: { error?: { code?: string; message?: string }; detail?: { code?: string; message?: string } } = {}
@@ -63,20 +78,62 @@ export interface TokenResponse {
   expires_in: number
 }
 
+interface JWTClaims {
+  sub: string
+  tier: string
+  region: string
+  scopes: string[]
+}
+
+function adoptSession(data: TokenResponse) {
+  const claims = jwtDecode<JWTClaims>(data.access_token)
+  useUserStore.getState().setAuth(data.access_token, claims.sub, claims.tier, claims.region, claims.scopes)
+  sessionStorage.setItem(REFRESH_TOKEN_KEY, data.refresh_token)
+}
+
+// Redeems this tab's stored refresh token for a new access token, silently —
+// used both by apiFetch's own 401-retry above and by a page on mount to
+// restore a session an in-memory-only access token doesn't survive a reload.
+// Returns the new access token, or null if there was nothing to redeem or
+// the refresh token itself was invalid/expired/already used (in which case
+// the stale session is cleared rather than left half-set).
+export async function restoreSession(): Promise<string | null> {
+  if (typeof window === 'undefined') return null
+  const refreshToken = sessionStorage.getItem(REFRESH_TOKEN_KEY)
+  if (!refreshToken) return null
+  try {
+    const data = await apiFetch<TokenResponse>(
+      '/v1/auth/refresh',
+      { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) },
+      true,
+    )
+    adoptSession(data)
+    return data.access_token
+  } catch {
+    useUserStore.getState().clearAuth()
+    sessionStorage.removeItem(REFRESH_TOKEN_KEY)
+    return null
+  }
+}
+
 export async function authRegister(email: string, password: string): Promise<TokenResponse> {
-  return apiFetch<TokenResponse>(
+  const data = await apiFetch<TokenResponse>(
     '/v1/auth/register',
     { method: 'POST', body: JSON.stringify({ email, password }) },
     true,
   )
+  adoptSession(data)
+  return data
 }
 
 export async function authLogin(email: string, password: string): Promise<TokenResponse> {
-  return apiFetch<TokenResponse>(
+  const data = await apiFetch<TokenResponse>(
     '/v1/auth/login',
     { method: 'POST', body: JSON.stringify({ email, password }) },
     true,
   )
+  adoptSession(data)
+  return data
 }
 
 // ── Humanize ──────────────────────────────────────────────────────────────────
