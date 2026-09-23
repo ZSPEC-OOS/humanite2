@@ -16,7 +16,7 @@ export function buildOutput(
   return {
     text: postText,
     quality_scores: {
-      bertscore_f1: agg.bertscore_f1,
+      semantic_similarity: agg.semantic_similarity,
       nli_entailment: agg.nli_entailment,
       entity_overlap: agg.entity_overlap,
       passed: agg.passed,

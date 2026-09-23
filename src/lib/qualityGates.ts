@@ -34,7 +34,7 @@ export interface QualityScores {
   // null only when this specific gate failed to run (e.g. a custom model
   // endpoint doesn't support the embedding call semantic similarity needs)
   // — never a fabricated score standing in for "didn't run".
-  bertscore_f1: number | null
+  semantic_similarity: number | null
   nli_entailment: number | null
   // Always present: deterministic string matching with no external
   // dependency, so nothing can prevent it from running.
@@ -105,11 +105,12 @@ export function checkEntityOverlap(
 }
 
 // ── Gate 2: semantic similarity ──────────────────────────────────────────────
-// Approximates the "BERTScore F1" signal (did the rewrite preserve the
-// source's content, not just its surface form) using embedding cosine
-// similarity rather than a locally-hosted contextual-embedding model — the
-// latter doesn't fit a serverless request budget. Reported under the
-// `bertscore_f1` field for API continuity; it is not literal BERTScore.
+// Did the rewrite preserve the source's content, not just its surface form —
+// approximated with embedding cosine similarity rather than a locally-hosted
+// contextual-embedding model (the latter doesn't fit a serverless request
+// budget). This is genuinely what it's named: cosine similarity between two
+// embeddings, not BERTScore — an earlier revision reported it under a
+// `bertscore_f1` field name, which this module never actually computed.
 
 export function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0
@@ -218,7 +219,7 @@ export async function runQualityGates(
   else if (similarity != null && similarity < thresholds.semanticSimilarity) failedGate = 'semantic_similarity'
 
   return {
-    bertscore_f1: similarity == null ? null : round(similarity),
+    semantic_similarity: similarity == null ? null : round(similarity),
     nli_entailment: entailment == null ? null : round(entailment.score),
     entity_overlap: round(entity.score),
     passed: failedGate === null,

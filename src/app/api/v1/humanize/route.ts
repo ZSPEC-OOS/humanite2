@@ -5,7 +5,7 @@ import { waitUntil } from '@vercel/functions'
 import { db, tryPersist } from '@/lib/firestore'
 import { requireAuth, isAuthFailure } from '@/lib/require-auth'
 import { preprocess, FactLock } from '@/lib/preprocess'
-import { generateWatermark } from '@/lib/watermark'
+import { generateWatermark, hashContent } from '@/lib/watermark'
 import { chunkFactLockedText } from '@/lib/chunk'
 import { humanizeChunk, ChunkResult } from '@/lib/humanizePipeline'
 import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
@@ -103,6 +103,7 @@ async function processHumanizeJobAsync(
       completedAt: new Date(),
       updatedAt: new Date(),
       watermarkFingerprint: watermark.fingerprint,
+      contentHash: hashContent(postText),
       result: {
         output,
         processing_metadata: {
@@ -276,6 +277,7 @@ export async function POST(req: NextRequest) {
       completedAt: new Date(),
       updatedAt: new Date(),
       watermarkFingerprint: watermark.fingerprint,
+      contentHash: hashContent(result.text),
     }), 'complete humanize job')
 
     return NextResponse.json({

@@ -114,7 +114,7 @@ export function SplitView({ mobileOutputOnly = false }: { mobileOutputOnly?: boo
 
         {output && (
           <div className="flex items-center gap-2">
-            {output.quality_scores.bertscore_f1 == null ? (
+            {output.quality_scores.semantic_similarity == null ? (
               <span className="flex items-center gap-1.5 text-xs text-gray-500
                                bg-gray-50 border border-gray-200 rounded-full px-2.5 py-0.5
                                dark:text-gray-400 dark:bg-gray-800 dark:border-gray-700">
@@ -126,7 +126,7 @@ export function SplitView({ mobileOutputOnly = false }: { mobileOutputOnly?: boo
                                bg-gray-100 border border-gray-300 rounded-full px-2.5 py-0.5
                                dark:text-gray-100 dark:bg-gray-800 dark:border-gray-600">
                 <span className="w-1.5 h-1.5 rounded-full bg-gray-900 dark:bg-gray-100" />
-                BERTScore {output.quality_scores.bertscore_f1.toFixed(3)}
+                Similarity {output.quality_scores.semantic_similarity.toFixed(3)}
               </span>
             ) : (
               <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-900

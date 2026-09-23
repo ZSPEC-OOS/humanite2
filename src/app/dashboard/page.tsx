@@ -112,10 +112,11 @@ export default function Dashboard() {
     })
   }
 
-  // bertscore_f1 is null until the semantic-fidelity gate (Phase 1) is wired in —
-  // never fabricate a score in its place.
-  const humanScore = output && output.quality_scores.bertscore_f1 != null
-    ? Math.round(output.quality_scores.bertscore_f1 * 100)
+  // semantic_similarity is null when that specific gate couldn't run (e.g. a
+  // custom model endpoint without embedding support) — never fabricate a
+  // score in its place.
+  const humanScore = output && output.quality_scores.semantic_similarity != null
+    ? Math.round(output.quality_scores.semantic_similarity * 100)
     : null
   const scoreLabel = humanScore == null ? 'Not yet scored'
     : humanScore >= 90 ? 'Excellent' : humanScore >= 75 ? 'Good' : 'Fair'

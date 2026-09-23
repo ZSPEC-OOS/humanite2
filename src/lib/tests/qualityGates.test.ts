@@ -289,10 +289,10 @@ describe('runQualityGates', () => {
     expect(result.missing_facts).toEqual(['42'])
   })
 
-  it('reports bertscore_f1 as null (not 0, not thrown away) when only the embedding call fails', async () => {
+  it('reports semantic_similarity as null (not 0, not thrown away) when only the embedding call fails', async () => {
     const client = clientWithFailingEmbeddings('{"entailment_probability": 1.0, "issues": []}')
     const result = await runQualityGates(client, 'gpt-4o-mini', 'the cat sat', 'the cat sat', [lock('cat')])
-    expect(result.bertscore_f1).toBeNull()
+    expect(result.semantic_similarity).toBeNull()
     expect(result.nli_entailment).toBe(1)
     expect(result.entity_overlap).toBe(1)
   })
@@ -309,7 +309,7 @@ describe('runQualityGates', () => {
     const result = await runQualityGates(client, 'gpt-4o-mini', 'the cat sat', 'the cat sat', [lock('cat')])
     expect(result.nli_entailment).toBeNull()
     expect(result.entailment_issues).toEqual([])
-    expect(result.bertscore_f1).toBe(1)
+    expect(result.semantic_similarity).toBe(1)
     expect(result.entity_overlap).toBe(1)
     expect(result.passed).toBe(true)
   })
@@ -319,7 +319,7 @@ describe('runQualityGates', () => {
     const embedCreate = vi.fn().mockRejectedValue(new Error('no embeddings support'))
     const client = { chat: { completions: { create: chatCreate } }, embeddings: { create: embedCreate } } as unknown as OpenAI
     const result = await runQualityGates(client, 'gpt-4o-mini', 'orig', 'output missing the fact', [lock('42')])
-    expect(result.bertscore_f1).toBeNull()
+    expect(result.semantic_similarity).toBeNull()
     expect(result.nli_entailment).toBeNull()
     expect(result.entity_overlap).toBe(0)
     expect(result.failed_gate).toBe('entity_overlap')

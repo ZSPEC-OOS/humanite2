@@ -44,18 +44,21 @@ Domain: ${domain}
 Intensity: ${intensity}/10
 ${intensityGuide}
 
-## VOCABULARY SUBSTITUTIONS (mandatory)
-Replace these words wherever they appear, unless inside a locked span:
-- "utilize" → "use"
-- "leverage" (verb) → "apply" or "use"
-- "delve into" → "explore"
-- "robust" (generic) → "strong" or "reliable"
-- "multifaceted" → "complex"
-- "comprehensive" → "thorough"
-- "facilitate" → "help" or "enable"
-- "Furthermore," / "Moreover," / "Additionally," (sentence openers) → remove or replace
-- "In conclusion," → remove; restructure closing sentence naturally
-- "It is important to note that" → remove; integrate content directly
+## STYLE GUIDANCE
+Prefer plainer alternatives to these AI-typical words where it does not change the sentence's technical or factual meaning — use judgment, not a fixed rule, and never inside a locked span:
+- "utilize" often just means "use"
+- "leverage" (as a verb) often just means "apply" or "use"
+- "delve into" often just means "explore" or "look at"
+- generic "robust" often just means "strong" or "reliable" — leave it if it's a defined technical/domain term instead
+- "multifaceted" often just means "complex"
+- "comprehensive" often just means "thorough"
+- "facilitate" often just means "help" or "enable"
+Never make a substitution that would change what a sentence claims — this matters most in technical, scientific, or professional writing, where a word like "robust" may carry a specific meaning "strong" doesn't.
+
+## REMOVE THESE AI-TYPICAL OPENERS (always safe — they add no content)
+- "Furthermore," / "Moreover," / "Additionally," as sentence openers → remove or restructure
+- "In conclusion," → remove; restructure the closing sentence naturally
+- "It is important to note that" → remove; integrate the content directly
 
 ## INPUT TEXT
 ${text}`
@@ -155,7 +158,7 @@ export async function humanizeChunk(
 }
 
 export interface AggregatedQuality {
-  bertscore_f1: number | null
+  semantic_similarity: number | null
   nli_entailment: number | null
   entity_overlap: number | null
   passed: boolean | null
@@ -199,7 +202,7 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
 
   if (scored.length === 0) {
     return {
-      bertscore_f1: null,
+      semantic_similarity: null,
       nli_entailment: null,
       entity_overlap: null,
       passed: null,
@@ -221,7 +224,7 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
   const firstFailure = scored.find(r => !r.gate.passed)
 
   return {
-    bertscore_f1: average(g => g.bertscore_f1),
+    semantic_similarity: average(g => g.semantic_similarity),
     nli_entailment: average(g => g.nli_entailment),
     entity_overlap: average(g => g.entity_overlap),
     passed: scored.every(r => r.gate.passed),

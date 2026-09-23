@@ -148,9 +148,11 @@ export interface HumanizeSettings {
 export interface HumanizeOutput {
   text: string
   quality_scores: {
-    // null only if the gates couldn't run at all against a custom model
-    // endpoint (see `warning`) — otherwise these are real, measured scores.
-    bertscore_f1: number | null
+    // semantic_similarity/nli_entailment are null only when that specific
+    // gate couldn't run (e.g. a custom model endpoint without embedding
+    // support) — entity_overlap has no external dependency and is never
+    // null. See `warning` for the unscored-entirely case.
+    semantic_similarity: number | null
     nli_entailment: number | null
     entity_overlap: number | null
     passed: boolean | null
