@@ -26,28 +26,19 @@ const CITATION_RE =
 const DATE_RE =
   /\b(?:\d{4}-\d{2}-\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4})\b/g
 
-// Injection detection
-const INJECTION_PATTERNS = [
-  /<script/i,
-  /javascript\s*:/i,
-  /on\w{1,20}\s*=\s*['"]/i,
-  /<!--[\s\S]*?-->/,
-  /<\s*iframe/i,
-]
-
 // Zero-width and invisible chars
 const ZERO_WIDTH_RE = /[​‌‍‎‏‪-‮⁠-⁤﻿­]/g
 const HTML_TAGS_RE = /<[^>]{0,500}>/g
 const EXCESS_SPACES_RE = /[ \t]{3,}/g
 const EXCESS_NEWLINES_RE = /\n{3,}/g
 
+// Analyzes/rewrites text as data — it is never executed, so markup-like
+// content (a document about <script> tags, an email with an onclick=
+// example) is normalized, not rejected outright. The security boundary is
+// downstream: never render this text as unescaped HTML, and never
+// interpolate it into a privileged instruction (see lib/detection/client.ts,
+// which sends it to the scanner as a JSON field, not a prompt).
 export function preprocess(text: string): PreprocessResult {
-  for (const pattern of INJECTION_PATTERNS) {
-    if (pattern.test(text)) {
-      throw new Error('INJECTION_ATTEMPT')
-    }
-  }
-
   let clean = text
   clean = clean.replace(ZERO_WIDTH_RE, '')
   clean = clean.replace(HTML_TAGS_RE, '')

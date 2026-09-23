@@ -1,5 +1,5 @@
 """
-Extract 18 statistical features from text.
+Extract 22 statistical features from text.
 These are language-agnostic signals that distinguish human and AI writing
 at the distributional level, independent of content.
 
@@ -9,6 +9,12 @@ Feature groups:
   Punctuation (3): comma density, period density, punctuation entropy
   Discourse (3):  transition word density, AI vocabulary density, passive ratio
   Syntactic (3):  avg parse depth, subordinate clause ratio, nominalization ratio
+  Lexical rules (4): bot signature/pattern counts, first-person marker count,
+                      informal phrase count — weak evidence only. These were
+                      previously used to short-circuit classification outright
+                      (a regex match on "as an AI language model" forcing 99%
+                      confidence); they are numeric features like any other now,
+                      so a rule hit nudges the classifier instead of overriding it.
 """
 import math
 import re
@@ -39,6 +45,34 @@ _FUNCTION_POS: frozenset[str] = frozenset({
     "ADP", "AUX", "CCONJ", "DET", "PART", "PRON", "SCONJ",
 })
 
+# Strings/patterns that only appear in LLM outputs refusing requests or
+# self-identifying. Weak evidence: a hit nudges the classifier, it does not
+# determine the verdict (see classifier._statistical_fallback).
+_BOT_SIGNATURES: frozenset[str] = frozenset({
+    "as an ai language model", "as a large language model",
+    "as an artificial intelligence", "i'm an ai and",
+    "i am an ai assistant", "i cannot assist with that",
+    "i'm not able to help with", "i must clarify that as an ai",
+})
+
+_BOT_PATTERNS: list[re.Pattern] = [
+    re.compile(r"as an ai(?:\s+language)?\s+model", re.IGNORECASE),
+    re.compile(r"i(?:'m| am) programmed to", re.IGNORECASE),
+    re.compile(r"my (?:training data|knowledge cutoff)", re.IGNORECASE),
+    re.compile(r"i don'?t have (?:personal )?(?:opinions|feelings|consciousness)", re.IGNORECASE),
+]
+
+_FIRST_PERSON_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\bi (?:think|feel|believe|reckon|suppose|guess)\b", re.IGNORECASE),
+]
+
+_INFORMAL_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\bto be (?:honest|fair|blunt)\b", re.IGNORECASE),
+    re.compile(r"\bhonestly\b", re.IGNORECASE),
+    re.compile(r"\byou know what\b", re.IGNORECASE),
+    re.compile(r"\bdon't get me wrong\b", re.IGNORECASE),
+]
+
 FEATURE_NAMES: list[str] = [
     "ttr",
     "avg_word_length",
@@ -58,6 +92,10 @@ FEATURE_NAMES: list[str] = [
     "avg_parse_depth",
     "subclause_ratio",
     "nominalization_ratio",
+    "bot_signature_count",
+    "bot_pattern_count",
+    "first_person_marker_count",
+    "informal_phrase_count",
 ]
 
 
@@ -146,6 +184,12 @@ def extract_features(text: str) -> np.ndarray:
     nom_count = sum(1 for t in doc if t.pos_ == "NOUN" and _nom_re.search(t.text))
     nominalization_ratio = nom_count / n_words
 
+    # ── Lexical rules (weak evidence — see module docstring) ────────────────────
+    bot_signature_count = float(sum(1 for sig in _BOT_SIGNATURES if sig in text_lower))
+    bot_pattern_count = float(sum(1 for p in _BOT_PATTERNS if p.search(text)))
+    first_person_marker_count = float(sum(1 for p in _FIRST_PERSON_PATTERNS if p.search(text)))
+    informal_phrase_count = float(sum(1 for p in _INFORMAL_PATTERNS if p.search(text)))
+
     features = np.array([
         ttr, avg_word_length, hapax_ratio, content_function_ratio,
         avg_sentence_length, sentence_length_std, sentence_length_cv, burstiness_index,
@@ -153,6 +197,8 @@ def extract_features(text: str) -> np.ndarray:
         comma_density, period_density, punct_entropy,
         transition_density, ai_vocab_density, passive_ratio,
         avg_parse_depth, subclause_ratio, nominalization_ratio,
+        bot_signature_count, bot_pattern_count,
+        first_person_marker_count, informal_phrase_count,
     ], dtype=np.float32)
 
     return features

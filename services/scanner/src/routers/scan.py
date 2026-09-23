@@ -13,7 +13,7 @@ from ..config import settings
 from ..detection.classifier import classify, _load_model
 from ..detection.features import extract_features, FEATURE_NAMES
 from ..detection.perplexity import compute_perplexity
-from ..detection.rule_filter import rule_filter
+from ..detection.rule_filter import is_underdetermined
 from ..schemas import FeatureContribution, ScanRequest, ScanResponse
 
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(__file__), "../../..")))
@@ -62,23 +62,40 @@ def _build_explanation(
     confidence: float,
     human_prob: float,
     ai_prob: float,
-    rule_fired: bool,
-    features: dict | None,
+    model_used: str,
     perplexity: list[float],
 ) -> dict:
     summary = f"Text classified as {classification} with {confidence:.0%} confidence."
 
-    if rule_fired:
-        detail = "Classification determined by rule-based filter (bot signature detected)."
-    else:
-        avg_perp = sum(perplexity) / len(perplexity) if perplexity else 0.0
-        detail = (
-            f"Transformer classifier: AI={ai_prob:.2f}, Human={human_prob:.2f}. "
-            f"Average sentence perplexity: {avg_perp:.1f} "
-            f"({'high — human signal' if avg_perp > 80 else 'low — AI signal'})."
+    avg_perp = sum(perplexity) / len(perplexity) if perplexity else 0.0
+    detail = (
+        f"Detector ({model_used}): AI={ai_prob:.2f}, Human={human_prob:.2f}."
+    )
+    if perplexity:
+        detail += (
+            f" Average sentence perplexity: {avg_perp:.1f} — one diagnostic "
+            "input among several, not independent proof of authorship."
         )
 
     return {"summary": summary, "detail": detail}
+
+
+# Features that point toward AI when high. Statistical features get full
+# weight (0-1); lexical-rule counts (bot signatures/patterns) are deliberately
+# capped lower — a regex hit is weak evidence, not a verdict (see
+# classifier._statistical_fallback and features.py module docstring).
+_AI_HIGH_FEATURES = {
+    "transition_density", "ai_vocab_density", "passive_ratio",
+    "nominalization_ratio",
+}
+_AI_HIGH_WEAK_FEATURES = {"bot_signature_count", "bot_pattern_count"}
+
+# Features that point toward human when high, same weak/strong split.
+_HUMAN_HIGH_FEATURES = {
+    "ttr", "hapax_ratio", "burstiness_index",
+    "sentence_length_cv", "punct_entropy",
+}
+_HUMAN_HIGH_WEAK_FEATURES = {"first_person_marker_count", "informal_phrase_count"}
 
 
 def _top_features(
@@ -86,27 +103,18 @@ def _top_features(
     classification: str,
 ) -> list[FeatureContribution]:
     """Return top 5 most informative features for the given classification."""
-    # Features that point toward AI when high
-    ai_high_features = {
-        "transition_density", "ai_vocab_density", "passive_ratio",
-        "nominalization_ratio",
-    }
-    # Features that point toward human when high
-    human_high_features = {
-        "ttr", "hapax_ratio", "burstiness_index",
-        "sentence_length_cv", "punct_entropy",
-    }
-
     feat_dict = dict(zip(FEATURE_NAMES, feature_vec))
     contributions: list[FeatureContribution] = []
 
     for name, value in feat_dict.items():
-        if name in ai_high_features:
-            direction = "ai_indicator"
-            contrib = float(min(value * 5.0, 1.0))
-        elif name in human_high_features:
-            direction = "human_indicator"
-            contrib = float(min(value, 1.0))
+        if name in _AI_HIGH_FEATURES:
+            direction, contrib = "ai_indicator", min(value * 5.0, 1.0)
+        elif name in _AI_HIGH_WEAK_FEATURES:
+            direction, contrib = "ai_indicator", min(value / 3.0, 1.0) * 0.5
+        elif name in _HUMAN_HIGH_FEATURES:
+            direction, contrib = "human_indicator", min(value, 1.0)
+        elif name in _HUMAN_HIGH_WEAK_FEATURES:
+            direction, contrib = "human_indicator", min(value / 3.0, 1.0) * 0.5
         else:
             continue
 
@@ -114,7 +122,7 @@ def _top_features(
             feature=name,
             observed_value=round(float(value), 4),
             direction=direction,
-            contribution=round(contrib, 4),
+            contribution=round(float(contrib), 4),
         ))
 
     contributions.sort(key=lambda c: c.contribution, reverse=True)
@@ -147,76 +155,19 @@ async def scan(body: ScanRequest) -> ScanResponse:
             data["processing_duration_ms"] = int((time.monotonic() - start_time) * 1000)
             return ScanResponse(**data)
 
-        # ── Stage 1: Rule filter (fast path) ─────────────────────────────────────
-        rule_result = rule_filter(text)
-
-        if rule_result == "uncertain":
+        # ── Stage 1: Evidence-sufficiency gate ───────────────────────────────────
+        # Short + low-vocabulary text is insufficient for any classifier — this
+        # is the only remaining early return. Bot-signature/human-signal regex
+        # hits no longer short-circuit classification (see rule_filter.py); they
+        # are numeric features fed into the classifier below instead.
+        if is_underdetermined(text):
             return _uncertain_response(scan_id, start_time, reason="text_too_short")
 
-        if rule_result == "ai-generated":
-            resp = ScanResponse(
-                scan_id=scan_id,
-                classification="ai-generated",
-                confidence=0.99,
-                human_probability=0.01,
-                ai_probability=0.99,
-                uncertain_probability=0.0,
-                per_sentence_perplexity=[],
-                top_features=[
-                    FeatureContribution(
-                        feature="bot_signature",
-                        observed_value=1.0,
-                        direction="ai_indicator",
-                        contribution=1.0,
-                    )
-                ],
-                explanation={
-                    "summary": "Text classified as ai-generated with 99% confidence.",
-                    "detail": "AI bot signature phrase detected in text (rule-based filter).",
-                },
-                model_used="rule_filter",
-                processing_duration_ms=int((time.monotonic() - start_time) * 1000),
-            )
-            SCAN_JOBS_TOTAL.labels(classification="ai-generated").inc()
-            SCAN_CONFIDENCE.observe(0.99)
-            SCAN_DURATION.observe(time.monotonic() - start_time)
-            await _cache_result(cache_key, resp)
-            return resp
-
-        if rule_result == "human-written":
-            resp = ScanResponse(
-                scan_id=scan_id,
-                classification="human-written",
-                confidence=0.85,
-                human_probability=0.85,
-                ai_probability=0.15,
-                uncertain_probability=0.0,
-                per_sentence_perplexity=[],
-                top_features=[
-                    FeatureContribution(
-                        feature="informal_human_signals",
-                        observed_value=1.0,
-                        direction="human_indicator",
-                        contribution=0.85,
-                    )
-                ],
-                explanation={
-                    "summary": "Text classified as human-written with 85% confidence.",
-                    "detail": "Multiple informal human-writing signals detected (hedging, first-person markers).",
-                },
-                model_used="rule_filter",
-                processing_duration_ms=int((time.monotonic() - start_time) * 1000),
-            )
-            SCAN_JOBS_TOTAL.labels(classification="human-written").inc()
-            SCAN_CONFIDENCE.observe(0.85)
-            SCAN_DURATION.observe(time.monotonic() - start_time)
-            await _cache_result(cache_key, resp)
-            return resp
-
-        # ── Stage 2: Statistical feature extraction ───────────────────────────────
+        # ── Stage 2: Statistical feature extraction (includes lexical-rule counts) ─
         feature_vec = extract_features(text)
 
-        # ── Stage 3: Transformer classifier ───────────────────────────────────────
+        # ── Stage 3: Classifier (trained model, or statistical fallback which
+        # blends in the weak lexical-rule features) ──────────────────────────────
         cls_result = classify(text)
 
         # ── Stage 4: Per-sentence perplexity (skip in quick mode) ─────────────────
@@ -233,7 +184,7 @@ async def scan(body: ScanRequest) -> ScanResponse:
         top_feats          = _top_features(feature_vec.tolist(), classification)
         explanation        = _build_explanation(
             classification, confidence, human_prob, ai_prob,
-            rule_fired=False, features=None, perplexity=perplexity,
+            model_used=cls_result["model_used"], perplexity=perplexity,
         )
 
         resp = ScanResponse(
@@ -281,7 +232,7 @@ def _uncertain_response(
             "summary": "Classification is uncertain.",
             "detail": f"Reason: {reason}. Insufficient signal for reliable classification.",
         },
-        model_used="rule_filter",
+        model_used="evidence_gate",
         processing_duration_ms=int((time.monotonic() - start_time) * 1000),
     )
 

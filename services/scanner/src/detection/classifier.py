@@ -51,8 +51,11 @@ def _load_model() -> None:
 def _statistical_fallback(text: str) -> dict:
     """
     Heuristic classifier used only when the trained model is unavailable.
-    Uses AI vocabulary density and transition word frequency as a crude signal.
-    Not suitable for production.
+    Uses AI vocabulary density and transition word frequency as a crude signal,
+    with a small nudge from lexical rule hits (bot signatures/patterns, first-
+    person markers, informal phrases). Those rule features are deliberately
+    weighted small — a single "as an AI language model" match should move the
+    score, not decide it outright. Not suitable for production.
     """
     from .features import extract_features, FEATURE_NAMES
     features = extract_features(text)
@@ -62,8 +65,13 @@ def _statistical_fallback(text: str) -> dict:
         feat_dict["ai_vocab_density"] * 30.0 +
         feat_dict["transition_density"] * 0.4 +
         (1.0 - feat_dict["sentence_length_cv"]) * 0.3
+        # Weak lexical-rule evidence — capped contribution, see docstring.
+        + feat_dict["bot_signature_count"] * 0.15
+        + feat_dict["bot_pattern_count"] * 0.08
+        - feat_dict["first_person_marker_count"] * 0.05
+        - feat_dict["informal_phrase_count"] * 0.05
     )
-    ai_prob    = float(min(ai_score, 1.0))
+    ai_prob    = float(min(max(ai_score, 0.0), 1.0))
     human_prob = 1.0 - ai_prob
 
     return {
