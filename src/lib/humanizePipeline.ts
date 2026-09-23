@@ -211,8 +211,13 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
     }
   }
 
-  const average = (select: (g: QualityScores) => number) =>
-    round(scored.reduce((sum, r) => sum + select(r.gate), 0) / scored.length)
+  // A per-chunk score can itself be null (that specific gate didn't run for
+  // that chunk — see qualityGates.ts) — averaged only over the chunks where
+  // it actually ran, not treated as 0 and dragging the average down.
+  const average = (select: (g: QualityScores) => number | null) => {
+    const values = scored.map(r => select(r.gate)).filter((v): v is number => v != null)
+    return values.length === 0 ? null : round(values.reduce((sum, v) => sum + v, 0) / values.length)
+  }
   const firstFailure = scored.find(r => !r.gate.passed)
 
   return {

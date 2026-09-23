@@ -31,8 +31,13 @@ export interface CategoryPreservation {
 export type PreservationByType = Partial<Record<FactLockType, CategoryPreservation>>
 
 export interface QualityScores {
-  bertscore_f1: number
-  nli_entailment: number
+  // null only when this specific gate failed to run (e.g. a custom model
+  // endpoint doesn't support the embedding call semantic similarity needs)
+  // — never a fabricated score standing in for "didn't run".
+  bertscore_f1: number | null
+  nli_entailment: number | null
+  // Always present: deterministic string matching with no external
+  // dependency, so nothing can prevent it from running.
   entity_overlap: number
   passed: boolean
   failed_gate: FailedGate
@@ -47,6 +52,19 @@ export interface QualityScores {
 // enforces the prompt's "preserve every fact exactly" instruction instead of
 // trusting the model complied.
 
+// Non-overlapping count of an exact substring — how many times `needle`
+// genuinely appears in `haystack`, not just whether it appears at all.
+function countOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0
+  let count = 0
+  let index = haystack.indexOf(needle)
+  while (index !== -1) {
+    count++
+    index = haystack.indexOf(needle, index + needle.length)
+  }
+  return count
+}
+
 export function checkEntityOverlap(
   output: string,
   factLocks: FactLock[],
@@ -54,16 +72,32 @@ export function checkEntityOverlap(
   const by_type: PreservationByType = {}
   const missing: string[] = []
 
+  // Grouped by exact text, not checked lock-by-lock: a value repeated N
+  // times in the source (e.g. "2024" three times) needs N occurrences in
+  // the output. A per-lock output.includes() can't tell "all three
+  // survived" from "only one did" — it only answers "does this value
+  // appear anywhere at all", so two dropped duplicates would still each
+  // independently read as preserved off the one surviving copy.
+  const groups = new Map<string, FactLock[]>()
   for (const lock of factLocks) {
-    const entry = by_type[lock.lock_type] ?? { total: 0, preserved: 0, missing: [] }
-    entry.total += 1
-    if (output.includes(lock.text)) {
-      entry.preserved += 1
-    } else {
-      entry.missing.push(lock.text)
-      missing.push(lock.text)
-    }
-    by_type[lock.lock_type] = entry
+    const group = groups.get(lock.text)
+    if (group) group.push(lock)
+    else groups.set(lock.text, [lock])
+  }
+
+  for (const group of groups.values()) {
+    const preservedCount = Math.min(group.length, countOccurrences(output, group[0]!.text))
+    group.forEach((lock, i) => {
+      const entry = by_type[lock.lock_type] ?? { total: 0, preserved: 0, missing: [] }
+      entry.total += 1
+      if (i < preservedCount) {
+        entry.preserved += 1
+      } else {
+        entry.missing.push(lock.text)
+        missing.push(lock.text)
+      }
+      by_type[lock.lock_type] = entry
+    })
   }
 
   const score = factLocks.length === 0 ? 1 : (factLocks.length - missing.length) / factLocks.length
@@ -151,25 +185,46 @@ export async function runQualityGates(
   factLocks: FactLock[],
   thresholds: GateThresholds = DEFAULT_THRESHOLDS,
 ): Promise<QualityScores> {
+  // entity_overlap has no external dependency and must never be lost just
+  // because an unrelated, network-dependent gate fails — computed first,
+  // and the other two are caught independently (Promise.allSettled, not
+  // Promise.all) instead of one rejection failing all three at once. A gate
+  // that couldn't run reports null rather than a fabricated score, and is
+  // excluded from the pass/fail decision rather than counted as a failure.
   const entity = checkEntityOverlap(output, factLocks)
-  const [similarity, entailment] = await Promise.all([
+
+  const [similarityResult, entailmentResult] = await Promise.allSettled([
     checkSemanticSimilarity(client, original, output),
     checkEntailment(client, model, original, output),
   ])
 
+  if (similarityResult.status === 'rejected') {
+    console.warn('Semantic similarity gate unavailable, continuing without it', {
+      type: similarityResult.reason instanceof Error ? similarityResult.reason.constructor.name : typeof similarityResult.reason,
+    })
+  }
+  if (entailmentResult.status === 'rejected') {
+    console.warn('Entailment gate unavailable, continuing without it', {
+      type: entailmentResult.reason instanceof Error ? entailmentResult.reason.constructor.name : typeof entailmentResult.reason,
+    })
+  }
+
+  const similarity = similarityResult.status === 'fulfilled' ? similarityResult.value : null
+  const entailment = entailmentResult.status === 'fulfilled' ? entailmentResult.value : null
+
   let failedGate: FailedGate = null
   if (entity.score < thresholds.entityOverlap) failedGate = 'entity_overlap'
-  else if (entailment.score < thresholds.entailment) failedGate = 'entailment'
-  else if (similarity < thresholds.semanticSimilarity) failedGate = 'semantic_similarity'
+  else if (entailment != null && entailment.score < thresholds.entailment) failedGate = 'entailment'
+  else if (similarity != null && similarity < thresholds.semanticSimilarity) failedGate = 'semantic_similarity'
 
   return {
-    bertscore_f1: round(similarity),
-    nli_entailment: round(entailment.score),
+    bertscore_f1: similarity == null ? null : round(similarity),
+    nli_entailment: entailment == null ? null : round(entailment.score),
     entity_overlap: round(entity.score),
     passed: failedGate === null,
     failed_gate: failedGate,
     missing_facts: entity.missing,
-    entailment_issues: entailment.issues,
+    entailment_issues: entailment?.issues ?? [],
     preservation_by_type: entity.by_type,
   }
 }
