@@ -1,7 +1,7 @@
 import type OpenAI from 'openai'
 import type { FactLock } from './preprocess'
 import { postprocess } from './postprocess'
-import { runQualityGates, QualityScores } from './qualityGates'
+import { runQualityGates, QualityScores, PreservationByType } from './qualityGates'
 
 export const SYSTEM_PROMPT = `You are a professional editor. Your only job is to rewrite the provided text \
 so it reads as natural, fluent human prose. You must:
@@ -163,6 +163,28 @@ export interface AggregatedQuality {
   retry_count: number
   missing_facts: string[]
   entailment_issues: string[]
+  preservation_by_type: PreservationByType
+}
+
+// Sums each category's total/preserved counts and concatenates its missing
+// list across every chunk — the document-level view of what Phase 10's
+// preservation report renders, built the same way for a one-chunk document
+// as a many-chunk one.
+function mergePreservationByType(results: ChunkResult[]): PreservationByType {
+  const merged: PreservationByType = {}
+  for (const r of results) {
+    const byType = r.gate?.preservation_by_type
+    if (!byType) continue
+    for (const key of Object.keys(byType) as (keyof PreservationByType)[]) {
+      const cat = byType[key]!
+      const entry = merged[key] ?? { total: 0, preserved: 0, missing: [] }
+      entry.total += cat.total
+      entry.preserved += cat.preserved
+      entry.missing.push(...cat.missing)
+      merged[key] = entry
+    }
+  }
+  return merged
 }
 
 // Combines per-chunk gate results into one score set. Used for both the
@@ -172,6 +194,7 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
   const totalRetries = results.reduce((sum, r) => sum + r.retryCount, 0)
   const missingFacts = results.flatMap(r => r.gate?.missing_facts ?? [])
   const entailmentIssues = results.flatMap(r => r.gate?.entailment_issues ?? [])
+  const preservationByType = mergePreservationByType(results)
   const scored = results.filter((r): r is ChunkResult & { gate: QualityScores } => !r.gatesUnavailable && r.gate != null)
 
   if (scored.length === 0) {
@@ -184,6 +207,7 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
       retry_count: totalRetries,
       missing_facts: missingFacts,
       entailment_issues: entailmentIssues,
+      preservation_by_type: preservationByType,
     }
   }
 
@@ -200,6 +224,7 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
     retry_count: totalRetries,
     missing_facts: missingFacts,
     entailment_issues: entailmentIssues,
+    preservation_by_type: preservationByType,
   }
 }
 

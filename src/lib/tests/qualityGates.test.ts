@@ -67,6 +67,30 @@ describe('checkEntityOverlap — fixture set', () => {
   })
 })
 
+// ── Gate 1: per-category breakdown (spec §52 preservation report) ───────────
+
+describe('checkEntityOverlap — by_type breakdown', () => {
+  it('buckets each lock under its own type with independent totals', () => {
+    const locks = [lock('12%'), lock('45'), lock('January 5, 2024', 'date'), lock('[3]', 'citation')]
+    const { by_type } = checkEntityOverlap('Revenue grew by 12% and 45 more on January 5, 2024 [3].', locks)
+    expect(by_type.number).toEqual({ total: 2, preserved: 2, missing: [] })
+    expect(by_type.date).toEqual({ total: 1, preserved: 1, missing: [] })
+    expect(by_type.citation).toEqual({ total: 1, preserved: 1, missing: [] })
+  })
+
+  it('records a per-category miss without affecting other categories', () => {
+    const locks = [lock('12%'), lock('[3]', 'citation')]
+    const { by_type } = checkEntityOverlap('Revenue grew, cited [3].', locks)
+    expect(by_type.number).toEqual({ total: 1, preserved: 0, missing: ['12%'] })
+    expect(by_type.citation).toEqual({ total: 1, preserved: 1, missing: [] })
+  })
+
+  it('returns an empty breakdown when there are no locks', () => {
+    const { by_type } = checkEntityOverlap('Nothing to preserve here.', [])
+    expect(by_type).toEqual({})
+  })
+})
+
 // ── Gate 2: cosine similarity (pure math) ────────────────────────────────────
 
 describe('cosineSimilarity', () => {

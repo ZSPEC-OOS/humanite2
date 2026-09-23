@@ -22,6 +22,7 @@ export function buildOutput(
       retry_count: agg.retry_count,
       missing_facts: agg.missing_facts,
       entailment_issues: agg.entailment_issues,
+      preservation_by_type: agg.preservation_by_type,
     },
     detection,
     // Distinguishes "not analyzed" (detection is null, this is set) from a
