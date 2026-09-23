@@ -1,34 +1,43 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-const { docStore, txShouldThrow } = vi.hoisted(() => ({
+const { docStore, txShouldThrow, dbShouldThrow } = vi.hoisted(() => ({
   docStore: new Map<string, { requests: number; words: number }>(),
   txShouldThrow: { value: false },
+  dbShouldThrow: { value: false },
 }))
 
 vi.mock('@/lib/firestore', () => ({
-  db: () => ({
-    collection: () => ({
-      doc: (key: string) => ({ __key: key }),
-    }),
-    runTransaction: async (
-      fn: (tx: {
-        get: (ref: { __key: string }) => Promise<{ exists: boolean; data: () => unknown }>
-        set: (ref: { __key: string }, value: unknown, opts?: { merge?: boolean }) => void
-      }) => Promise<unknown>,
-    ) => {
-      if (txShouldThrow.value) throw new Error('Firestore unavailable')
-      const tx = {
-        get: async (ref: { __key: string }) => ({
-          exists: docStore.has(ref.__key),
-          data: () => docStore.get(ref.__key),
-        }),
-        set: (ref: { __key: string }, value: unknown) => {
-          docStore.set(ref.__key, value as { requests: number; words: number })
-        },
-      }
-      return fn(tx)
-    },
-  }),
+  db: () => {
+    // Mirrors the real db() throwing synchronously when Firebase
+    // credentials are missing — a regression test for a real bug: the
+    // collection().doc() call that builds a doc reference used to happen
+    // before the try/catch, so this exact failure mode wasn't actually
+    // caught despite the "fails open" doc comment above.
+    if (dbShouldThrow.value) throw new Error('Missing Firebase credentials')
+    return {
+      collection: () => ({
+        doc: (key: string) => ({ __key: key }),
+      }),
+      runTransaction: async (
+        fn: (tx: {
+          get: (ref: { __key: string }) => Promise<{ exists: boolean; data: () => unknown }>
+          set: (ref: { __key: string }, value: unknown, opts?: { merge?: boolean }) => void
+        }) => Promise<unknown>,
+      ) => {
+        if (txShouldThrow.value) throw new Error('Firestore unavailable')
+        const tx = {
+          get: async (ref: { __key: string }) => ({
+            exists: docStore.has(ref.__key),
+            data: () => docStore.get(ref.__key),
+          }),
+          set: (ref: { __key: string }, value: unknown) => {
+            docStore.set(ref.__key, value as { requests: number; words: number })
+          },
+        }
+        return fn(tx)
+      },
+    }
+  },
 }))
 
 const { checkAndRecordUsage } = await import('../usageLimits')
@@ -45,6 +54,7 @@ function resetEnv() {
 beforeEach(() => {
   docStore.clear()
   txShouldThrow.value = false
+  dbShouldThrow.value = false
   resetEnv()
 })
 afterEach(resetEnv)
@@ -109,8 +119,18 @@ describe('checkAndRecordUsage', () => {
     expect((await checkAndRecordUsage('user-x', 'not-a-real-tier', 10)).allowed).toBe(false)
   })
 
-  it('fails open (allows the request) if Firestore itself is unavailable', async () => {
+  it('fails open (allows the request) if the transaction itself fails', async () => {
     txShouldThrow.value = true
+    const result = await checkAndRecordUsage('user-1', 'free', 10)
+    expect(result.allowed).toBe(true)
+  })
+
+  it('fails open even when db() itself throws synchronously (e.g. missing Firebase credentials)', async () => {
+    // This is the actual real-world failure mode — db() throws before any
+    // Firestore call is even attempted, not inside a rejected transaction.
+    // Caught live: a request would 500 here before the fix, because the doc
+    // reference used to be built outside the try/catch.
+    dbShouldThrow.value = true
     const result = await checkAndRecordUsage('user-1', 'free', 10)
     expect(result.allowed).toBe(true)
   })

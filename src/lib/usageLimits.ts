@@ -58,9 +58,9 @@ export async function checkAndRecordUsage(
   words: number,
 ): Promise<UsageCheckResult> {
   const limits = limitsForTier(tier)
-  const docRef = db().collection('usage').doc(`${userId}_${todayKey()}`)
 
   try {
+    const docRef = db().collection('usage').doc(`${userId}_${todayKey()}`)
     return await db().runTransaction(async (tx) => {
       const snap = await tx.get(docRef)
       const current = (snap.exists ? snap.data() : null) as { requests: number; words: number } | null

@@ -4,9 +4,18 @@ import { DetectionProvider } from './providers/provider'
 import { GPTZeroProvider } from './providers/gptzero'
 import { MockDetectionProvider, MockFixtureName } from './providers/mock'
 
+// Below this word count, a detector's classification is generally less
+// reliable — not a hard cutoff (still worth showing a result), but worth
+// flagging so a one-sentence scan doesn't display with the same apparent
+// confidence as a full-paragraph one.
+const RELIABLE_MIN_WORDS = 50
+
 // Every production detection request flows through this — it's the one
-// place that adds timing and local diagnostics on top of whatever the
-// provider returns, so providers themselves stay simple.
+// place that adds timing, local diagnostics, and a short-text reliability
+// warning on top of whatever the provider returns, so providers themselves
+// stay simple and both call sites (manual /v1/scan and the automatic
+// post-humanize scan) get this consistently rather than each needing its
+// own copy of the threshold.
 export class DetectionGateway {
   constructor(
     private readonly provider: DetectionProvider,
@@ -23,9 +32,14 @@ export class DetectionGateway {
     const started = performance.now()
     const result = await this.provider.detect(text, options)
     const diagnostics = this.diagnosticsEnabled ? calculateLocalDiagnostics(text) : null
+    const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0
+    const warnings = wordCount < RELIABLE_MIN_WORDS
+      ? [...result.warnings, `This text is short (${wordCount} words) — detection accuracy is generally lower on short passages. Treat this result with extra caution.`]
+      : result.warnings
     return {
       ...result,
       diagnostics,
+      warnings,
       processing_duration_ms: Math.round(performance.now() - started),
     }
   }

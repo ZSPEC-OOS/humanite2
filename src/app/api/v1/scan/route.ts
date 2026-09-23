@@ -13,6 +13,10 @@ import { checkAndRecordUsage } from '@/lib/usageLimits'
 export const maxDuration = 60
 
 const ABSOLUTE_MAX_CHARS = 300_000
+// Rules out a single short sentence outright — a harder floor than the
+// reliability warning in DetectionGateway.detect(), which still returns a
+// result (with a caveat) for anything under its own, higher word threshold.
+const ABSOLUTE_MIN_CHARS = 100
 
 export async function POST(req: NextRequest) {
   const auth = await requireAuth(req)
@@ -31,9 +35,14 @@ export async function POST(req: NextRequest) {
   const text = (body.text ?? '').trim()
   const mode = body.mode === 'quick' ? 'quick' : 'standard'
 
-  if (text.length < 20) {
+  if (text.length < ABSOLUTE_MIN_CHARS) {
     return NextResponse.json(
-      { error: { code: 'VALIDATION_MIN_LENGTH', message: 'Text must be at least 20 characters.' } },
+      {
+        error: {
+          code: 'VALIDATION_MIN_LENGTH',
+          message: `Text must be at least ${ABSOLUTE_MIN_CHARS} characters — AI detection isn't reliable on anything shorter.`,
+        },
+      },
       { status: 400 },
     )
   }

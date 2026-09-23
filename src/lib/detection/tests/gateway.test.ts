@@ -61,6 +61,35 @@ describe('DetectionGateway', () => {
     expect(result.diagnostics).toBeNull()
   })
 
+  it('adds a short-text reliability warning under the word threshold', async () => {
+    delete process.env.DETECTION_PROVIDER
+    const result = await getDetectionGateway().detect('This was a great day.') // 5 words
+    expect(result.warnings.some(w => /short/i.test(w) && /caution/i.test(w))).toBe(true)
+  })
+
+  it('does not add the short-text warning once a passage is long enough', async () => {
+    delete process.env.DETECTION_PROVIDER
+    const longText = 'This is a reasonably long sentence about nothing in particular. '.repeat(6) // 60+ words
+    const result = await getDetectionGateway().detect(longText)
+    expect(result.warnings.some(w => /short/i.test(w))).toBe(false)
+  })
+
+  it('the short-text warning is additive — it does not replace an existing provider warning', async () => {
+    process.env.MOCK_DETECTION_FIXTURE = 'low-confidence'
+    delete process.env.DETECTION_PROVIDER
+    const result = await getDetectionGateway().detect('Too short.')
+    expect(result.warnings.some(w => /low-confidence/i.test(w))).toBe(true)
+    expect(result.warnings.some(w => /short/i.test(w) && /caution/i.test(w))).toBe(true)
+  })
+
+  it('still adds the short-text warning even when diagnostics are disabled — it does not depend on them', async () => {
+    delete process.env.DETECTION_PROVIDER
+    process.env.LOCAL_DIAGNOSTICS_ENABLED = 'false'
+    const result = await getDetectionGateway().detect('This was a great day.')
+    expect(result.diagnostics).toBeNull()
+    expect(result.warnings.some(w => /short/i.test(w))).toBe(true)
+  })
+
   it('memoizes the gateway across calls until reset', async () => {
     delete process.env.DETECTION_PROVIDER
     const first = getDetectionGateway()
