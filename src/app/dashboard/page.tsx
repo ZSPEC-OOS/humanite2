@@ -1,4 +1,5 @@
 'use client'
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useUserStore }     from '@/stores/userStore'
 import { useHumanizeStore } from '@/stores/humanizeStore'
@@ -200,9 +201,9 @@ export default function Dashboard() {
         {/* Desktop header */}
         <header className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 shrink-0 dark:border-gray-800">
           <div className="flex items-center gap-2.5">
-            <span className="text-base font-bold text-gray-900 dark:text-gray-100">
+            <Link href="/" className="font-display text-lg text-gray-900 dark:text-gray-100">
               Humanite
-            </span>
+            </Link>
           </div>
           <div className="flex items-center gap-3">
             <PresetSelector />
@@ -492,9 +493,9 @@ export default function Dashboard() {
       <header className="shrink-0 flex items-center justify-between px-4 bg-white border-b border-gray-200 dark:bg-gray-900 dark:border-gray-800"
         style={{ height: '52px' }}>
         <div className="flex items-center gap-2">
-          <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
+          <Link href="/" className="font-display text-base text-gray-900 dark:text-gray-100">
             Humanite
-          </span>
+          </Link>
         </div>
         <div className="flex items-center gap-1.5">
           <ThemeToggle className="w-9 h-9" />

@@ -66,4 +66,20 @@ describe('DetectionGateway', () => {
     const second = getDetectionGateway()
     expect(first).toBe(second)
   })
+
+  it('an apiKeyOverride always selects GPTZeroProvider, bypassing DETECTION_PROVIDER', () => {
+    delete process.env.DETECTION_PROVIDER
+    const gateway = getDetectionGateway('user-supplied-key')
+    expect(gateway.providerId).toBe('gptzero')
+  })
+
+  it('an apiKeyOverride does not replace or read from the memoized default-gateway singleton', () => {
+    delete process.env.DETECTION_PROVIDER
+    const withoutOverride = getDetectionGateway()
+    const withOverride = getDetectionGateway('user-supplied-key')
+    const stillWithoutOverride = getDetectionGateway()
+    expect(withoutOverride.providerId).toBe('mock')
+    expect(withOverride.providerId).toBe('gptzero')
+    expect(stillWithoutOverride).toBe(withoutOverride)
+  })
 })

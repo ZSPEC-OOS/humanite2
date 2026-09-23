@@ -145,15 +145,19 @@ export async function apiHumanize(
   text: string,
   settings: HumanizeSettings,
 ): Promise<HumanizeAPIResponse> {
-  const { config, hasCustomConfig } = useApiConfigStore.getState()
+  const { config, hasCustomConfig, hasCustomGptzeroKey } = useApiConfigStore.getState()
   const body: Record<string, unknown> = { text, settings }
+  const apiConfig: Record<string, string> = {}
   if (hasCustomConfig()) {
-    body.api_config = {
-      api_key: config.apiKey,
-      model_id: config.modelId,
-      ...(config.baseUrl.trim() ? { base_url: config.baseUrl.trim() } : {}),
-    }
+    apiConfig.api_key = config.apiKey
+    apiConfig.model_id = config.modelId
+    if (config.baseUrl.trim()) apiConfig.base_url = config.baseUrl.trim()
   }
+  // Independent of the generation-model fields above — a user may set only
+  // this, only those, both, or neither.
+  if (hasCustomGptzeroKey()) apiConfig.gptzero_api_key = config.gptzeroApiKey.trim()
+  if (Object.keys(apiConfig).length > 0) body.api_config = apiConfig
+
   return apiFetch<HumanizeAPIResponse>('/v1/humanize', {
     method: 'POST',
     body: JSON.stringify(body),
@@ -178,10 +182,16 @@ export async function apiScan(
   mode: 'quick' | 'standard' = 'standard',
 ): Promise<ScanAPIResponse> {
   // Detection runs on an independent scanner service, not the user's
-  // configured generation model — no api_config is sent here.
+  // configured generation model — the only api_config field ever sent here
+  // is the caller's own GPTZero key, and only when they've set one.
+  const { config, hasCustomGptzeroKey } = useApiConfigStore.getState()
+  const body: Record<string, unknown> = { text, mode }
+  if (hasCustomGptzeroKey()) {
+    body.api_config = { gptzero_api_key: config.gptzeroApiKey.trim() }
+  }
   return apiFetch<ScanAPIResponse>('/v1/scan', {
     method: 'POST',
-    body: JSON.stringify({ text, mode }),
+    body: JSON.stringify(body),
   })
 }
 

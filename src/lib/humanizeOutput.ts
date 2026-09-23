@@ -41,13 +41,15 @@ export function buildOutput(
 //
 // Deliberately does not take the humanizer's OpenAI client/model: the
 // detector is an independent service and must not be gradeable by (or
-// dependent on) whatever model produced the text it's scanning.
-export async function tryClassifyOutput(text: string): Promise<DetectionResult | null> {
+// dependent on) whatever model produced the text it's scanning. It does
+// accept the caller's own GPTZero key (from api_config.gptzero_api_key),
+// threaded straight through to getDetectionGateway() — see gateway.ts.
+export async function tryClassifyOutput(text: string, gptzeroApiKey?: string): Promise<DetectionResult | null> {
   const words = text.trim() ? text.trim().split(/\s+/).length : 0
   recordScanTelemetry({ event: 'scan_requested', trigger: 'auto', words, chars: text.length })
 
   try {
-    const result = await getDetectionGateway().detect(text, { mode: 'standard' })
+    const result = await getDetectionGateway(gptzeroApiKey).detect(text, { mode: 'standard' })
     recordScanTelemetry({
       event: 'scan_completed',
       trigger: 'auto',

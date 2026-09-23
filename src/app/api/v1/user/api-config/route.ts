@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth, isAuthFailure } from '@/lib/require-auth'
 import { getApiConfig, putApiConfig } from '@/lib/r2'
 
-// Syncs the "AI Model Config" (nickname/model/base URL/API key) across
-// devices via R2, keyed by the caller's identity. Best-effort throughout —
-// R2 being unconfigured or unreachable degrades to localStorage-only
-// behavior on the client rather than breaking anything.
+// Syncs the "AI Model Config" panel — the generation model fields
+// (nickname/model/base URL/API key) plus the caller's own GPTZero detection
+// key — across devices via R2, keyed by the caller's identity. Best-effort
+// throughout — R2 being unconfigured or unreachable degrades to
+// localStorage-only behavior on the client rather than breaking anything.
 
 export async function GET(req: NextRequest) {
   const auth = await requireAuth(req)
@@ -26,7 +27,7 @@ export async function PUT(req: NextRequest) {
   const auth = await requireAuth(req)
   if (isAuthFailure(auth)) return auth
 
-  let body: { nickname?: string; modelId?: string; baseUrl?: string; apiKey?: string }
+  let body: { nickname?: string; modelId?: string; baseUrl?: string; apiKey?: string; gptzeroApiKey?: string }
   try {
     body = await req.json()
   } catch {
@@ -42,6 +43,7 @@ export async function PUT(req: NextRequest) {
       modelId: body.modelId ?? '',
       baseUrl: body.baseUrl ?? '',
       apiKey: body.apiKey ?? '',
+      gptzeroApiKey: body.gptzeroApiKey ?? '',
     })
     return NextResponse.json({ synced: true })
   } catch (err) {

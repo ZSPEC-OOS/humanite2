@@ -39,6 +39,7 @@ interface ApiConfig {
   api_key?: string
   model_id?: string
   base_url?: string
+  gptzero_api_key?: string
 }
 
 // ── Async background processing ──────────────────────────────────────────────
@@ -91,7 +92,7 @@ async function processHumanizeJobAsync(
     const postText = results.map(r => r.text).join('\n\n')
     const modelUsed = results.at(-1)?.modelUsed ?? model
     const watermark = generateWatermark(jobId, modelUsed)
-    const detection = await tryClassifyOutput(postText)
+    const detection = await tryClassifyOutput(postText, apiCfg?.gptzero_api_key)
     const output = buildOutput(postText, results, watermark, detection)
     const durationMs = Date.now() - start
 
@@ -236,7 +237,7 @@ export async function POST(req: NextRequest) {
     const durationMs = Date.now() - start
 
     const watermark = generateWatermark(jobId, result.modelUsed)
-    const detection = await tryClassifyOutput(result.text)
+    const detection = await tryClassifyOutput(result.text, apiCfg?.gptzero_api_key)
     const output = buildOutput(result.text, [result], watermark, detection)
 
     await tryPersist(() => db().collection('jobs').doc(jobId).update({

@@ -8,13 +8,14 @@ interface Props {
 }
 
 export function ApiConfigModal({ open, onClose }: Props) {
-  const { config, setConfig, clearConfig, hasCustomConfig, syncFromServer } = useApiConfigStore()
+  const { config, setConfig, clearConfig, hasCustomConfig, hasCustomGptzeroKey, syncFromServer } = useApiConfigStore()
   const [draft, setDraft] = useState<ApiConfig>(config)
   const [showKey, setShowKey] = useState(false)
+  const [showGptzeroKey, setShowGptzeroKey] = useState(false)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    if (open) { setDraft(config); setSaved(false); setShowKey(false) }
+    if (open) { setDraft(config); setSaved(false); setShowKey(false); setShowGptzeroKey(false) }
   }, [open, config])
 
   // Pull the latest config saved from any other device — resolves into
@@ -34,9 +35,9 @@ export function ApiConfigModal({ open, onClose }: Props) {
     setTimeout(() => { setSaved(false); onClose() }, 800)
   }
 
-  const handleClear = () => { clearConfig(); setDraft({ nickname: '', modelId: '', baseUrl: '', apiKey: '' }) }
+  const handleClear = () => { clearConfig(); setDraft({ nickname: '', modelId: '', baseUrl: '', apiKey: '', gptzeroApiKey: '' }) }
 
-  const isActive = hasCustomConfig()
+  const isActive = hasCustomConfig() || hasCustomGptzeroKey()
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -180,6 +181,56 @@ export function ApiConfigModal({ open, onClose }: Props) {
               </button>
             </div>
           </label>
+
+          {/* Detection (GPTZero) */}
+          <div className="pt-2 border-t border-gray-200 dark:border-gray-800">
+            <p className="mt-4 text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+              Detection
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+              Use your own GPTZero account for AI-detection scans instead of the server default.
+              Independent of the model settings above — set one, both, or neither.
+            </p>
+            <label className="block mt-3">
+              <span className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                GPTZero API Key
+              </span>
+              <div className="relative mt-1.5">
+                <input
+                  type={showGptzeroKey ? 'text' : 'password'}
+                  value={draft.gptzeroApiKey}
+                  onChange={patch('gptzeroApiKey')}
+                  placeholder="Your GPTZero API key"
+                  className="w-full bg-white border border-gray-300 rounded-xl
+                             px-3.5 py-2.5 pr-10 text-sm text-gray-800 placeholder-gray-400
+                             outline-none focus:border-gray-900 transition-colors
+                             dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200
+                             dark:placeholder-gray-600 dark:focus:border-gray-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowGptzeroKey(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2
+                             text-gray-400 hover:text-gray-700 transition-colors
+                             dark:text-gray-500 dark:hover:text-gray-300"
+                  aria-label={showGptzeroKey ? 'Hide key' : 'Show key'}
+                >
+                  {showGptzeroKey ? (
+                    <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden>
+                      <path d="M2 10s3-6 8-6 8 6 8 6-3 6-8 6-8-6-8-6z" stroke="currentColor" strokeWidth="1.4"/>
+                      <circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.4"/>
+                      <path d="M3 3l14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                    </svg>
+                  ) : (
+                    <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden>
+                      <path d="M2 10s3-6 8-6 8 6 8 6-3 6-8 6-8-6-8-6z" stroke="currentColor" strokeWidth="1.4"/>
+                      <circle cx="10" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.4"/>
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </label>
+          </div>
         </div>
 
         {/* footer */}
@@ -202,7 +253,7 @@ export function ApiConfigModal({ open, onClose }: Props) {
             </button>
             <button
               onClick={handleSave}
-              disabled={!draft.apiKey.trim() && !draft.modelId.trim()}
+              disabled={!draft.apiKey.trim() && !draft.modelId.trim() && !draft.gptzeroApiKey.trim()}
               className="text-xs font-semibold text-white px-4 py-2 rounded-xl
                          disabled:opacity-30 disabled:cursor-not-allowed transition-colors
                          bg-gray-900 hover:bg-gray-800

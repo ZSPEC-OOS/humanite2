@@ -37,11 +37,26 @@ export function ControlPanel() {
             className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
             style={{ accentColor: 'var(--accent)' }}
           />
-          <div className="flex justify-between mt-2">
+          {/* Positioned by percent-of-range rather than flex justify-between —
+              the ticks aren't evenly spaced values (1, 2, 6, 7, 10), so even
+              spacing made a tick's label land beside a different slider
+              position than the value it names (e.g. "6" sitting under where
+              the thumb actually reads ~7 out of the 1-10 range). */}
+          <div className="relative mt-2 h-7">
             {INTENSITY_TICKS.map(t => (
-              <div key={t.v} className="flex flex-col items-center gap-0.5">
+              <div
+                key={t.v}
+                className="absolute top-0 flex flex-col items-center gap-0.5"
+                style={{
+                  left: `${((t.v - 1) / 9) * 100}%`,
+                  transform:
+                    t.v === 1 ? 'translateX(0)'
+                    : t.v === 10 ? 'translateX(-100%)'
+                    : 'translateX(-50%)',
+                }}
+              >
                 <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium tabular-nums">{t.v}</span>
-                <span className="text-[9px] text-gray-400 dark:text-gray-500">{t.label}</span>
+                <span className="text-[9px] text-gray-400 dark:text-gray-500 whitespace-nowrap">{t.label}</span>
               </div>
             ))}
           </div>

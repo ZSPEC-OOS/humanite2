@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   const auth = await requireAuth(req)
   if (isAuthFailure(auth)) return auth
 
-  let body: { text?: string; mode?: string; domain_hint?: string }
+  let body: { text?: string; mode?: string; domain_hint?: string; api_config?: { gptzero_api_key?: string } }
   try {
     body = await req.json()
   } catch {
@@ -72,16 +72,21 @@ export async function POST(req: NextRequest) {
   recordScanTelemetry({ event: 'scan_requested', trigger: 'manual', words: wordCount, chars: sanitized.length })
 
   try {
-    const gateway = getDetectionGateway()
+    // A caller-supplied GPTZero key gets its own request, never the shared
+    // dedupe cache below — that cache is keyed by provider id + text only,
+    // so serving a cached result would mean returning another account's
+    // (or the server's own) GPTZero call in place of the user's own.
+    const userGptzeroKey = body.api_config?.gptzero_api_key?.trim() || undefined
+    const gateway = getDetectionGateway(userGptzeroKey)
     const cacheKey = hashScanInput(sanitized, gateway.providerId)
-    const cached = await getCachedScanResult(cacheKey)
+    const cached = userGptzeroKey ? null : await getCachedScanResult(cacheKey)
     const cacheHit = cached !== null
 
     const detectionResult = cached ?? await gateway.detect(sanitized, {
       mode,
       domainHint: body.domain_hint || 'general',
     })
-    if (!cacheHit) await setCachedScanResult(cacheKey, detectionResult)
+    if (!cacheHit && !userGptzeroKey) await setCachedScanResult(cacheKey, detectionResult)
 
     await tryPersist(() => db().collection('jobs').doc(jobId).update({
       status: 'completed',

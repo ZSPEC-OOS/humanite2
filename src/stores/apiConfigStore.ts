@@ -6,6 +6,10 @@ export interface ApiConfig {
   modelId: string
   baseUrl: string
   apiKey: string
+  // The caller's own GPTZero key — independent of the generation-model
+  // fields above (spec §52 follow-up: settable without a custom model, and
+  // vice versa).
+  gptzeroApiKey: string
 }
 
 interface ApiConfigState {
@@ -13,6 +17,7 @@ interface ApiConfigState {
   setConfig: (patch: Partial<ApiConfig>) => void
   clearConfig: () => void
   hasCustomConfig: () => boolean
+  hasCustomGptzeroKey: () => boolean
   // Pulls the last config saved from any device (via R2) and adopts it
   // locally. Best-effort — silently no-ops if sync isn't configured/reachable
   // or if nothing has ever been synced.
@@ -20,7 +25,7 @@ interface ApiConfigState {
 }
 
 const STORAGE_KEY = 'humanite_api_config'
-const DEFAULTS: ApiConfig = { nickname: '', modelId: '', baseUrl: '', apiKey: '' }
+const DEFAULTS: ApiConfig = { nickname: '', modelId: '', baseUrl: '', apiKey: '', gptzeroApiKey: '' }
 
 function load(): ApiConfig {
   if (typeof window === 'undefined') return DEFAULTS
@@ -79,10 +84,12 @@ export const useApiConfigStore = create<ApiConfigState>((set, get) => ({
     return !!(apiKey.trim() && modelId.trim())
   },
 
+  hasCustomGptzeroKey: () => !!get().config.gptzeroApiKey.trim(),
+
   syncFromServer: async () => {
     try {
       const { config: synced } = await syncFetch('GET') as { config: ApiConfig | null }
-      if (synced && (synced.apiKey.trim() || synced.modelId.trim())) {
+      if (synced && (synced.apiKey.trim() || synced.modelId.trim() || synced.gptzeroApiKey?.trim())) {
         const next = { ...DEFAULTS, ...synced }
         save(next)
         set({ config: next })
