@@ -25,7 +25,7 @@ function bucket(): string {
   return name
 }
 
-// ── Encryption for the one genuinely sensitive field (apiKey) ───────────────
+// ── Encryption for the genuinely sensitive fields (apiKey, gptzeroApiKey) ───
 // The real access-control boundary is the API route's auth (see
 // require-auth.ts) — this is defense in depth so a leaked/misconfigured
 // bucket alone doesn't hand out a live provider API key in plaintext.
@@ -66,6 +66,10 @@ export interface StoredApiConfig {
   modelId: string
   baseUrl: string
   apiKey: string
+  // The caller's own GPTZero key (spec §52 follow-up) — independent of the
+  // generation-model fields above: a user may set this without configuring
+  // a custom model, or vice versa.
+  gptzeroApiKey: string
 }
 
 function keyFor(userId: string): string {
@@ -83,6 +87,7 @@ export async function getApiConfig(userId: string): Promise<StoredApiConfig | nu
       modelId: parsed.modelId ?? '',
       baseUrl: parsed.baseUrl ?? '',
       apiKey: decrypt(parsed.apiKeyEncrypted ?? ''),
+      gptzeroApiKey: decrypt(parsed.gptzeroApiKeyEncrypted ?? ''),
     }
   } catch (err) {
     if (err instanceof Error && (err.name === 'NoSuchKey' || err.name === 'NotFound')) return null
@@ -96,6 +101,7 @@ export async function putApiConfig(userId: string, config: StoredApiConfig): Pro
     modelId: config.modelId,
     baseUrl: config.baseUrl,
     apiKeyEncrypted: encrypt(config.apiKey),
+    gptzeroApiKeyEncrypted: encrypt(config.gptzeroApiKey),
   })
   await client().send(new PutObjectCommand({
     Bucket: bucket(),

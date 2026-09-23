@@ -39,7 +39,14 @@ function isMockFixtureName(value: string): value is MockFixtureName {
   return MOCK_FIXTURES.has(value as MockFixtureName)
 }
 
-function buildProvider(): DetectionProvider {
+function buildProvider(apiKeyOverride?: string): DetectionProvider {
+  // A caller-supplied key (the user's own GPTZero account, set via the AI
+  // Model settings panel) always wins — same precedence as the humanizer's
+  // own api_config.api_key overriding the server's OPENAI_API_KEY. Explicitly
+  // providing a key is the user opting in to a live call regardless of how
+  // this deployment's DETECTION_PROVIDER is set.
+  if (apiKeyOverride) return new GPTZeroProvider(apiKeyOverride)
+
   if (process.env.DETECTION_PROVIDER === 'gptzero') {
     return new GPTZeroProvider()
   }
@@ -55,8 +62,12 @@ let gateway: DetectionGateway | null = null
 // Single entry point the API routes use for detection. Which backend
 // actually runs is controlled entirely by DETECTION_PROVIDER — nothing
 // downstream of this needs to know whether it's talking to GPTZero or the
-// mock.
-export function getDetectionGateway(): DetectionGateway {
+// mock — unless the caller passes its own GPTZero key, in which case a
+// fresh, non-memoized gateway is built for that one call: keys are
+// per-user, so they must never leak into the shared singleton other
+// requests reuse.
+export function getDetectionGateway(apiKeyOverride?: string): DetectionGateway {
+  if (apiKeyOverride) return new DetectionGateway(buildProvider(apiKeyOverride))
   if (!gateway) gateway = new DetectionGateway(buildProvider())
   return gateway
 }
