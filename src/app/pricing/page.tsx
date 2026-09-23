@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { SiteNav } from '@/components/marketing/SiteNav'
 import { SiteFooter } from '@/components/marketing/SiteFooter'
-import { PageBackground } from '@/components/marketing/PageBackground'
 import { CheckoutButton } from '@/components/marketing/CheckoutButton'
 import { CheckIcon } from '@/components/marketing/icons'
 import { PRICING_TIERS } from '@/lib/pricing'
@@ -27,10 +26,8 @@ const FAQS = [
 
 export default function PricingPage() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-white">
-      <PageBackground />
-
-      <div className="relative z-10 flex min-h-screen flex-col">
+    <main className="min-h-screen bg-white">
+      <div className="flex min-h-screen flex-col">
         <SiteNav />
 
         <div className="flex-1 px-6 pb-20 pt-6 md:px-14">
@@ -52,13 +49,13 @@ export default function PricingPage() {
             {PRICING_TIERS.map(tier => (
               <div
                 key={tier.id}
-                className={`relative flex flex-col rounded-2xl border bg-white/90 p-7 shadow-lg shadow-black/5 backdrop-blur-md ${
-                  tier.highlighted ? 'border-orange-300 md:-translate-y-2 md:shadow-xl' : 'border-white/60'
+                className={`relative flex flex-col rounded-2xl border bg-white p-7 ${
+                  tier.highlighted ? 'border-gray-900 md:-translate-y-2' : 'border-gray-200'
                 }`}
               >
                 {tier.highlighted && (
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r
-                                   from-orange-500 to-red-500 px-3 py-1 text-xs font-bold text-white">
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gray-900
+                                   px-3 py-1 text-xs font-bold text-white">
                     Most popular
                   </span>
                 )}
@@ -74,7 +71,7 @@ export default function PricingPage() {
                 <ul className="mt-6 flex-1 space-y-3">
                   {tier.features.map(f => (
                     <li key={f} className="flex items-start gap-2.5 text-sm text-gray-600">
-                      <CheckIcon className="mt-0.5 shrink-0 text-green-600" />
+                      <CheckIcon className="mt-0.5 shrink-0 text-gray-900" />
                       {f}
                     </li>
                   ))}
@@ -84,9 +81,8 @@ export default function PricingPage() {
                   {tier.stripePriceEnvVar ? (
                     <CheckoutButton
                       plan={tier.id}
-                      className="w-full rounded-full bg-gradient-to-r from-orange-500 to-red-500
-                                 px-6 py-3 text-sm font-bold text-white shadow-md shadow-orange-500/25
-                                 transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-60"
+                      className="w-full rounded-full bg-gray-900 px-6 py-3 text-sm font-bold text-white
+                                 transition-colors hover:bg-gray-800 disabled:opacity-60"
                     >
                       {tier.cta}
                     </CheckoutButton>
@@ -111,7 +107,7 @@ export default function PricingPage() {
             </h2>
             <div className="mt-8 space-y-4">
               {FAQS.map(item => (
-                <div key={item.q} className="rounded-2xl border border-white/60 bg-white/85 p-5 shadow-sm backdrop-blur-md">
+                <div key={item.q} className="rounded-2xl border border-gray-200 bg-white p-5">
                   <p className="text-sm font-semibold text-gray-900">{item.q}</p>
                   <p className="mt-1.5 text-sm leading-relaxed text-gray-600">{item.a}</p>
                 </div>

@@ -60,7 +60,7 @@ export function ApiConfigModal({ open, onClose }: Props) {
             <span className="text-sm font-semibold text-gray-800">AI Model Config</span>
             {isActive && (
               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full
-                               bg-green-100 border border-green-300 text-green-700">
+                               bg-gray-900 text-white">
                 Active
               </span>
             )}
@@ -103,7 +103,7 @@ export function ApiConfigModal({ open, onClose }: Props) {
           {/* Model ID */}
           <label className="block">
             <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
-              Model ID <span className="text-red-500">*</span>
+              Model ID <span className="text-gray-900">*</span>
             </span>
             <input
               type="text"
@@ -135,7 +135,7 @@ export function ApiConfigModal({ open, onClose }: Props) {
           {/* API Key */}
           <label className="block">
             <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
-              API Key <span className="text-red-500">*</span>
+              API Key <span className="text-gray-900">*</span>
             </span>
             <div className="relative mt-1.5">
               <input
@@ -190,9 +190,9 @@ export function ApiConfigModal({ open, onClose }: Props) {
             <button
               onClick={handleSave}
               disabled={!draft.apiKey.trim() && !draft.modelId.trim()}
-              className={`text-xs font-semibold text-white px-4 py-2 rounded-xl
+              className="text-xs font-semibold text-white px-4 py-2 rounded-xl
                          disabled:opacity-30 disabled:cursor-not-allowed transition-colors
-                         ${saved ? 'bg-green-600' : 'bg-gray-900 hover:bg-gray-800'}`}
+                         bg-gray-900 hover:bg-gray-800"
             >
               {saved ? 'Saved ✓' : 'Save'}
             </button>

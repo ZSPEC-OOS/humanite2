@@ -1,6 +1,5 @@
 'use client'
 import { useEffect, useState } from 'react'
-import Image from 'next/image'
 import { useUserStore }     from '@/stores/userStore'
 import { useHumanizeStore } from '@/stores/humanizeStore'
 import { useScanStore }     from '@/stores/scanStore'
@@ -26,7 +25,7 @@ function CircularScore({ pct }: { pct: number }) {
     <svg width="68" height="68" viewBox="0 0 68 68" aria-hidden>
       <circle cx="34" cy="34" r={r} fill="none" stroke="#e5e7eb" strokeWidth="5" />
       <circle
-        cx="34" cy="34" r={r} fill="none" stroke="#22c55e" strokeWidth="5"
+        cx="34" cy="34" r={r} fill="none" stroke="#111827" strokeWidth="5"
         strokeDasharray={circ} strokeDashoffset={circ * (1 - pct / 100)}
         strokeLinecap="round" transform="rotate(-90 34 34)"
       />
@@ -124,14 +123,14 @@ export default function Dashboard() {
           <span className="text-sm font-semibold text-gray-500">Humanized Text</span>
         </div>
         {output?.quality_scores.passed && (
-          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" className="text-green-500">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" className="text-gray-900">
             <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.4" />
             <path d="M6.5 10l2.5 2.5 5-5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         )}
       </div>
       {response?.warning && hStatus === 'done' && (
-        <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-700 shrink-0">
+        <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs text-gray-700 shrink-0">
           ⚠ {response.warning}
         </div>
       )}
@@ -144,7 +143,7 @@ export default function Dashboard() {
             </div>
           </div>
         ) : hStatus === 'error' ? (
-          <p className="text-sm text-red-500">{error ?? 'Humanization failed.'}</p>
+          <p className="text-sm font-semibold text-gray-900">{error ?? 'Humanization failed.'}</p>
         ) : outputText ? outputText : (
           <span className="text-gray-300 italic">Your humanized text will appear here…</span>
         )}
@@ -157,7 +156,7 @@ export default function Dashboard() {
             className="text-gray-300 hover:text-gray-700 transition-colors disabled:opacity-30">
             {copied ? (
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
-                <path d="M2 8l4 4 8-8" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M2 8l4 4 8-8" stroke="#111827" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             ) : (
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -178,18 +177,9 @@ export default function Dashboard() {
     {/* ══════════════════════════════════════════════════════════════
         DESKTOP  (md+)
         ══════════════════════════════════════════════════════════════ */}
-    <div className="relative hidden md:flex flex-col items-center min-h-screen py-6 px-6 bg-white overflow-hidden">
-      <Image
-        src="/images/AppDesktopBackground.PNG"
-        alt=""
-        fill
-        priority
-        sizes="100vw"
-        className="object-cover"
-        aria-hidden
-      />
-      <div className="relative z-10 w-full max-w-6xl rounded-2xl overflow-hidden flex flex-col
-                      bg-white border border-gray-200 shadow-md"
+    <div className="hidden md:flex flex-col items-center min-h-screen py-6 px-6 bg-white">
+      <div className="w-full max-w-6xl rounded-2xl overflow-hidden flex flex-col
+                      bg-white border border-gray-200"
         style={{ minHeight: 'calc(100vh - 3rem)' }}>
         {/* Desktop header */}
         <header className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 shrink-0">
@@ -213,7 +203,7 @@ export default function Dashboard() {
                   stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
               </svg>
               {hasCustomConfig() && (
-                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-500" />
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-gray-900" />
               )}
             </button>
             <span className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full
@@ -279,7 +269,7 @@ export default function Dashboard() {
                       )}
                       <div>
                         <p className="text-sm font-semibold text-gray-700">Human Score</p>
-                        <p className={`text-sm font-bold ${humanScore != null ? 'text-green-600' : 'text-gray-400'}`}>
+                        <p className={`text-sm font-bold ${humanScore != null ? 'text-gray-900' : 'text-gray-400'}`}>
                           {scoreLabel}
                         </p>
                       </div>
@@ -300,12 +290,9 @@ export default function Dashboard() {
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-gray-700">AI Detection</p>
-                        <p className={`text-sm font-bold ${
-                          aiDetLabel === 'Human-like' ? 'text-green-600'
-                          : aiDetLabel === 'AI-like'  ? 'text-red-500'
-                          : aiDetLabel === 'Mixed'    ? 'text-amber-500'
-                          : 'text-gray-400'
-                        }`}>{aiDetLabel ?? 'Scanning…'}</p>
+                        <p className={`text-sm font-bold ${aiDetLabel ? 'text-gray-900' : 'text-gray-400'}`}>
+                          {aiDetLabel ?? 'Scanning…'}
+                        </p>
                       </div>
                       {outputText && (
                         <button
@@ -329,26 +316,20 @@ export default function Dashboard() {
 
                 {output && (
                   <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center border ${
-                      output.quality_scores.passed === true ? 'bg-green-50 border-green-200'
-                      : output.quality_scores.passed === false ? 'bg-red-50 border-red-200'
-                      : 'bg-gray-50 border-gray-200'
-                    }`}>
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center border bg-gray-50 border-gray-200">
                       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
                         <circle cx="10" cy="10" r="7.5"
-                          stroke={output.quality_scores.passed === true ? '#22c55e' : output.quality_scores.passed === false ? '#ef4444' : '#d1d5db'}
+                          stroke={output.quality_scores.passed != null ? '#111827' : '#d1d5db'}
                           strokeWidth="1.4" />
                         <path d="M6.5 10l2.5 2.5 5-5"
-                          stroke={output.quality_scores.passed === true ? '#22c55e' : output.quality_scores.passed === false ? '#ef4444' : '#d1d5db'}
+                          stroke={output.quality_scores.passed != null ? '#111827' : '#d1d5db'}
                           strokeWidth="1.4" strokeLinecap="round" />
                       </svg>
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-gray-700">Fidelity check</p>
                       <p className={`text-sm font-bold ${
-                        output.quality_scores.passed === true ? 'text-green-600'
-                        : output.quality_scores.passed === false ? 'text-red-500'
-                        : 'text-gray-400'
+                        output.quality_scores.passed != null ? 'text-gray-900' : 'text-gray-400'
                       }`}
                         title={
                           output.quality_scores.passed === false
@@ -376,16 +357,6 @@ export default function Dashboard() {
         MOBILE  (<md)
         ══════════════════════════════════════════════════════════════ */}
     <div className="relative md:hidden flex flex-col bg-white p-2" style={{ height: '100dvh' }}>
-      <Image
-        src="/images/AppIphoneBackground.PNG"
-        alt=""
-        fill
-        priority
-        sizes="100vw"
-        className="object-cover"
-        aria-hidden
-      />
-
       {/* ── Drawer backdrop ── */}
       {menuOpen && (
         <div
@@ -455,7 +426,7 @@ export default function Dashboard() {
               </div>
               <div className="flex items-center gap-2">
                 {hasCustomConfig() && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-gray-900" />
                 )}
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
                   <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -484,8 +455,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Card shell — lets AppIphoneBackground peek through at the edges ── */}
-      <div className="relative z-10 flex flex-col flex-1 min-h-0 overflow-hidden rounded-3xl bg-white shadow-xl">
+      {/* ── Card shell ── */}
+      <div className="relative z-10 flex flex-col flex-1 min-h-0 overflow-hidden rounded-3xl bg-white border border-gray-200">
 
       {/* ── Mobile header ── */}
       <header className="shrink-0 flex items-center justify-between px-4 bg-white border-b border-gray-200"
@@ -546,10 +517,10 @@ export default function Dashboard() {
               <div className="shrink-0 flex gap-2 px-4 pt-3 pb-2 flex-wrap border-b border-gray-200">
                 <span className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium border ${
                   humanScore != null
-                    ? 'bg-green-50 border-green-200 text-green-700'
+                    ? 'bg-gray-100 border-gray-300 text-gray-900'
                     : 'bg-gray-50 border-gray-200 text-gray-500'
                 }`}>
-                  {humanScore != null && <span className="w-1.5 h-1.5 rounded-full bg-green-500" />}
+                  {humanScore != null && <span className="w-1.5 h-1.5 rounded-full bg-gray-900" />}
                   {humanScore != null ? `${humanScore}% Human · ${scoreLabel}` : scoreLabel}
                 </span>
                 {output.quality_scores.passed && (
@@ -559,13 +530,8 @@ export default function Dashboard() {
                   </span>
                 )}
                 {aiDetLabel && (
-                  <span className={`text-xs px-2.5 py-1 rounded-full font-medium border ${
-                    aiDetLabel === 'Human-like'
-                      ? 'bg-green-50 border-green-200 text-green-700'
-                      : aiDetLabel === 'AI-like'
-                      ? 'bg-red-50 border-red-200 text-red-700'
-                      : 'bg-amber-50 border-amber-200 text-amber-700'
-                  }`}>
+                  <span className="text-xs px-2.5 py-1 rounded-full font-medium border
+                                   bg-gray-100 border-gray-300 text-gray-900">
                     {aiDetLabel}
                   </span>
                 )}
@@ -573,7 +539,7 @@ export default function Dashboard() {
             )}
 
             {response?.warning && hStatus === 'done' && (
-              <div className="shrink-0 px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-700">
+              <div className="shrink-0 px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs text-gray-700">
                 ⚠ {response.warning}
               </div>
             )}
@@ -590,8 +556,8 @@ export default function Dashboard() {
                   </div>
                 </div>
               ) : hStatus === 'error' ? (
-                <div className="p-4 rounded-2xl bg-red-50 border border-red-200">
-                  <p className="text-sm text-red-600">{error ?? 'Humanization failed.'}</p>
+                <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200">
+                  <p className="text-sm font-semibold text-gray-900">{error ?? 'Humanization failed.'}</p>
                 </div>
               ) : outputText ? outputText : (
                 <div className="h-full flex items-center justify-center">
@@ -615,7 +581,7 @@ export default function Dashboard() {
                   >
                     {copied ? (
                       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-                        <path d="M2 8l4 4 8-8" stroke="#22c55e" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M2 8l4 4 8-8" stroke="#111827" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
                       </svg>
                     ) : (
                       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>

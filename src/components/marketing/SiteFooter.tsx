@@ -9,7 +9,7 @@ const FOOTER_LINKS = [
 
 export function SiteFooter() {
   return (
-    <footer className="relative z-10 border-t border-white/60 bg-white/70 backdrop-blur-md">
+    <footer className="border-t border-gray-200 bg-white">
       <div className="mx-auto flex max-w-5xl flex-col items-center gap-6 px-6 py-10 text-center md:flex-row md:justify-between md:text-left">
         <div>
           <span className="font-display text-lg text-gray-900">

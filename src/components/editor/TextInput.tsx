@@ -17,7 +17,7 @@ export function TextInput() {
                    px-4 py-4 outline-none placeholder-gray-400 font-sans"
       />
       <div className="flex items-center justify-end px-4 py-2 border-t border-gray-200 shrink-0">
-        <span className={`text-xs tabular-nums ${overLimit ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>
+        <span className={`text-xs tabular-nums ${overLimit ? 'text-gray-900 font-semibold' : 'text-gray-400'}`}>
           {text.length.toLocaleString()} / {MAX_CHARS.toLocaleString()}
         </span>
       </div>

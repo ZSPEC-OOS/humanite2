@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { SiteNav } from '@/components/marketing/SiteNav'
 import { SiteFooter } from '@/components/marketing/SiteFooter'
-import { PageBackground } from '@/components/marketing/PageBackground'
 import { ArrowIcon, CheckIcon } from '@/components/marketing/icons'
 
 const SEGMENTS = [
@@ -49,10 +48,8 @@ const SEGMENTS = [
 
 export default function UseCasesPage() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-white">
-      <PageBackground />
-
-      <div className="relative z-10 flex min-h-screen flex-col">
+    <main className="min-h-screen bg-white">
+      <div className="flex min-h-screen flex-col">
         <SiteNav />
 
         <div className="flex-1 px-6 pb-20 pt-6 md:px-14">
@@ -72,14 +69,14 @@ export default function UseCasesPage() {
           {/* Segments */}
           <div className="mx-auto mt-14 grid max-w-5xl gap-6 md:grid-cols-2">
             {SEGMENTS.map(s => (
-              <div key={s.title} className="rounded-2xl border border-white/60 bg-white/85 p-7 shadow-sm backdrop-blur-md">
+              <div key={s.title} className="rounded-2xl border border-gray-200 bg-white p-7">
                 <span className="text-3xl" aria-hidden>{s.icon}</span>
                 <h2 className="mt-3 text-lg font-semibold text-gray-900">{s.title}</h2>
                 <p className="mt-1 text-sm text-gray-600">{s.tagline}</p>
                 <ul className="mt-4 space-y-2.5">
                   {s.points.map(p => (
                     <li key={p} className="flex items-start gap-2.5 text-sm text-gray-600">
-                      <CheckIcon className="mt-0.5 shrink-0 text-green-600" />
+                      <CheckIcon className="mt-0.5 shrink-0 text-gray-900" />
                       {p}
                     </li>
                   ))}
@@ -92,9 +89,9 @@ export default function UseCasesPage() {
           <div className="mx-auto mt-16 max-w-xl text-center">
             <Link
               href="/dashboard"
-              className="inline-flex items-center gap-2.5 rounded-full bg-gradient-to-r from-orange-500 to-red-500
-                         px-8 py-4 text-base font-bold text-white shadow-lg shadow-orange-500/25
-                         transition-transform hover:scale-[1.02] active:scale-[0.98]"
+              className="inline-flex items-center gap-2.5 rounded-full bg-gray-900
+                         px-8 py-4 text-base font-bold text-white
+                         transition-colors hover:bg-gray-800"
             >
               Try it with your own text
               <ArrowIcon />
