@@ -10,9 +10,9 @@ import { chunkFactLockedText } from '@/lib/chunk'
 import { humanizeChunk, ChunkResult, joinChunkResults } from '@/lib/humanizePipeline'
 import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
 import { buildOutput, tryClassifyOutput } from '@/lib/humanizeOutput'
-import { isAllowedProviderBaseUrl } from '@/lib/providerAllowlist'
 import { checkAndRecordUsage } from '@/lib/usageLimits'
 import { getUserApiConfig } from '@/lib/userApiConfig'
+import { resolveProvider } from '@/lib/providerResolution'
 import type { StoredApiConfig } from '@/lib/r2'
 
 // Vercel clamps this to whatever the deployment's plan actually allows
@@ -39,17 +39,6 @@ interface HumanizeSettings {
   domain: string
 }
 
-// A stored base_url is re-validated here (not just at save time in
-// /v1/user/api-config) rather than trusted blindly — cheap, and covers any
-// data written before that check existed or by another path. Falls back to
-// the server default instead of failing the whole request: this is the
-// caller's own previously-saved data, not a malicious per-request payload,
-// so a bad stored value is treated as "ignore it", not "reject the job".
-function safeBaseUrl(userConfig: StoredApiConfig | null): string | undefined {
-  const url = userConfig?.baseUrl?.trim()
-  return url && isAllowedProviderBaseUrl(url) ? url : undefined
-}
-
 // ── Async background processing ──────────────────────────────────────────────
 // Kicked off via waitUntil after the "pending" response is already sent. On
 // Vercel this keeps the serverless invocation alive past the response; on a
@@ -63,11 +52,8 @@ async function processHumanizeJobAsync(
   userConfig: StoredApiConfig | null,
 ) {
   try {
-    const client = new OpenAI({
-      apiKey: userConfig?.apiKey || process.env.OPENAI_API_KEY,
-      baseURL: safeBaseUrl(userConfig) || process.env.OPENAI_BASE_URL,
-    })
-    const model = userConfig?.modelId || process.env.OPENAI_MODEL || 'gpt-4o-mini'
+    const { apiKey, baseURL, model } = resolveProvider(userConfig)
+    const client = new OpenAI({ apiKey, baseURL })
     const start = Date.now()
     const chunks = chunkFactLockedText(sanitizedText, factLocks, CHUNK_MAX_CHARS)
 
@@ -249,11 +235,8 @@ export async function POST(req: NextRequest) {
 
   // ── Short document: process synchronously within this request ─────────────
   try {
-    const client = new OpenAI({
-      apiKey: userConfig?.apiKey || process.env.OPENAI_API_KEY,
-      baseURL: safeBaseUrl(userConfig) || process.env.OPENAI_BASE_URL,
-    })
-    const model = userConfig?.modelId || process.env.OPENAI_MODEL || 'gpt-4o-mini'
+    const { apiKey, baseURL, model } = resolveProvider(userConfig)
+    const client = new OpenAI({ apiKey, baseURL })
     const start = Date.now()
 
     const result = await humanizeChunk(
