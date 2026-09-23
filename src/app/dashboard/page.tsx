@@ -73,9 +73,12 @@ export default function Dashboard() {
     : null
   const scoreLabel = humanScore == null ? 'Not yet scored'
     : humanScore >= 90 ? 'Excellent' : humanScore >= 75 ? 'Good' : 'Fair'
-  const aiDetLabel = scanResp?.classification === 'human-written' ? 'Undetectable'
-                   : scanResp?.classification === 'ai-generated'  ? 'Detected'
-                   : scanResp?.classification === 'mixed'         ? 'Partial'
+  // Terminology contract: report inference, not proof — never
+  // "Undetectable"/"Detected", which implies an evasion guarantee the
+  // detector cannot back up.
+  const aiDetLabel = scanResp?.classification === 'human-written' ? 'Human-like'
+                   : scanResp?.classification === 'ai-generated'  ? 'AI-like'
+                   : scanResp?.classification === 'mixed'         ? 'Mixed'
                    : null
 
   /* ── Shared panel JSX ── */
@@ -298,9 +301,9 @@ export default function Dashboard() {
                       <div>
                         <p className="text-sm font-semibold text-gray-700">AI Detection</p>
                         <p className={`text-sm font-bold ${
-                          aiDetLabel === 'Undetectable' ? 'text-green-600'
-                          : aiDetLabel === 'Detected'   ? 'text-red-500'
-                          : aiDetLabel === 'Partial'    ? 'text-amber-500'
+                          aiDetLabel === 'Human-like' ? 'text-green-600'
+                          : aiDetLabel === 'AI-like'  ? 'text-red-500'
+                          : aiDetLabel === 'Mixed'    ? 'text-amber-500'
                           : 'text-gray-400'
                         }`}>{aiDetLabel ?? 'Scanning…'}</p>
                       </div>
@@ -557,9 +560,9 @@ export default function Dashboard() {
                 )}
                 {aiDetLabel && (
                   <span className={`text-xs px-2.5 py-1 rounded-full font-medium border ${
-                    aiDetLabel === 'Undetectable'
+                    aiDetLabel === 'Human-like'
                       ? 'bg-green-50 border-green-200 text-green-700'
-                      : aiDetLabel === 'Detected'
+                      : aiDetLabel === 'AI-like'
                       ? 'bg-red-50 border-red-200 text-red-700'
                       : 'bg-amber-50 border-amber-200 text-amber-700'
                   }`}>
@@ -644,7 +647,7 @@ export default function Dashboard() {
                 </button>
               </div>
             )}
-            <ScanReport />
+            <ScanReport text={outputText} />
           </div>
         )}
       </div>

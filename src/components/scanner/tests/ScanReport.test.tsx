@@ -7,6 +7,8 @@ beforeEach(() => {
   useScanStore.setState({ status: 'idle', response: null, error: null })
 })
 
+const SCANNED_TEXT = 'This is the exact text that was scanned for the heatmap.'
+
 const MOCK_SCAN_RESPONSE = {
   job_id: 'job-1',
   status: 'completed',
@@ -16,6 +18,15 @@ const MOCK_SCAN_RESPONSE = {
   human_probability: 0.12,
   ai_probability: 0.88,
   uncertain_probability: 0.0,
+  ai_fraction: 0.88,
+  coverage: { analyzed_tokens: 10, total_tokens: 10, fraction: 1.0 },
+  segments: [
+    {
+      id: 'seg-0', start_char: 0, end_char: SCANNED_TEXT.length,
+      start_token: 0, end_token: 10,
+      ai_probability: 0.88, classification: 'ai-generated' as const, confidence: 0.9,
+    },
+  ],
   per_sentence_perplexity: [42.1, 38.6, 55.2, 71.0],
   top_features: [
     { feature: 'transition_density', observed_value: 0.33,
@@ -72,5 +83,24 @@ describe('ScanReport', () => {
     useScanStore.setState({ status: 'done', response: MOCK_SCAN_RESPONSE })
     render(<ScanReport />)
     expect(screen.getByText(/per-sentence perplexity/i)).toBeTruthy()
+  })
+
+  it('renders coverage', () => {
+    useScanStore.setState({ status: 'done', response: MOCK_SCAN_RESPONSE })
+    render(<ScanReport />)
+    expect(screen.getByText(/100% coverage/i)).toBeTruthy()
+  })
+
+  it('renders the document-map heatmap when text and segments are provided', () => {
+    useScanStore.setState({ status: 'done', response: MOCK_SCAN_RESPONSE })
+    render(<ScanReport text={SCANNED_TEXT} />)
+    expect(screen.getByText(/document map/i)).toBeTruthy()
+    expect(screen.getByText(SCANNED_TEXT)).toBeTruthy()
+  })
+
+  it('does not render the heatmap without the scanned text', () => {
+    useScanStore.setState({ status: 'done', response: MOCK_SCAN_RESPONSE })
+    render(<ScanReport />)
+    expect(screen.queryByText(/document map/i)).toBeNull()
   })
 })

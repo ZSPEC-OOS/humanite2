@@ -246,6 +246,7 @@ async def test_full_scan_returns_required_fields():
     required_fields = {
         "scan_id", "classification", "confidence",
         "human_probability", "ai_probability", "uncertain_probability",
+        "ai_fraction", "coverage", "segments",
         "per_sentence_perplexity", "top_features", "explanation",
         "model_used", "processing_duration_ms",
     }
@@ -253,7 +254,22 @@ async def test_full_scan_returns_required_fields():
     assert not missing, f"Missing fields: {missing}"
 
     assert data["classification"] == "ai-generated"
-    assert data["confidence"] == pytest.approx(0.87)
+    # Confidence is now derived from segment agreement x coverage, not
+    # passed through from the (mocked) classifier's own confidence field —
+    # AI_TEXT is short enough to be a single window, so agreement is
+    # trivially perfect and coverage is complete: confidence should be high.
+    assert data["confidence"] > 0.7
+    # ai_fraction is the token-level reconstruction (spec §9) — for a
+    # single-window document it equals that window's ai_probability, and
+    # ai_probability mirrors it for backward compatibility (spec §34).
+    assert data["ai_fraction"] == pytest.approx(0.87)
+    assert data["ai_probability"] == pytest.approx(0.87)
+    assert data["coverage"]["fraction"] == pytest.approx(1.0)
+    assert data["coverage"]["analyzed_tokens"] == data["coverage"]["total_tokens"]
+    assert len(data["segments"]) >= 1
+    assert data["segments"][0]["classification"] == "ai-generated"
+    assert data["segments"][0]["start_char"] == 0
+    assert data["segments"][-1]["end_char"] == len(AI_TEXT)
     assert len(data["per_sentence_perplexity"]) == 3
     assert len(data["top_features"]) > 0
     assert "summary" in data["explanation"]
@@ -280,6 +296,72 @@ async def test_uncertain_when_classifier_low_confidence():
             resp = await client.post("/scan/", json={"text": AI_TEXT})
 
     assert resp.json()["classification"] == "uncertain"
+
+
+# ── Segmentation / coverage (spec §9, §11, §12, §85) ────────────────────────────
+
+@pytest.mark.asyncio
+async def test_standard_mode_covers_entire_long_document():
+    """
+    A document long enough to span multiple windows must be fully covered
+    in standard mode — the fix for the old behavior where only the first
+    ~400 words of any document were ever classified.
+    """
+    from httpx import AsyncClient, ASGITransport
+    from src.main import app
+
+    long_text = " ".join([f"paragraph{i} content word filler" for i in range(500)])  # ~2500 words
+
+    mock_cls = {
+        "classification": "ai-generated", "confidence": 0.8,
+        "human_probability": 0.2, "ai_probability": 0.8,
+        "model_used": "mock-roberta",
+    }
+
+    with patch("src.routers.scan.classify", return_value=mock_cls), \
+         patch("src.routers.scan.compute_perplexity", return_value=[]):
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post("/scan/", json={"text": long_text, "mode": "standard"})
+
+    data = resp.json()
+    assert data["coverage"]["fraction"] == pytest.approx(1.0)
+    assert data["coverage"]["analyzed_tokens"] == data["coverage"]["total_tokens"]
+    assert len(data["segments"]) >= 1
+    # Segments must span from the very start to the very end of the document.
+    assert data["segments"][0]["start_char"] == 0
+    assert data["segments"][-1]["end_char"] == len(long_text)
+
+
+@pytest.mark.asyncio
+async def test_quick_mode_reduces_coverage_on_long_document():
+    """
+    Quick mode samples windows spread across the document (spec §12) rather
+    than only reading the beginning — coverage should drop below 100% for a
+    document with more than one window, and the reported fraction must be
+    honest about it.
+    """
+    from httpx import AsyncClient, ASGITransport
+    from src.main import app
+
+    long_text = " ".join([f"paragraph{i} content word filler" for i in range(500)])
+
+    mock_cls = {
+        "classification": "ai-generated", "confidence": 0.8,
+        "human_probability": 0.2, "ai_probability": 0.8,
+        "model_used": "mock-roberta",
+    }
+
+    with patch("src.routers.scan.classify", return_value=mock_cls):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post("/scan/", json={"text": long_text, "mode": "quick"})
+
+    data = resp.json()
+    assert 0.0 < data["coverage"]["fraction"] < 1.0
+    assert data["coverage"]["analyzed_tokens"] < data["coverage"]["total_tokens"]
+    # A gap in coverage must surface as its own segment, not be silently
+    # absorbed into a neighboring classified one (see aggregation.document).
+    assert any(s["classification"] == "uncertain" for s in data["segments"])
 
 
 @pytest.mark.asyncio

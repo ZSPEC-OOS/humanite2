@@ -108,6 +108,9 @@ export interface HumanizeOutput {
     human_probability: number
     ai_probability: number
     uncertain_probability: number
+    ai_fraction: number
+    coverage: Coverage
+    segments: DetectionSegment[]
     per_sentence_perplexity: number[]
     top_features: FeatureContribution[]
     explanation: { summary: string; detail: string }
@@ -175,6 +178,23 @@ export interface FeatureContribution {
   contribution: number
 }
 
+export interface DetectionSegment {
+  id: string
+  start_char: number
+  end_char: number
+  start_token: number
+  end_token: number
+  ai_probability: number
+  classification: 'human-written' | 'ai-generated' | 'uncertain'
+  confidence: number
+}
+
+export interface Coverage {
+  analyzed_tokens: number
+  total_tokens: number
+  fraction: number
+}
+
 export interface ScanAPIResponse {
   job_id: string
   status: string
@@ -184,6 +204,9 @@ export interface ScanAPIResponse {
   human_probability: number | null
   ai_probability: number | null
   uncertain_probability: number | null
+  ai_fraction: number | null
+  coverage: Coverage | null
+  segments: DetectionSegment[]
   per_sentence_perplexity: number[]
   top_features: FeatureContribution[]
   explanation: { summary: string; detail: string } | null

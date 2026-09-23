@@ -1,7 +1,16 @@
 'use client'
 import { useScanStore } from '@/stores/scanStore'
 import { PerplexityChart } from './PerplexityChart'
+import { SegmentHeatmap } from './SegmentHeatmap'
 import { Spinner } from '@/components/ui/Spinner'
+
+interface ScanReportProps {
+  // The exact text that was scanned — required to render the segment
+  // heatmap, since segment char offsets are into that text, not whatever
+  // is currently in the editor. Optional so existing callers keep working;
+  // the heatmap simply doesn't render without it.
+  text?: string
+}
 
 // Terminology contract: report inference, not proof — "AI-like" /
 // "Human-like", never "Detected" / "Undetectable" (which implies an
@@ -31,7 +40,7 @@ const CLASS_CONFIG = {
 
 type ClassKey = keyof typeof CLASS_CONFIG
 
-export function ScanReport() {
+export function ScanReport({ text }: ScanReportProps = {}) {
   const { response, status, error } = useScanStore()
 
   if (status === 'idle') {
@@ -91,6 +100,22 @@ export function ScanReport() {
                style={{ width: `${conf * 100}%` }} />
         </div>
       </div>
+
+      {/* Coverage — how much of the document was actually analyzed. Distinct
+          from confidence: a fully-covered document can still be low
+          confidence, and a partially-covered one (quick mode) should say so
+          rather than presenting a full-document number. */}
+      {response.coverage && (
+        <p className="text-xs text-gray-400">
+          Analyzed {response.coverage.analyzed_tokens.toLocaleString()} / {response.coverage.total_tokens.toLocaleString()} tokens
+          {' '}({(response.coverage.fraction * 100).toFixed(0)}% coverage)
+        </p>
+      )}
+
+      {/* Document map — segment heatmap over the exact scanned text */}
+      {text && response.segments.length > 0 && (
+        <SegmentHeatmap text={text} segments={response.segments} />
+      )}
 
       {/* Probability breakdown */}
       <div className="space-y-2.5">
