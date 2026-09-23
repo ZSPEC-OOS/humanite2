@@ -12,7 +12,7 @@ export function SiteNav() {
   return (
     <header className="relative z-10 flex items-center justify-between px-6 py-6 md:px-14 md:py-7">
       <Link href="/" className="font-display text-xl text-gray-900 dark:text-gray-100">
-        Humanite<sup className="text-[0.55em]">™</sup>
+        Humanite
       </Link>
 
       <nav className="hidden items-center gap-8 md:flex">
