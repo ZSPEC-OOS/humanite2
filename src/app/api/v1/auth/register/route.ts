@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/firestore'
-import { hashPassword, issueAccessToken, generateRefreshToken } from '@/lib/auth-utils'
+import { issueAccessToken, generateRefreshToken } from '@/lib/auth-utils'
+import { registerUser } from '@/lib/userRegistration'
 import { randomUUID } from 'crypto'
 
 export async function POST(req: NextRequest) {
@@ -16,26 +17,11 @@ export async function POST(req: NextRequest) {
   }
 
   const firestore = db()
-
-  // Check email taken
-  const existing = await firestore.collection('users').where('email', '==', email).limit(1).get()
-  if (!existing.empty) {
+  const registration = await registerUser(firestore, email, password)
+  if (!registration.ok) {
     return NextResponse.json({ error: { code: 'EMAIL_TAKEN', message: 'An account with this email already exists.' } }, { status: 409 })
   }
-
-  const userId = randomUUID()
-  const passwordHash = await hashPassword(password)
-  const now = new Date()
-
-  await firestore.collection('users').doc(userId).set({
-    email,
-    passwordHash,
-    tier: 'free',
-    region: 'us-east1',
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-  })
+  const userId = registration.userId!
 
   const accessToken = await issueAccessToken(userId, email, 'free', 'us-east1')
   const { raw, hash } = generateRefreshToken()
@@ -45,7 +31,7 @@ export async function POST(req: NextRequest) {
     userId,
     familyId,
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    createdAt: now,
+    createdAt: new Date(),
     revokedAt: null,
   })
 
