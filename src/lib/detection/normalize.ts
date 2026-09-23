@@ -2,7 +2,7 @@ import {
   ConfidenceCategory,
   DetectionClassification,
   DetectionProviderError,
-  DetectionSegmentV3,
+  DetectionSegment,
   ProbabilitySet,
 } from './contracts'
 import { DetectionProviderResult } from './providers/provider'
@@ -109,7 +109,7 @@ function deriveConfidenceCategory(
 // Locates each sentence's char offsets in the original text so the UI can
 // highlight it directly, rather than re-tokenizing. GPTZero's documented
 // sentence objects don't carry offsets themselves.
-function buildSegments(sentences: GPTZeroSentence[] | undefined, originalText: string): DetectionSegmentV3[] {
+function buildSegments(sentences: GPTZeroSentence[] | undefined, originalText: string): DetectionSegment[] {
   if (!sentences?.length) return []
   let cursor = 0
 
@@ -143,8 +143,8 @@ function buildSegments(sentences: GPTZeroSentence[] | undefined, originalText: s
 // Spec §13 — derived only when the response is granular enough to support
 // it (per-sentence scores present); never manufactured from
 // probabilities.ai alone.
-function estimateAiLikeFraction(segments: DetectionSegmentV3[]): number | null {
-  const scored = segments.filter((s): s is DetectionSegmentV3 & { ai_score: number } => s.ai_score != null)
+function estimateAiLikeFraction(segments: DetectionSegment[]): number | null {
+  const scored = segments.filter((s): s is DetectionSegment & { ai_score: number } => s.ai_score != null)
   if (scored.length === 0) return null
   return round(scored.reduce((sum, s) => sum + s.ai_score, 0) / scored.length)
 }

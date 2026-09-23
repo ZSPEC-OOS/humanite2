@@ -16,21 +16,8 @@ function applyDetectionToScanStore(output: HumanizeOutput) {
     job_id: output.watermark.job_id,
     status: 'completed',
     scan_id: null,
-    classification: output.detection.classification,
-    confidence: output.detection.confidence,
-    human_probability: output.detection.human_probability,
-    ai_probability: output.detection.ai_probability,
-    uncertain_probability: output.detection.uncertain_probability,
-    ai_fraction: output.detection.ai_fraction,
-    coverage: output.detection.coverage,
-    segments: output.detection.segments,
-    per_sentence_perplexity: output.detection.per_sentence_perplexity,
-    top_features: output.detection.top_features,
-    explanation: output.detection.explanation,
-    model_used: output.detection.model_used,
-    processing_duration_ms: null,
     result_url: null,
-    warning: null,
+    ...output.detection,
   })
 }
 

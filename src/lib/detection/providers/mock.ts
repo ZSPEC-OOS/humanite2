@@ -2,7 +2,7 @@ import {
   ConfidenceCategory,
   DetectionClassification,
   DetectionProviderError,
-  DetectionSegmentV3,
+  DetectionSegment,
   ProbabilitySet,
 } from '../contracts'
 import { DetectionProvider, DetectionProviderResult } from './provider'
@@ -22,9 +22,9 @@ type SegmentClass = 'human-written' | 'ai-generated' | 'uncertain'
 // given classification pattern across them, so a fixture's segments carry
 // char offsets that actually resolve against whatever text was passed in
 // — useful for exercising segment highlighting without a live provider.
-function splitIntoSegments(text: string, pattern: SegmentClass[]): DetectionSegmentV3[] {
+function splitIntoSegments(text: string, pattern: SegmentClass[]): DetectionSegment[] {
   const sentences = text.match(/[^.!?]+[.!?]*/g)?.map(s => s.trim()).filter(Boolean) ?? [text]
-  const segments: DetectionSegmentV3[] = []
+  const segments: DetectionSegment[] = []
   let cursor = 0
 
   sentences.forEach((sentence, i) => {
