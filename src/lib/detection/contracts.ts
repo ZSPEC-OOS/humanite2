@@ -95,9 +95,12 @@ export interface ProbabilitySet {
 export interface DetectionSegmentV3 {
   id: string
   text?: string
-  start_char?: number
-  end_char?: number
-  classification?: 'human-written' | 'ai-generated' | 'uncertain'
+  // GPTZero-derived segments know they lack an offset/classification when
+  // sentence-matching fails or a score is missing — an explicit `undefined`
+  // rather than an omitted key, hence `| undefined` alongside `?:` here.
+  start_char?: number | undefined
+  end_char?: number | undefined
+  classification?: 'human-written' | 'ai-generated' | 'uncertain' | undefined
   ai_score: number | null
   highlighted_for_ai: boolean
   source: string
