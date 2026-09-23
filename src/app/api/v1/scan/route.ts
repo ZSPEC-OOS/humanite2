@@ -4,6 +4,7 @@ import { db, tryPersist } from '@/lib/firestore'
 import { requireAuth, isAuthFailure } from '@/lib/require-auth'
 import { preprocess } from '@/lib/preprocess'
 import { getDetectionGateway } from '@/lib/detection/gateway'
+import { getCachedScanResult, hashScanInput, setCachedScanResult } from '@/lib/detection/dedupe'
 import { DetectionProviderError } from '@/lib/detection/contracts'
 
 // A single non-chunked detection call through DetectionGateway.
@@ -51,12 +52,15 @@ export async function POST(req: NextRequest) {
   const scanId = randomUUID()
   const inputHash = createHash('sha256').update(text).digest('hex')
   const now = new Date()
+  const wordCount = sanitized.split(/\s+/).filter(Boolean).length
 
   await tryPersist(() => db().collection('jobs').doc(jobId).set({
     userId: auth.claims.sub,
     jobType: 'scan',
     status: 'processing',
     inputTextHash: inputHash,
+    inputChars: sanitized.length,
+    inputWords: wordCount,
     settings: { mode },
     createdAt: now,
     updatedAt: now,
@@ -65,19 +69,40 @@ export async function POST(req: NextRequest) {
   }), 'create scan job')
 
   try {
-    const detectionResult = await getDetectionGateway().detect(sanitized, {
+    const gateway = getDetectionGateway()
+    const cacheKey = hashScanInput(sanitized, gateway.providerId)
+    const cached = await getCachedScanResult(cacheKey)
+    const cacheHit = cached !== null
+
+    const detectionResult = cached ?? await gateway.detect(sanitized, {
       mode,
       domainHint: body.domain_hint || 'general',
     })
+    if (!cacheHit) await setCachedScanResult(cacheKey, detectionResult)
 
-    await tryPersist(() => db().collection('jobs').doc(jobId).update({ status: 'completed', completedAt: new Date(), updatedAt: new Date() }), 'complete scan job')
+    await tryPersist(() => db().collection('jobs').doc(jobId).update({
+      status: 'completed',
+      completedAt: new Date(),
+      updatedAt: new Date(),
+      provider: detectionResult.provider.id,
+      cacheHit,
+      result: {
+        classification: detectionResult.classification,
+        predicted_class_probability: detectionResult.predicted_class_probability,
+        confidence_category: detectionResult.confidence_category,
+      },
+    }), 'complete scan job')
 
     return NextResponse.json({
       job_id: jobId,
       status: 'completed',
       scan_id: scanId,
       result_url: null,
+      cache_hit: cacheHit,
       ...detectionResult,
+      // A cache hit didn't redo the detection work this request — report
+      // the (near-zero) lookup time, not the original call's duration.
+      ...(cacheHit ? { processing_duration_ms: 0 } : {}),
     })
   } catch (err) {
     await tryPersist(() => db().collection('jobs').doc(jobId).update({ status: 'failed', errorCode: 'INTERNAL_PIPELINE_ERROR', updatedAt: new Date() }), 'mark scan job failed')

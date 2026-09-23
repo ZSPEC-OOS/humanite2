@@ -165,6 +165,10 @@ export interface ScanAPIResponse extends DetectionResult {
   status: string
   scan_id: string | null
   result_url: string | null
+  // Set by /v1/scan when it served a cached result instead of making a new
+  // detection call (see src/lib/detection/dedupe.ts). Not tracked on the
+  // post-humanize auto-scan path, hence optional.
+  cache_hit?: boolean
 }
 
 export async function apiScan(

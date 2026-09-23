@@ -13,6 +13,12 @@ export class DetectionGateway {
     private readonly diagnosticsEnabled: boolean = process.env.LOCAL_DIAGNOSTICS_ENABLED !== 'false',
   ) {}
 
+  // Lets callers key a cache or telemetry record to the active backend
+  // without re-deriving the DETECTION_PROVIDER selection logic themselves.
+  get providerId(): string {
+    return this.provider.id
+  }
+
   async detect(text: string, options?: DetectionOptions): Promise<DetectionResult> {
     const started = performance.now()
     const result = await this.provider.detect(text, options)
