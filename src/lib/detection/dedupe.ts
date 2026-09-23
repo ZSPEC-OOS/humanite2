@@ -2,9 +2,9 @@ import { createHash } from 'crypto'
 import { db, tryPersist } from '@/lib/firestore'
 import type { DetectionResult } from './contracts'
 
-// Matches the retired proprietary scanner's own cache policy (24h,
-// services/scanner/src/config.py's cache_ttl_seconds) — scan results for
-// identical text are stable, and reusing them saves a real GPTZero request.
+// Matches the retired proprietary scanner's own cache policy (24h) — scan
+// results for identical text are stable, and reusing them saves a real
+// GPTZero request.
 const DEFAULT_CACHE_TTL_SECONDS = 86_400
 
 function cacheTtlSeconds(): number {
