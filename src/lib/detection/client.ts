@@ -13,6 +13,9 @@ interface ScannerServiceResponse {
   human_probability: number
   ai_probability: number
   uncertain_probability: number
+  ai_fraction?: number
+  coverage?: ClassifyResult['coverage']
+  segments?: ClassifyResult['segments']
   per_sentence_perplexity?: number[]
   top_features?: ClassifyResult['top_features']
   explanation?: ClassifyResult['explanation']
@@ -67,6 +70,9 @@ export async function classify(
     human_probability: data.human_probability,
     ai_probability: data.ai_probability,
     uncertain_probability: data.uncertain_probability,
+    ai_fraction: data.ai_fraction ?? data.ai_probability,
+    coverage: data.coverage ?? { analyzed_tokens: 0, total_tokens: 0, fraction: 0 },
+    segments: data.segments ?? [],
     per_sentence_perplexity: data.per_sentence_perplexity ?? [],
     top_features: data.top_features ?? [],
     explanation: data.explanation ?? { summary: '', detail: '' },
