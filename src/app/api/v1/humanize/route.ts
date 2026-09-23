@@ -11,6 +11,7 @@ import { humanizeChunk, ChunkResult } from '@/lib/humanizePipeline'
 import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
 import { buildOutput, tryClassifyOutput } from '@/lib/humanizeOutput'
 import { isAllowedProviderBaseUrl } from '@/lib/providerAllowlist'
+import { checkAndRecordUsage } from '@/lib/usageLimits'
 
 // Vercel clamps this to whatever the deployment's plan actually allows
 // (Hobby's ceiling is well under this) — raise it in the dashboard/CLI to
@@ -186,6 +187,19 @@ export async function POST(req: NextRequest) {
   }
 
   const prep = preprocess(text)
+
+  // Skipped entirely for a caller using their own generation key — this
+  // quota exists to protect this deployment's own paid OPENAI_API_KEY, not
+  // to restrict usage of a key that isn't this deployment's to pay for.
+  if (!body.api_config?.api_key) {
+    const usage = await checkAndRecordUsage(auth.claims.sub, auth.claims.tier, prep.word_count)
+    if (!usage.allowed) {
+      return NextResponse.json(
+        { error: { code: 'USAGE_LIMIT_EXCEEDED', message: usage.reason } },
+        { status: 429 },
+      )
+    }
+  }
 
   const jobId = randomUUID()
   const inputHash = createHash('sha256').update(text).digest('hex')
