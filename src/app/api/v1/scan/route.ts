@@ -3,10 +3,11 @@ import { randomUUID, createHash } from 'crypto'
 import { db, tryPersist } from '@/lib/firestore'
 import { requireAuth, isAuthFailure } from '@/lib/require-auth'
 import { preprocess } from '@/lib/preprocess'
-import { classify } from '@/lib/detection/client'
-import { DetectorError } from '@/lib/detection/contracts'
+import { getDetectionGateway } from '@/lib/detection/gateway'
+import { toLegacyClassifyResult } from '@/lib/detection/legacyAdapter'
+import { DetectionProviderError } from '@/lib/detection/contracts'
 
-// A single non-chunked classification call against the scanner service.
+// A single non-chunked detection call through DetectionGateway.
 export const maxDuration = 60
 
 const ABSOLUTE_MAX_CHARS = 300_000
@@ -67,7 +68,11 @@ export async function POST(req: NextRequest) {
   }), 'create scan job')
 
   try {
-    const result = await classify(sanitized, mode, body.domain_hint || 'general')
+    const detectionResult = await getDetectionGateway().detect(sanitized, {
+      mode,
+      domainHint: body.domain_hint || 'general',
+    })
+    const result = toLegacyClassifyResult(detectionResult, sanitized)
 
     await tryPersist(() => db().collection('jobs').doc(jobId).update({ status: 'completed', completedAt: new Date(), updatedAt: new Date() }), 'complete scan job')
 
@@ -95,8 +100,11 @@ export async function POST(req: NextRequest) {
     await tryPersist(() => db().collection('jobs').doc(jobId).update({ status: 'failed', errorCode: 'INTERNAL_PIPELINE_ERROR', updatedAt: new Date() }), 'mark scan job failed')
     console.error('Scan failed', { jobId, err })
 
-    if (err instanceof DetectorError) {
-      const status = err.code === 'INVALID_INPUT' ? 400 : 502
+    if (err instanceof DetectionProviderError) {
+      const status =
+        err.code === 'INVALID_INPUT' || err.code === 'TEXT_TOO_SHORT' || err.code === 'TEXT_TOO_LARGE' ? 400
+        : err.code === 'PROVIDER_RATE_LIMITED' ? 429
+        : 502
       return NextResponse.json({ error: { code: err.code, message: err.message } }, { status })
     }
     return NextResponse.json(

@@ -36,8 +36,8 @@ const EXCESS_NEWLINES_RE = /\n{3,}/g
 // content (a document about <script> tags, an email with an onclick=
 // example) is normalized, not rejected outright. The security boundary is
 // downstream: never render this text as unescaped HTML, and never
-// interpolate it into a privileged instruction (see lib/detection/client.ts,
-// which sends it to the scanner as a JSON field, not a prompt).
+// interpolate it into a privileged instruction (see lib/detection/gateway.ts,
+// which sends it to the detector as a JSON field, not a prompt).
 export function preprocess(text: string): PreprocessResult {
   let clean = text
   clean = clean.replace(ZERO_WIDTH_RE, '')
