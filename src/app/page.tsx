@@ -43,7 +43,7 @@ export default function LandingPage() {
         fill
         priority
         sizes="100vw"
-        className="hidden object-cover md:block"
+        className="hidden object-contain object-top md:block"
         aria-hidden
       />
       <Image

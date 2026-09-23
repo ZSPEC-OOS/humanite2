@@ -2,17 +2,19 @@
 
 /**
  * Temporary authoring tool — not a production feature. Lets you nudge the
- * position, size, and spacing of any element on the page, then copy the
- * resulting deltas out as JSON so they can be hard-coded into the real
- * Tailwind markup. Inert unless explicitly activated: append `?edit=1` to
- * any URL, or press Ctrl+Shift+E. Nothing renders or attaches listeners
- * until then.
+ * position, size, spacing, and centering of any element on the page, then
+ * copy the resulting deltas out as JSON so they can be hard-coded into the
+ * real Tailwind markup. A small ✥ button sits fixed at the bottom-left of
+ * every page as the way in — click it (or append `?edit=1` to the URL, or
+ * press Ctrl+Shift+E) to open the full toolbar. Everything else — overlays,
+ * listeners — stays dormant until then.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 
 interface EditState {
+  centered: boolean
   x: number
   y: number
   width: number | null
@@ -25,6 +27,7 @@ interface EditState {
 }
 
 const DEFAULT_EDIT: EditState = {
+  centered: false,
   x: 0,
   y: 0,
   width: null,
@@ -37,8 +40,18 @@ const DEFAULT_EDIT: EditState = {
 }
 
 function isDefault(edit: EditState): boolean {
-  const defaults = DEFAULT_EDIT as unknown as Record<string, number | null>
-  return Object.entries(edit).every(([k, v]) => v === defaults[k])
+  return (
+    edit.centered === DEFAULT_EDIT.centered &&
+    edit.x === DEFAULT_EDIT.x &&
+    edit.y === DEFAULT_EDIT.y &&
+    edit.width === DEFAULT_EDIT.width &&
+    edit.height === DEFAULT_EDIT.height &&
+    edit.marginTop === DEFAULT_EDIT.marginTop &&
+    edit.marginRight === DEFAULT_EDIT.marginRight &&
+    edit.marginBottom === DEFAULT_EDIT.marginBottom &&
+    edit.marginLeft === DEFAULT_EDIT.marginLeft &&
+    edit.fontSize === DEFAULT_EDIT.fontSize
+  )
 }
 
 function storageKey(pathname: string) {
@@ -84,7 +97,15 @@ function selectorFor(el: Element): string {
 }
 
 function applyEdit(el: HTMLElement, edit: EditState) {
-  el.style.transform = edit.x || edit.y ? `translate(${edit.x}px, ${edit.y}px)` : ''
+  if (edit.centered) {
+    el.style.position = 'relative'
+    el.style.left = '50%'
+    el.style.transform = `translate(calc(-50% + ${edit.x}px), ${edit.y}px)`
+  } else {
+    el.style.position = ''
+    el.style.left = ''
+    el.style.transform = edit.x || edit.y ? `translate(${edit.x}px, ${edit.y}px)` : ''
+  }
   el.style.width = edit.width != null ? `${edit.width}px` : ''
   el.style.height = edit.height != null ? `${edit.height}px` : ''
   el.style.marginTop = edit.marginTop ? `${edit.marginTop}px` : ''
@@ -288,7 +309,20 @@ export function PositionEditor() {
 
   const [lastExport, setLastExport] = useState<string | null>(null)
 
-  if (!active) return null
+  if (!active) {
+    return (
+      <button
+        data-editor-ui
+        onClick={() => setActive(true)}
+        title="Open position editor (Ctrl+Shift+E)"
+        className="fixed bottom-4 left-4 z-[10000] flex h-10 w-10 items-center justify-center
+                   rounded-full border border-gray-300 bg-white/90 text-gray-500 shadow-lg
+                   backdrop-blur-sm transition hover:text-gray-900"
+      >
+        ✥
+      </button>
+    )
+  }
 
   const selectedEdit = selected ? overrides[selected] ?? DEFAULT_EDIT : null
   const hasAnyOverrides = Object.keys(overrides).length > 0
@@ -354,7 +388,8 @@ export function PositionEditor() {
         {!selected && (
           <p className="text-xs leading-relaxed text-gray-500">
             Click any text or box on the page to select it. Drag the ✥ handle to move it, the
-            corner handle to resize it, or use the fields below once selected.
+            corner handle to resize it, or use the fields below once selected — including
+            centering it and nudging it up or down while centered.
           </p>
         )}
 
@@ -364,9 +399,22 @@ export function PositionEditor() {
               {labelFor(document.querySelector(selected) ?? document.body)}
             </p>
 
+            <label className="flex items-center gap-2 text-xs font-medium text-gray-600">
+              <input
+                type="checkbox"
+                checked={selectedEdit.centered}
+                onChange={e => setEditFor(selected, { centered: e.target.checked, x: 0 })}
+              />
+              Center horizontally
+            </label>
+
             <div className="grid grid-cols-2 gap-2">
-              <NumberField label="Offset X" value={selectedEdit.x} onChange={v => setEditFor(selected, { x: v ?? 0 })} />
-              <NumberField label="Offset Y" value={selectedEdit.y} onChange={v => setEditFor(selected, { y: v ?? 0 })} />
+              <NumberField
+                label={selectedEdit.centered ? 'Nudge X (from center)' : 'Offset X'}
+                value={selectedEdit.x}
+                onChange={v => setEditFor(selected, { x: v ?? 0 })}
+              />
+              <NumberField label="Offset Y (up/down)" value={selectedEdit.y} onChange={v => setEditFor(selected, { y: v ?? 0 })} />
               <NumberField
                 label="Width"
                 value={selectedEdit.width}
