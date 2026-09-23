@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { chunkRanges, chunkFactLockedText } from '../chunk'
+import { preprocess } from '../preprocess'
 import type { FactLock } from '../preprocess'
 
 function lock(text: string, char_start: number): FactLock {
@@ -103,13 +104,60 @@ describe('chunkFactLockedText', () => {
     expect(chunks[1]!.text.slice(secondLock.char_start, secondLock.char_end)).toBe('8%')
   })
 
-  it('drops a fact lock that straddles a chunk boundary rather than corrupting it', () => {
+  it('never bisects a fact lock, even when the natural split point falls inside it', () => {
     const text = 'a'.repeat(10) + '12%' + 'b'.repeat(10) // "12%" straddles offset 10-13
     const locks = [lock('12%', 10)]
-    // Force a split in the middle of the fact lock.
+    // Without lock-awareness this would hard-split right through "12%" at
+    // offset 11 (maxChars=11) — the boundary must move instead.
     const chunks = chunkFactLockedText(text, locks, 11)
     const allLocks = chunks.flatMap(c => c.factLocks)
-    expect(allLocks).toHaveLength(0)
+    expect(allLocks).toHaveLength(1)
+    // The lock's local offsets in whichever chunk it landed in must still
+    // resolve to its exact original text — not just "a lock survived".
+    const owner = chunks.find(c => c.factLocks.length > 0)!
+    const survivingLock = owner.factLocks[0]!
+    expect(owner.text.slice(survivingLock.char_start, survivingLock.char_end)).toBe('12%')
+  })
+
+  it('may exceed maxChars slightly rather than drop a straddling lock', () => {
+    const text = 'a'.repeat(10) + '12%' + 'b'.repeat(10)
+    const locks = [lock('12%', 10)]
+    const chunks = chunkFactLockedText(text, locks, 11)
+    // The chunk absorbing the lock is allowed to grow past maxChars=11 —
+    // the alternative (silently losing the fact) is worse.
+    expect(chunks.some(c => c.text.length > 11)).toBe(true)
+    expect(chunks.flatMap(c => c.factLocks)).toHaveLength(1)
+  })
+
+  it('a lock straddling several consecutive hard-split points in a row is still fully absorbed', () => {
+    const text = 'x'.repeat(5) + '1234567890' + 'y'.repeat(5) // a 10-char lock, tiny maxChars
+    const locks = [lock('1234567890', 5)]
+    const chunks = chunkFactLockedText(text, locks, 3) // would otherwise split every 3 chars
+    const allLocks = chunks.flatMap(c => c.factLocks)
+    expect(allLocks).toHaveLength(1)
+    const owner = chunks.find(c => c.factLocks.length > 0)!
+    const survivingLock = owner.factLocks[0]!
+    expect(owner.text.slice(survivingLock.char_start, survivingLock.char_end)).toBe('1234567890')
+  })
+
+  it('a citation like "et al. (2024)" is not bisected by the sentence-boundary splitter', () => {
+    // CITATION_RE matches "et al. (2024)" as one lock, but its own internal
+    // ". " looks exactly like a sentence boundary to chunkRanges — a real
+    // collision between two regexes in this codebase, not a hypothetical.
+    const before = 'Prior findings were limited. '.repeat(3)
+    const text = `${before}This replicates work by et al. (2024) in the field. ` + 'More text follows here. '.repeat(3)
+    const { sanitized_text, fact_locks } = preprocess(text)
+    const citationLock = fact_locks.find(l => l.lock_type === 'citation')
+    expect(citationLock).toBeDefined()
+
+    // maxChars chosen so a naive sentence split would land inside "et al. (2024)".
+    const splitPoint = sanitized_text.indexOf('et al.') + 'et al.'.length + 1
+    const chunks = chunkFactLockedText(sanitized_text, fact_locks, splitPoint)
+
+    const owner = chunks.find(c => c.factLocks.some(l => l.lock_type === 'citation'))
+    expect(owner).toBeDefined()
+    const survivingLock = owner!.factLocks.find(l => l.lock_type === 'citation')!
+    expect(owner!.text.slice(survivingLock.char_start, survivingLock.char_end)).toBe(citationLock!.text)
   })
 
   it('chunk texts together cover every content character exactly once', () => {

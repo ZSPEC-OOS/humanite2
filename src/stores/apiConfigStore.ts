@@ -1,33 +1,56 @@
 import { create } from 'zustand'
 import { useUserStore } from './userStore'
 
-export interface ApiConfig {
+// What the browser is allowed to hold: never a raw key, only whether one is
+// configured and a masked hint ("••••4F91") — the server is the only place
+// that ever sees (or stores) the real value. See ApiConfigModal.tsx for the
+// save flow this backs: a raw key typed there goes straight to the server
+// as a one-off call argument and is never assigned into this store's state.
+export interface ApiConfigMeta {
+  nickname: string
+  modelId: string
+  baseUrl: string
+  hasApiKey: boolean
+  apiKeyHint: string
+  hasGptzeroKey: boolean
+  gptzeroKeyHint: string
+}
+
+// The raw values a save actually sends — held only as a function argument
+// and request body, never stored anywhere on the client.
+export interface ModelConfigDraft {
   nickname: string
   modelId: string
   baseUrl: string
   apiKey: string
-  // The caller's own GPTZero key — independent of the generation-model
-  // fields above (spec §52 follow-up: settable without a custom model, and
-  // vice versa).
   gptzeroApiKey: string
 }
 
 interface ApiConfigState {
-  config: ApiConfig
-  setConfig: (patch: Partial<ApiConfig>) => void
-  clearConfig: () => void
+  config: ApiConfigMeta
   hasCustomConfig: () => boolean
   hasCustomGptzeroKey: () => boolean
-  // Pulls the last config saved from any device (via R2) and adopts it
-  // locally. Best-effort — silently no-ops if sync isn't configured/reachable
-  // or if nothing has ever been synced.
+  // Sends a draft to the server once; adopts whatever sanitized metadata
+  // comes back. An empty apiKey/gptzeroApiKey in the draft leaves that
+  // field's stored value untouched server-side (see the route) rather than
+  // clearing it — this lets a save that only changes the nickname, say, not
+  // wipe out an existing key.
+  saveModelConfig: (draft: ModelConfigDraft) => Promise<void>
+  clearConfig: () => Promise<void>
+  // Pulls this account's config metadata from the server. Best-effort —
+  // silently no-ops if the server/R2 isn't reachable or nothing's been
+  // saved yet.
   syncFromServer: () => Promise<void>
 }
 
-const STORAGE_KEY = 'humanite_api_config'
-const DEFAULTS: ApiConfig = { nickname: '', modelId: '', baseUrl: '', apiKey: '', gptzeroApiKey: '' }
+const STORAGE_KEY = 'humanite_api_config_meta'
+const DEFAULTS: ApiConfigMeta = {
+  nickname: '', modelId: '', baseUrl: '',
+  hasApiKey: false, apiKeyHint: '',
+  hasGptzeroKey: false, gptzeroKeyHint: '',
+}
 
-function load(): ApiConfig {
+function load(): ApiConfigMeta {
   if (typeof window === 'undefined') return DEFAULTS
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -38,15 +61,15 @@ function load(): ApiConfig {
   }
 }
 
-function save(config: ApiConfig) {
+function save(meta: ApiConfigMeta) {
   if (typeof window === 'undefined') return
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(config)) } catch { /* ignore */ }
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(meta)) } catch { /* ignore */ }
 }
 
 // Raw fetch rather than the shared apiFetch() helper (src/lib/api.ts) —
 // that module imports this store, so importing it back here would be
 // circular. Deliberately minimal: same auth header convention, no retries.
-async function syncFetch(method: 'GET' | 'PUT', body?: ApiConfig) {
+async function configFetch(method: 'GET' | 'PUT', body?: unknown) {
   const token = useUserStore.getState().accessToken
   const resp = await fetch('/api/v1/user/api-config', {
     method,
@@ -56,44 +79,45 @@ async function syncFetch(method: 'GET' | 'PUT', body?: ApiConfig) {
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
-  if (!resp.ok) throw new Error(`Sync failed: HTTP ${resp.status}`)
-  return resp.json()
+  if (!resp.ok) throw new Error(`Config request failed: HTTP ${resp.status}`)
+  return resp.json() as Promise<{ config: ApiConfigMeta }>
 }
 
 export const useApiConfigStore = create<ApiConfigState>((set, get) => ({
   config: load(),
 
-  setConfig: (patch) => {
-    const next = { ...get().config, ...patch }
-    save(next)
-    set({ config: next })
-    // Fire-and-forget — a device without R2 configured (or offline) still
-    // gets the instant local save above; this just adds cross-device sync
-    // on top when available.
-    syncFetch('PUT', next).catch(() => {})
-  },
-
-  clearConfig: () => {
-    if (typeof window !== 'undefined') localStorage.removeItem(STORAGE_KEY)
-    set({ config: DEFAULTS })
-    syncFetch('PUT', DEFAULTS).catch(() => {})
-  },
-
   hasCustomConfig: () => {
-    const { apiKey, modelId } = get().config
-    return !!(apiKey.trim() && modelId.trim())
+    const { hasApiKey, modelId } = get().config
+    return hasApiKey && !!modelId.trim()
   },
 
-  hasCustomGptzeroKey: () => !!get().config.gptzeroApiKey.trim(),
+  hasCustomGptzeroKey: () => get().config.hasGptzeroKey,
+
+  saveModelConfig: async (draft) => {
+    const { config } = await configFetch('PUT', {
+      nickname: draft.nickname,
+      modelId: draft.modelId,
+      baseUrl: draft.baseUrl,
+      // Omitted (not just empty-string) when blank, so the server's
+      // "leave existing value alone" branch actually triggers.
+      ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {}),
+      ...(draft.gptzeroApiKey.trim() ? { gptzeroApiKey: draft.gptzeroApiKey.trim() } : {}),
+    })
+    save(config)
+    set({ config })
+  },
+
+  clearConfig: async () => {
+    const { config } = await configFetch('PUT', { clear: true })
+    save(config)
+    set({ config })
+  },
 
   syncFromServer: async () => {
     try {
-      const { config: synced } = await syncFetch('GET') as { config: ApiConfig | null }
-      if (synced && (synced.apiKey.trim() || synced.modelId.trim() || synced.gptzeroApiKey?.trim())) {
-        const next = { ...DEFAULTS, ...synced }
-        save(next)
-        set({ config: next })
-      }
+      const { config } = await configFetch('GET')
+      save(config)
+      set({ config })
     } catch {
       // best-effort — keep whatever's local
     }

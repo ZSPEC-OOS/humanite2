@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { getDetectionGateway, resetDetectionGatewayForTests } from '../gateway'
 
 const ORIGINAL_ENV = { ...process.env }
@@ -8,6 +8,7 @@ function resetEnv() {
     if (!(key in ORIGINAL_ENV)) delete process.env[key]
   }
   Object.assign(process.env, ORIGINAL_ENV)
+  vi.unstubAllEnvs()
   resetDetectionGatewayForTests()
 }
 
@@ -60,6 +61,35 @@ describe('DetectionGateway', () => {
     expect(result.diagnostics).toBeNull()
   })
 
+  it('adds a short-text reliability warning under the word threshold', async () => {
+    delete process.env.DETECTION_PROVIDER
+    const result = await getDetectionGateway().detect('This was a great day.') // 5 words
+    expect(result.warnings.some(w => /short/i.test(w) && /caution/i.test(w))).toBe(true)
+  })
+
+  it('does not add the short-text warning once a passage is long enough', async () => {
+    delete process.env.DETECTION_PROVIDER
+    const longText = 'This is a reasonably long sentence about nothing in particular. '.repeat(6) // 60+ words
+    const result = await getDetectionGateway().detect(longText)
+    expect(result.warnings.some(w => /short/i.test(w))).toBe(false)
+  })
+
+  it('the short-text warning is additive — it does not replace an existing provider warning', async () => {
+    process.env.MOCK_DETECTION_FIXTURE = 'low-confidence'
+    delete process.env.DETECTION_PROVIDER
+    const result = await getDetectionGateway().detect('Too short.')
+    expect(result.warnings.some(w => /low-confidence/i.test(w))).toBe(true)
+    expect(result.warnings.some(w => /short/i.test(w) && /caution/i.test(w))).toBe(true)
+  })
+
+  it('still adds the short-text warning even when diagnostics are disabled — it does not depend on them', async () => {
+    delete process.env.DETECTION_PROVIDER
+    process.env.LOCAL_DIAGNOSTICS_ENABLED = 'false'
+    const result = await getDetectionGateway().detect('This was a great day.')
+    expect(result.diagnostics).toBeNull()
+    expect(result.warnings.some(w => /short/i.test(w))).toBe(true)
+  })
+
   it('memoizes the gateway across calls until reset', async () => {
     delete process.env.DETECTION_PROVIDER
     const first = getDetectionGateway()
@@ -81,5 +111,60 @@ describe('DetectionGateway', () => {
     expect(withoutOverride.providerId).toBe('mock')
     expect(withOverride.providerId).toBe('gptzero')
     expect(stillWithoutOverride).toBe(withoutOverride)
+  })
+})
+
+describe('DetectionGateway — production fails closed on a misconfigured mock fallback', () => {
+  afterEach(resetEnv)
+
+  it('refuses to build the mock provider in production without an explicit opt-out', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    delete process.env.DETECTION_PROVIDER
+    delete process.env.ALLOW_MOCK_DETECTION
+    expect(() => getDetectionGateway()).toThrow(/not configured for production/i)
+  })
+
+  it('still refuses when DETECTION_PROVIDER is set to something other than "gptzero"', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    process.env.DETECTION_PROVIDER = 'mock'
+    delete process.env.ALLOW_MOCK_DETECTION
+    expect(() => getDetectionGateway()).toThrow(/not configured for production/i)
+  })
+
+  it('allows the mock provider in production when ALLOW_MOCK_DETECTION=true', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    delete process.env.DETECTION_PROVIDER
+    process.env.ALLOW_MOCK_DETECTION = 'true'
+    expect(getDetectionGateway().providerId).toBe('mock')
+  })
+
+  it('still selects the real provider in production when DETECTION_PROVIDER=gptzero', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    process.env.DETECTION_PROVIDER = 'gptzero'
+    expect(getDetectionGateway().providerId).toBe('gptzero')
+  })
+
+  it('a caller-supplied apiKeyOverride bypasses the production guard entirely', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    delete process.env.DETECTION_PROVIDER
+    delete process.env.ALLOW_MOCK_DETECTION
+    expect(getDetectionGateway('user-supplied-key').providerId).toBe('gptzero')
+  })
+
+  it('does not affect non-production environments (e.g. test/dev)', () => {
+    vi.stubEnv('NODE_ENV', 'test')
+    delete process.env.DETECTION_PROVIDER
+    delete process.env.ALLOW_MOCK_DETECTION
+    expect(getDetectionGateway().providerId).toBe('mock')
+  })
+
+  it('the failed build never poisons the singleton — a later valid config still works', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    delete process.env.DETECTION_PROVIDER
+    delete process.env.ALLOW_MOCK_DETECTION
+    expect(() => getDetectionGateway()).toThrow()
+
+    process.env.DETECTION_PROVIDER = 'gptzero'
+    expect(getDetectionGateway().providerId).toBe('gptzero')
   })
 })

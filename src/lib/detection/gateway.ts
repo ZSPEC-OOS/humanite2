@@ -1,12 +1,21 @@
-import { DetectionOptions, DetectionResult } from './contracts'
+import { DetectionOptions, DetectionProviderError, DetectionResult } from './contracts'
 import { calculateLocalDiagnostics } from './diagnostics'
 import { DetectionProvider } from './providers/provider'
 import { GPTZeroProvider } from './providers/gptzero'
 import { MockDetectionProvider, MockFixtureName } from './providers/mock'
 
+// Below this word count, a detector's classification is generally less
+// reliable — not a hard cutoff (still worth showing a result), but worth
+// flagging so a one-sentence scan doesn't display with the same apparent
+// confidence as a full-paragraph one.
+const RELIABLE_MIN_WORDS = 50
+
 // Every production detection request flows through this — it's the one
-// place that adds timing and local diagnostics on top of whatever the
-// provider returns, so providers themselves stay simple.
+// place that adds timing, local diagnostics, and a short-text reliability
+// warning on top of whatever the provider returns, so providers themselves
+// stay simple and both call sites (manual /v1/scan and the automatic
+// post-humanize scan) get this consistently rather than each needing its
+// own copy of the threshold.
 export class DetectionGateway {
   constructor(
     private readonly provider: DetectionProvider,
@@ -23,9 +32,14 @@ export class DetectionGateway {
     const started = performance.now()
     const result = await this.provider.detect(text, options)
     const diagnostics = this.diagnosticsEnabled ? calculateLocalDiagnostics(text) : null
+    const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0
+    const warnings = wordCount < RELIABLE_MIN_WORDS
+      ? [...result.warnings, `This text is short (${wordCount} words) — detection accuracy is generally lower on short passages. Treat this result with extra caution.`]
+      : result.warnings
     return {
       ...result,
       diagnostics,
+      warnings,
       processing_duration_ms: Math.round(performance.now() - started),
     }
   }
@@ -50,9 +64,21 @@ function buildProvider(apiKeyOverride?: string): DetectionProvider {
   if (process.env.DETECTION_PROVIDER === 'gptzero') {
     return new GPTZeroProvider()
   }
-  // Default: mock. Production deployments must set DETECTION_PROVIDER=gptzero
-  // explicitly — an unset var failing toward obviously-fake results is safer
-  // than silently defaulting to a live, billable API call.
+
+  // A misconfigured production deployment must never silently serve
+  // fabricated detection results — fail loudly instead of falling back to
+  // mock. ALLOW_MOCK_DETECTION=true is the explicit opt-out, for a
+  // staging/demo instance intentionally running in production mode without
+  // a live key.
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_MOCK_DETECTION !== 'true') {
+    throw new DetectionProviderError(
+      'PROVIDER_UNAVAILABLE',
+      'AI detection is not configured for production — DETECTION_PROVIDER must be "gptzero". ' +
+        'Set ALLOW_MOCK_DETECTION=true to intentionally run the mock provider instead.',
+    )
+  }
+
+  // Default: mock. Local dev and CI never spend a real GPTZero request.
   const fixture = process.env.MOCK_DETECTION_FIXTURE ?? 'human'
   return new MockDetectionProvider(isMockFixtureName(fixture) ? fixture : 'human')
 }

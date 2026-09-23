@@ -4,20 +4,26 @@ import { db, tryPersist } from '@/lib/firestore'
 import { requireAuth, isAuthFailure } from '@/lib/require-auth'
 import { preprocess } from '@/lib/preprocess'
 import { getDetectionGateway } from '@/lib/detection/gateway'
-import { getCachedScanResult, hashScanInput, setCachedScanResult } from '@/lib/detection/dedupe'
+import { detectWithCache } from '@/lib/detection/dedupe'
 import { DetectionProviderError } from '@/lib/detection/contracts'
 import { recordScanTelemetry } from '@/lib/observability/scanTelemetry'
+import { checkAndRecordUsage } from '@/lib/usageLimits'
+import { getUserApiConfig } from '@/lib/userApiConfig'
 
 // A single non-chunked detection call through DetectionGateway.
 export const maxDuration = 60
 
 const ABSOLUTE_MAX_CHARS = 300_000
+// Rules out a single short sentence outright — a harder floor than the
+// reliability warning in DetectionGateway.detect(), which still returns a
+// result (with a caveat) for anything under its own, higher word threshold.
+const ABSOLUTE_MIN_CHARS = 100
 
 export async function POST(req: NextRequest) {
   const auth = await requireAuth(req)
   if (isAuthFailure(auth)) return auth
 
-  let body: { text?: string; mode?: string; domain_hint?: string; api_config?: { gptzero_api_key?: string } }
+  let body: { text?: string; mode?: string; domain_hint?: string }
   try {
     body = await req.json()
   } catch {
@@ -30,9 +36,14 @@ export async function POST(req: NextRequest) {
   const text = (body.text ?? '').trim()
   const mode = body.mode === 'quick' ? 'quick' : 'standard'
 
-  if (text.length < 20) {
+  if (text.length < ABSOLUTE_MIN_CHARS) {
     return NextResponse.json(
-      { error: { code: 'VALIDATION_MIN_LENGTH', message: 'Text must be at least 20 characters.' } },
+      {
+        error: {
+          code: 'VALIDATION_MIN_LENGTH',
+          message: `Text must be at least ${ABSOLUTE_MIN_CHARS} characters — AI detection isn't reliable on anything shorter.`,
+        },
+      },
       { status: 400 },
     )
   }
@@ -55,6 +66,23 @@ export async function POST(req: NextRequest) {
   const now = new Date()
   const wordCount = sanitized.split(/\s+/).filter(Boolean).length
 
+  // The caller's own saved GPTZero key, if any — looked up server-side by
+  // their authenticated identity rather than trusted from the request body.
+  const userConfig = await getUserApiConfig(auth.claims.sub)
+  const userGptzeroKey = userConfig?.gptzeroApiKey?.trim() || undefined
+
+  // Skipped entirely for a caller using their own GPTZero key — see the
+  // identical note in humanize/route.ts.
+  if (!userGptzeroKey) {
+    const usage = await checkAndRecordUsage(auth.claims.sub, auth.claims.tier, wordCount)
+    if (!usage.allowed) {
+      return NextResponse.json(
+        { error: { code: 'USAGE_LIMIT_EXCEEDED', message: usage.reason } },
+        { status: 429 },
+      )
+    }
+  }
+
   await tryPersist(() => db().collection('jobs').doc(jobId).set({
     userId: auth.claims.sub,
     jobType: 'scan',
@@ -72,21 +100,13 @@ export async function POST(req: NextRequest) {
   recordScanTelemetry({ event: 'scan_requested', trigger: 'manual', words: wordCount, chars: sanitized.length })
 
   try {
-    // A caller-supplied GPTZero key gets its own request, never the shared
-    // dedupe cache below — that cache is keyed by provider id + text only,
-    // so serving a cached result would mean returning another account's
-    // (or the server's own) GPTZero call in place of the user's own.
-    const userGptzeroKey = body.api_config?.gptzero_api_key?.trim() || undefined
     const gateway = getDetectionGateway(userGptzeroKey)
-    const cacheKey = hashScanInput(sanitized, gateway.providerId)
-    const cached = userGptzeroKey ? null : await getCachedScanResult(cacheKey)
-    const cacheHit = cached !== null
-
-    const detectionResult = cached ?? await gateway.detect(sanitized, {
-      mode,
-      domainHint: body.domain_hint || 'general',
-    })
-    if (!cacheHit && !userGptzeroKey) await setCachedScanResult(cacheKey, detectionResult)
+    const { result: detectionResult, cacheHit } = await detectWithCache(
+      gateway,
+      sanitized,
+      { mode, domainHint: body.domain_hint || 'general' },
+      !!userGptzeroKey,
+    )
 
     await tryPersist(() => db().collection('jobs').doc(jobId).update({
       status: 'completed',

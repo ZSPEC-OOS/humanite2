@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 import { db, tryPersist } from '@/lib/firestore'
-import type { DetectionResult } from './contracts'
+import type { DetectionGateway } from './gateway'
+import type { DetectionOptions, DetectionResult } from './contracts'
 
 // Matches the retired proprietary scanner's own cache policy (24h) — scan
 // results for identical text are stable, and reusing them saves a real
@@ -45,4 +46,27 @@ export async function setCachedScanResult(cacheKey: string, result: DetectionRes
     () => db().collection('scanCache').doc(cacheKey).set({ result, cachedAt: Date.now() } satisfies CacheRecord),
     'cache scan result',
   )
+}
+
+// The one place that decides whether a detection call reuses a cached
+// result — shared by the manual /v1/scan route and the automatic
+// post-humanize scan so both go through identical reuse logic instead of
+// two copies that could quietly drift apart. `bypassCache` is true for a
+// caller's own GPTZero key: this cache is shared globally by provider id +
+// text alone, so serving a cached hit would mean returning another
+// account's (or the server's) call in place of the user's own live one.
+export async function detectWithCache(
+  gateway: DetectionGateway,
+  text: string,
+  options: DetectionOptions | undefined,
+  bypassCache: boolean,
+): Promise<{ result: DetectionResult; cacheHit: boolean }> {
+  const cacheKey = hashScanInput(text, gateway.providerId)
+  const cached = bypassCache ? null : await getCachedScanResult(cacheKey)
+  const cacheHit = cached !== null
+
+  const result = cached ?? await gateway.detect(text, options)
+  if (!cacheHit && !bypassCache) await setCachedScanResult(cacheKey, result)
+
+  return { result, cacheHit }
 }

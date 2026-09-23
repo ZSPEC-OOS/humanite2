@@ -1,6 +1,8 @@
 import { generateWatermark } from '@/lib/watermark'
 import { aggregateChunkResults, ChunkResult } from '@/lib/humanizePipeline'
 import { getDetectionGateway } from '@/lib/detection/gateway'
+import { detectWithCache } from '@/lib/detection/dedupe'
+import { preprocess } from '@/lib/preprocess'
 import { DetectionResult } from '@/lib/detection/contracts'
 import { recordScanTelemetry } from '@/lib/observability/scanTelemetry'
 
@@ -14,7 +16,7 @@ export function buildOutput(
   return {
     text: postText,
     quality_scores: {
-      bertscore_f1: agg.bertscore_f1,
+      semantic_similarity: agg.semantic_similarity,
       nli_entailment: agg.nli_entailment,
       entity_overlap: agg.entity_overlap,
       passed: agg.passed,
@@ -49,17 +51,26 @@ export async function tryClassifyOutput(text: string, gptzeroApiKey?: string): P
   recordScanTelemetry({ event: 'scan_requested', trigger: 'auto', words, chars: text.length })
 
   try {
-    const result = await getDetectionGateway(gptzeroApiKey).detect(text, { mode: 'standard' })
+    // Sanitized the same way /v1/scan sanitizes its input, so the two
+    // routes compute the identical cache key for the same underlying text
+    // — a manual re-check of freshly humanized text is a cache hit instead
+    // of a second paid GPTZero call.
+    const sanitized = preprocess(text).sanitized_text
+    const gateway = getDetectionGateway(gptzeroApiKey)
+    const { result, cacheHit } = await detectWithCache(gateway, sanitized, { mode: 'standard' }, !!gptzeroApiKey)
+
     recordScanTelemetry({
       event: 'scan_completed',
       trigger: 'auto',
       provider: result.provider.id,
       classification: result.classification,
       confidence_category: result.confidence_category,
-      cache_hit: false, // the auto-scan path isn't wired to the dedupe cache (see dedupe.ts)
-      duration_ms: result.processing_duration_ms,
+      cache_hit: cacheHit,
+      duration_ms: cacheHit ? 0 : result.processing_duration_ms,
     })
-    return result
+    // A cache hit didn't redo the detection work this call — report the
+    // (near-zero) lookup time, not the original call's duration.
+    return cacheHit ? { ...result, processing_duration_ms: 0 } : result
   } catch (err) {
     const code = err instanceof Error && 'code' in err ? String((err as { code: unknown }).code) : 'UNKNOWN_ERROR'
     recordScanTelemetry({ event: 'scan_failed', trigger: 'auto', error_code: code })

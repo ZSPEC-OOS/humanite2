@@ -1,5 +1,5 @@
+import { jwtDecode } from 'jwt-decode'
 import { useUserStore } from '@/stores/userStore'
-import { useApiConfigStore } from '@/stores/apiConfigStore'
 import type { DetectionResult, DetectionSegment, LocalDiagnostics } from '@/lib/detection/contracts'
 import type { PreservationByType } from '@/lib/qualityGates'
 
@@ -20,6 +20,8 @@ export class APIError extends Error {
   }
 }
 
+const REFRESH_TOKEN_KEY = '__rt'
+
 export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
@@ -35,7 +37,19 @@ export async function apiFetch<T>(
   }
 
   const url = path.startsWith('http') ? path : `${API_BASE}/api${path}`
-  const resp = await fetch(url, { ...options, headers })
+  let resp = await fetch(url, { ...options, headers })
+
+  // Access tokens are short-lived (15 min) — a 401 mid-session most likely
+  // means it just expired, not that the user was never logged in. Retry
+  // exactly once after a silent refresh so routine expiry doesn't interrupt
+  // whatever the user was doing. skipAuth calls (login/register/refresh
+  // itself) never enter this branch, so there's no retry loop.
+  if (resp.status === 401 && !skipAuth && token) {
+    const refreshedToken = await restoreSession()
+    if (refreshedToken) {
+      resp = await fetch(url, { ...options, headers: { ...headers, Authorization: `Bearer ${refreshedToken}` } })
+    }
+  }
 
   if (!resp.ok) {
     let errorBody: { error?: { code?: string; message?: string }; detail?: { code?: string; message?: string } } = {}
@@ -63,20 +77,62 @@ export interface TokenResponse {
   expires_in: number
 }
 
+interface JWTClaims {
+  sub: string
+  tier: string
+  region: string
+  scopes: string[]
+}
+
+function adoptSession(data: TokenResponse) {
+  const claims = jwtDecode<JWTClaims>(data.access_token)
+  useUserStore.getState().setAuth(data.access_token, claims.sub, claims.tier, claims.region, claims.scopes)
+  sessionStorage.setItem(REFRESH_TOKEN_KEY, data.refresh_token)
+}
+
+// Redeems this tab's stored refresh token for a new access token, silently —
+// used both by apiFetch's own 401-retry above and by a page on mount to
+// restore a session an in-memory-only access token doesn't survive a reload.
+// Returns the new access token, or null if there was nothing to redeem or
+// the refresh token itself was invalid/expired/already used (in which case
+// the stale session is cleared rather than left half-set).
+export async function restoreSession(): Promise<string | null> {
+  if (typeof window === 'undefined') return null
+  const refreshToken = sessionStorage.getItem(REFRESH_TOKEN_KEY)
+  if (!refreshToken) return null
+  try {
+    const data = await apiFetch<TokenResponse>(
+      '/v1/auth/refresh',
+      { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) },
+      true,
+    )
+    adoptSession(data)
+    return data.access_token
+  } catch {
+    useUserStore.getState().clearAuth()
+    sessionStorage.removeItem(REFRESH_TOKEN_KEY)
+    return null
+  }
+}
+
 export async function authRegister(email: string, password: string): Promise<TokenResponse> {
-  return apiFetch<TokenResponse>(
+  const data = await apiFetch<TokenResponse>(
     '/v1/auth/register',
     { method: 'POST', body: JSON.stringify({ email, password }) },
     true,
   )
+  adoptSession(data)
+  return data
 }
 
 export async function authLogin(email: string, password: string): Promise<TokenResponse> {
-  return apiFetch<TokenResponse>(
+  const data = await apiFetch<TokenResponse>(
     '/v1/auth/login',
     { method: 'POST', body: JSON.stringify({ email, password }) },
     true,
   )
+  adoptSession(data)
+  return data
 }
 
 // ── Humanize ──────────────────────────────────────────────────────────────────
@@ -91,9 +147,11 @@ export interface HumanizeSettings {
 export interface HumanizeOutput {
   text: string
   quality_scores: {
-    // null only if the gates couldn't run at all against a custom model
-    // endpoint (see `warning`) — otherwise these are real, measured scores.
-    bertscore_f1: number | null
+    // semantic_similarity/nli_entailment are null only when that specific
+    // gate couldn't run (e.g. a custom model endpoint without embedding
+    // support) — entity_overlap has no external dependency and is never
+    // null. See `warning` for the unscored-entirely case.
+    semantic_similarity: number | null
     nli_entailment: number | null
     entity_overlap: number | null
     passed: boolean | null
@@ -145,22 +203,12 @@ export async function apiHumanize(
   text: string,
   settings: HumanizeSettings,
 ): Promise<HumanizeAPIResponse> {
-  const { config, hasCustomConfig, hasCustomGptzeroKey } = useApiConfigStore.getState()
-  const body: Record<string, unknown> = { text, settings }
-  const apiConfig: Record<string, string> = {}
-  if (hasCustomConfig()) {
-    apiConfig.api_key = config.apiKey
-    apiConfig.model_id = config.modelId
-    if (config.baseUrl.trim()) apiConfig.base_url = config.baseUrl.trim()
-  }
-  // Independent of the generation-model fields above — a user may set only
-  // this, only those, both, or neither.
-  if (hasCustomGptzeroKey()) apiConfig.gptzero_api_key = config.gptzeroApiKey.trim()
-  if (Object.keys(apiConfig).length > 0) body.api_config = apiConfig
-
+  // No api_config here — the server looks up this authenticated user's own
+  // saved model config (if any) itself. The browser doesn't hold the raw
+  // key to send even if it wanted to; see apiConfigStore.ts.
   return apiFetch<HumanizeAPIResponse>('/v1/humanize', {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify({ text, settings }),
   })
 }
 
@@ -181,17 +229,12 @@ export async function apiScan(
   text: string,
   mode: 'quick' | 'standard' = 'standard',
 ): Promise<ScanAPIResponse> {
-  // Detection runs on an independent scanner service, not the user's
-  // configured generation model — the only api_config field ever sent here
-  // is the caller's own GPTZero key, and only when they've set one.
-  const { config, hasCustomGptzeroKey } = useApiConfigStore.getState()
-  const body: Record<string, unknown> = { text, mode }
-  if (hasCustomGptzeroKey()) {
-    body.api_config = { gptzero_api_key: config.gptzeroApiKey.trim() }
-  }
+  // No api_config here either — the server looks up this authenticated
+  // user's own saved GPTZero key (if any) itself, the same way it does for
+  // the generation model above.
   return apiFetch<ScanAPIResponse>('/v1/scan', {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify({ text, mode }),
   })
 }
 

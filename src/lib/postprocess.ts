@@ -2,15 +2,14 @@ import type { FactLock } from './preprocess'
 
 type SubstitutionRule = [RegExp, string]
 
+// Deliberately limited to removing AI-typical filler that carries no
+// content of its own — never a word-for-word synonym swap. A blind regex
+// has no way to tell a defined technical term from generic filler (e.g.
+// "robust" has a specific meaning in an engineering spec that "strong"
+// doesn't carry), so that class of substitution is left to the model,
+// which can see the whole sentence and use judgment — see the STYLE
+// GUIDANCE section of buildUserPrompt in humanizePipeline.ts.
 const RULES: SubstitutionRule[] = [
-  [/\butilize[sd]?\b/gi, 'use'],
-  [/\butilizing\b/gi, 'using'],
-  [/\bdelve[sd]?\b/gi, 'explore'],
-  [/\bdelving\b/gi, 'exploring'],
-  [/\brobust\b/gi, 'strong'],
-  [/\bmultifaceted\b/gi, 'complex'],
-  [/\bfacilitate[sd]?\b/gi, 'enable'],
-  [/\bfacilitating\b/gi, 'enabling'],
   [/^Furthermore,\s+/gim, ''],
   [/^Moreover,\s+/gim, ''],
   [/^Additionally,\s+/gim, ''],

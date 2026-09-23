@@ -99,16 +99,40 @@ export interface TextChunk {
   factLocks: FactLock[]
 }
 
-// Fact locks that straddle a chunk boundary (rare — locks are short spans;
-// this only happens if a split lands inside one) are dropped from both
-// sides rather than partially enforced. Chunking on paragraph/sentence
-// boundaries makes this edge case unlikely in practice.
+// Merges adjacent ranges whenever a fact lock spans the boundary between
+// them — a chunk boundary must never land inside a locked interval, or the
+// lock silently stops being enforced on either side. Locks are short
+// relative to maxChars (the longest, a quotation, tops out at 300 chars),
+// so absorbing one can grow a chunk past maxChars by at most a lock's own
+// length — an acceptable tradeoff for never dropping a fact from
+// validation. The loop re-checks the (possibly already-extended) previous
+// range against each new boundary, so a lock straddling several original
+// split points in a row is still fully absorbed, not just the first one.
+function mergeRangesAcrossLocks(ranges: Range[], factLocks: FactLock[]): Range[] {
+  if (ranges.length <= 1 || factLocks.length === 0) return ranges
+
+  const merged: Range[] = [{ ...ranges[0]! }]
+  for (let i = 1; i < ranges.length; i++) {
+    const next = ranges[i]!
+    const prev = merged[merged.length - 1]!
+    const boundary = prev.end
+    const straddling = factLocks.some(l => l.char_start < boundary && l.char_end > boundary)
+    if (straddling) {
+      prev.end = Math.max(prev.end, next.end)
+    } else {
+      merged.push({ ...next })
+    }
+  }
+  return merged
+}
+
 export function chunkFactLockedText(
   sanitizedText: string,
   factLocks: FactLock[],
   maxChars: number,
 ): TextChunk[] {
-  return chunkRanges(sanitizedText, maxChars).map(({ start, end }) => ({
+  const ranges = mergeRangesAcrossLocks(chunkRanges(sanitizedText, maxChars), factLocks)
+  return ranges.map(({ start, end }) => ({
     text: sanitizedText.slice(start, end),
     factLocks: factLocks
       .filter(l => l.char_start >= start && l.char_end <= end)

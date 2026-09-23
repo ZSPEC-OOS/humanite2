@@ -1,6 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useUserStore }     from '@/stores/userStore'
 import { useHumanizeStore } from '@/stores/humanizeStore'
 import { useScanStore }     from '@/stores/scanStore'
@@ -15,6 +16,7 @@ import { ApiConfigModal }   from '@/components/settings/ApiConfigModal'
 import { PreservationReport } from '@/components/humanizer/PreservationReport'
 import { ThemeToggle }      from '@/components/theme/ThemeToggle'
 import { useTheme }         from '@/components/theme/ThemeProvider'
+import { restoreSession }   from '@/lib/api'
 import { ASYNC_MAX_CHARS, SYNC_MAX_CHARS } from '@/lib/limits'
 
 const MAX_CHARS = ASYNC_MAX_CHARS
@@ -44,7 +46,7 @@ function CircularScore({ pct, isDark }: { pct: number; isDark: boolean }) {
 type MobileTab = 'input' | 'output' | 'scan'
 
 export default function Dashboard() {
-  const { tier }                                                       = useUserStore()
+  const { tier, isAuthenticated, clearAuth }                           = useUserStore()
   const { humanize, status: hStatus, reset: resetH, response, error, progressMessage } = useHumanizeStore()
   const { scan, status: sStatus, reset: resetS, response: scanResp }  = useScanStore()
   const { text, setText, clearText }                                   = useEditorStore()
@@ -56,8 +58,44 @@ export default function Dashboard() {
   const [copied, setCopied]           = useState(false)
   const [apiConfigOpen, setApiConfigOpen] = useState(false)
   const [preservationOpen, setPreservationOpen] = useState(false)
+  const [authReady, setAuthReady]     = useState(false)
+  const router = useRouter()
 
   useEffect(() => { if (hStatus === 'done') setMobileTab('output') }, [hStatus])
+
+  // An access token only lives in memory (userStore.ts), so it doesn't
+  // survive a page reload — try to silently redeem this tab's refresh token
+  // before deciding there's no session. Only redirect once that's settled,
+  // so a reload doesn't bounce a still-logged-in user to /auth/login.
+  useEffect(() => {
+    let cancelled = false
+    async function checkAuth() {
+      if (!isAuthenticated()) await restoreSession()
+      if (cancelled) return
+      if (!useUserStore.getState().isAuthenticated()) {
+        router.replace('/auth/login')
+        return
+      }
+      setAuthReady(true)
+    }
+    checkAuth()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleSignOut = () => {
+    clearAuth()
+    if (typeof window !== 'undefined') sessionStorage.removeItem('__rt')
+    router.push('/auth/login')
+  }
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
+        <Spinner className="w-8 h-8 border-gray-200 border-t-gray-700 dark:border-gray-700 dark:border-t-gray-300" />
+      </div>
+    )
+  }
 
   const output     = response?.output
   const outputText = output?.text ?? ''
@@ -74,10 +112,11 @@ export default function Dashboard() {
     })
   }
 
-  // bertscore_f1 is null until the semantic-fidelity gate (Phase 1) is wired in —
-  // never fabricate a score in its place.
-  const humanScore = output && output.quality_scores.bertscore_f1 != null
-    ? Math.round(output.quality_scores.bertscore_f1 * 100)
+  // semantic_similarity is null when that specific gate couldn't run (e.g. a
+  // custom model endpoint without embedding support) — never fabricate a
+  // score in its place.
+  const humanScore = output && output.quality_scores.semantic_similarity != null
+    ? Math.round(output.quality_scores.semantic_similarity * 100)
     : null
   const scoreLabel = humanScore == null ? 'Not yet scored'
     : humanScore >= 90 ? 'Excellent' : humanScore >= 75 ? 'Good' : 'Fair'
@@ -232,6 +271,8 @@ export default function Dashboard() {
             </span>
             <button onClick={handleClear}
               className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300 transition-colors">Clear</button>
+            <button onClick={handleSignOut}
+              className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300 transition-colors">Sign out</button>
           </div>
         </header>
         <div className="flex flex-col flex-1 min-h-0 p-5 gap-4">
@@ -482,6 +523,14 @@ export default function Dashboard() {
                        py-2.5 px-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
           >
             Clear all
+          </button>
+          <button
+            onClick={handleSignOut}
+            className="w-full text-left text-sm text-gray-500 hover:text-gray-800
+                       dark:text-gray-400 dark:hover:text-gray-100
+                       py-2.5 px-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
+          >
+            Sign out
           </button>
         </div>
       </div>

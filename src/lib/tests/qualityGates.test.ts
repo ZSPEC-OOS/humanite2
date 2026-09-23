@@ -91,6 +91,48 @@ describe('checkEntityOverlap — by_type breakdown', () => {
   })
 })
 
+// ── Gate 1: occurrence-aware checking for a repeated fact value ─────────────
+// output.includes(text) alone can't distinguish "all N occurrences
+// survived" from "only one did" — it only answers "does this value appear
+// anywhere". These lock the fix to actual occurrence counting.
+
+describe('checkEntityOverlap — repeated identical fact values', () => {
+  it('reports all copies preserved when every occurrence survives', () => {
+    const locks = [lock('2024', 'date'), lock('2024', 'date'), lock('2024', 'date')]
+    const { score, missing, by_type } = checkEntityOverlap(
+      'It happened in 2024, was reviewed again in 2024, and published in 2024.',
+      locks,
+    )
+    expect(score).toBe(1)
+    expect(missing).toEqual([])
+    expect(by_type.date).toEqual({ total: 3, preserved: 3, missing: [] })
+  })
+
+  it('catches dropped duplicates instead of letting one surviving copy vouch for all of them', () => {
+    const locks = [lock('2024', 'date'), lock('2024', 'date'), lock('2024', 'date')]
+    // Only one "2024" survives in the output — a naive `.includes()` check
+    // would still mark all three locks as preserved off that single copy.
+    const { score, missing, by_type } = checkEntityOverlap('It happened in 2024, reviewed, and published.', locks)
+    expect(score).toBeCloseTo(1 / 3, 6)
+    expect(missing).toEqual(['2024', '2024'])
+    expect(by_type.date).toEqual({ total: 3, preserved: 1, missing: ['2024', '2024'] })
+  })
+
+  it('reports partial preservation when some but not all copies survive', () => {
+    const locks = [lock('42'), lock('42')]
+    const { score, missing } = checkEntityOverlap('Two sources both cited 42 as the figure.', locks)
+    expect(score).toBe(0.5)
+    expect(missing).toEqual(['42'])
+  })
+
+  it('does not let an accidental extra occurrence in the output inflate the score beyond 1', () => {
+    const locks = [lock('99')]
+    const { score, missing } = checkEntityOverlap('The value 99 appears here and also 99 shows up again.', locks)
+    expect(score).toBe(1)
+    expect(missing).toEqual([])
+  })
+})
+
 // ── Gate 2: cosine similarity (pure math) ────────────────────────────────────
 
 describe('cosineSimilarity', () => {
@@ -209,5 +251,78 @@ describe('runQualityGates', () => {
     const client = mockClient('{"entailment_probability": 1.0, "issues": []}', [[1, 0], [0, 1]])
     const result = await runQualityGates(client, 'gpt-4o-mini', 'orig', 'output', [])
     expect(result.failed_gate).toBe('semantic_similarity')
+  })
+
+  // ── Independent gate availability ──────────────────────────────────────────
+  // A custom model endpoint that doesn't support the embedding call (or hits
+  // any other unrelated failure) must not take entity_overlap down with it —
+  // that check has no external dependency and must always still run.
+
+  function clientWithFailingEmbeddings(entailmentJson: string) {
+    const chatCreate = vi.fn().mockResolvedValue({
+      model: 'gpt-4o-mini',
+      choices: [{ message: { content: entailmentJson } }],
+    })
+    const embedCreate = vi.fn().mockRejectedValue(new Error('this endpoint has no embeddings support'))
+    return {
+      chat: { completions: { create: chatCreate } },
+      embeddings: { create: embedCreate },
+    } as unknown as OpenAI
+  }
+
+  function clientWithFailingChat(embedding: [number[], number[]]) {
+    const chatCreate = vi.fn().mockRejectedValue(new Error('this endpoint has no chat support'))
+    const embedCreate = vi.fn().mockResolvedValue({
+      data: [{ embedding: embedding[0] }, { embedding: embedding[1] }],
+    })
+    return {
+      chat: { completions: { create: chatCreate } },
+      embeddings: { create: embedCreate },
+    } as unknown as OpenAI
+  }
+
+  it('still catches a real fact drop even when the embedding call fails entirely', async () => {
+    const client = clientWithFailingEmbeddings('{"entailment_probability": 1.0, "issues": []}')
+    const result = await runQualityGates(client, 'gpt-4o-mini', 'orig', 'output missing the fact', [lock('42')])
+    expect(result.failed_gate).toBe('entity_overlap')
+    expect(result.passed).toBe(false)
+    expect(result.missing_facts).toEqual(['42'])
+  })
+
+  it('reports semantic_similarity as null (not 0, not thrown away) when only the embedding call fails', async () => {
+    const client = clientWithFailingEmbeddings('{"entailment_probability": 1.0, "issues": []}')
+    const result = await runQualityGates(client, 'gpt-4o-mini', 'the cat sat', 'the cat sat', [lock('cat')])
+    expect(result.semantic_similarity).toBeNull()
+    expect(result.nli_entailment).toBe(1)
+    expect(result.entity_overlap).toBe(1)
+  })
+
+  it('does not fail the whole result just because semantic similarity could not be checked', async () => {
+    const client = clientWithFailingEmbeddings('{"entailment_probability": 1.0, "issues": []}')
+    const result = await runQualityGates(client, 'gpt-4o-mini', 'the cat sat', 'the cat sat', [lock('cat')])
+    expect(result.passed).toBe(true)
+    expect(result.failed_gate).toBeNull()
+  })
+
+  it('reports nli_entailment as null when only the entailment call fails, and still runs the others', async () => {
+    const client = clientWithFailingChat([[1, 0], [1, 0]])
+    const result = await runQualityGates(client, 'gpt-4o-mini', 'the cat sat', 'the cat sat', [lock('cat')])
+    expect(result.nli_entailment).toBeNull()
+    expect(result.entailment_issues).toEqual([])
+    expect(result.semantic_similarity).toBe(1)
+    expect(result.entity_overlap).toBe(1)
+    expect(result.passed).toBe(true)
+  })
+
+  it('a genuine entity_overlap failure still blocks passed even when both other gates are unavailable', async () => {
+    const chatCreate = vi.fn().mockRejectedValue(new Error('no chat support'))
+    const embedCreate = vi.fn().mockRejectedValue(new Error('no embeddings support'))
+    const client = { chat: { completions: { create: chatCreate } }, embeddings: { create: embedCreate } } as unknown as OpenAI
+    const result = await runQualityGates(client, 'gpt-4o-mini', 'orig', 'output missing the fact', [lock('42')])
+    expect(result.semantic_similarity).toBeNull()
+    expect(result.nli_entailment).toBeNull()
+    expect(result.entity_overlap).toBe(0)
+    expect(result.failed_gate).toBe('entity_overlap')
+    expect(result.passed).toBe(false)
   })
 })
