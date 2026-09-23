@@ -44,10 +44,19 @@ describe('DetectionGateway', () => {
     })
   })
 
-  it('attaches processing_duration_ms and a null diagnostics placeholder', async () => {
+  it('attaches processing_duration_ms and local diagnostics by default', async () => {
     delete process.env.DETECTION_PROVIDER
+    delete process.env.LOCAL_DIAGNOSTICS_ENABLED
     const result = await getDetectionGateway().detect('The first sentence. The second sentence.')
     expect(result.processing_duration_ms).toBeGreaterThanOrEqual(0)
+    expect(result.diagnostics).not.toBeNull()
+    expect(result.diagnostics?.word_count).toBeGreaterThan(0)
+  })
+
+  it('omits diagnostics when LOCAL_DIAGNOSTICS_ENABLED=false', async () => {
+    delete process.env.DETECTION_PROVIDER
+    process.env.LOCAL_DIAGNOSTICS_ENABLED = 'false'
+    const result = await getDetectionGateway().detect('The first sentence. The second sentence.')
     expect(result.diagnostics).toBeNull()
   })
 

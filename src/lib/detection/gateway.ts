@@ -1,20 +1,25 @@
 import { DetectionOptions, DetectionResult } from './contracts'
+import { calculateLocalDiagnostics } from './diagnostics'
 import { DetectionProvider } from './providers/provider'
 import { GPTZeroProvider } from './providers/gptzero'
 import { MockDetectionProvider, MockFixtureName } from './providers/mock'
 
 // Every production detection request flows through this — it's the one
-// place that adds timing and (once Phase 4 lands) local diagnostics on top
-// of whatever the provider returns, so providers themselves stay simple.
+// place that adds timing and local diagnostics on top of whatever the
+// provider returns, so providers themselves stay simple.
 export class DetectionGateway {
-  constructor(private readonly provider: DetectionProvider) {}
+  constructor(
+    private readonly provider: DetectionProvider,
+    private readonly diagnosticsEnabled: boolean = process.env.LOCAL_DIAGNOSTICS_ENABLED !== 'false',
+  ) {}
 
   async detect(text: string, options?: DetectionOptions): Promise<DetectionResult> {
     const started = performance.now()
     const result = await this.provider.detect(text, options)
+    const diagnostics = this.diagnosticsEnabled ? calculateLocalDiagnostics(text) : null
     return {
       ...result,
-      diagnostics: null, // Local diagnostics land in Phase 4.
+      diagnostics,
       processing_duration_ms: Math.round(performance.now() - started),
     }
   }
