@@ -1,0 +1,19 @@
+{
+  "status": 200,
+  "body": {
+    "documents": [
+      {
+        "document_classification": "HUMAN_ONLY",
+        "class_probabilities": { "human": 0.52, "ai": 0.41, "mixed": 0.07 },
+        "confidence_category": "low",
+        "sentences": [
+          {
+            "sentence": "Short.",
+            "generated_prob": 0.48,
+            "highlight_sentence_for_ai": false
+          }
+        ]
+      }
+    ]
+  }
+}

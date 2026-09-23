@@ -1,0 +1,24 @@
+{
+  "status": 200,
+  "body": {
+    "documents": [
+      {
+        "document_classification": "AI_ONLY",
+        "class_probabilities": { "human": 0.02, "ai": 0.96, "mixed": 0.02 },
+        "confidence_category": "high",
+        "sentences": [
+          {
+            "sentence": "In today's rapidly evolving digital landscape, it is imperative to leverage cutting-edge solutions.",
+            "generated_prob": 0.97,
+            "highlight_sentence_for_ai": true
+          },
+          {
+            "sentence": "This comprehensive approach facilitates seamless integration across multiple stakeholder touchpoints.",
+            "generated_prob": 0.95,
+            "highlight_sentence_for_ai": true
+          }
+        ]
+      }
+    ]
+  }
+}
