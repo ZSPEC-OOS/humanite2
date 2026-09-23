@@ -1,11 +1,12 @@
 import { useUserStore } from '@/stores/userStore'
 import { useApiConfigStore } from '@/stores/apiConfigStore'
 import type { DetectionResult, DetectionSegment, LocalDiagnostics } from '@/lib/detection/contracts'
+import type { PreservationByType } from '@/lib/qualityGates'
 
-export type { DetectionResult, DetectionSegment, LocalDiagnostics }
+export type { DetectionResult, DetectionSegment, LocalDiagnostics, PreservationByType }
 
-// In production this is empty string (same-origin). Set NEXT_PUBLIC_API_URL only
-// when pointing at an external backend (legacy microservices deployment).
+// In production this is empty string (same-origin). Set NEXT_PUBLIC_API_URL
+// only when pointing this frontend at a different deployment of itself.
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ''
 
 export class APIError extends Error {
@@ -100,6 +101,7 @@ export interface HumanizeOutput {
     retry_count: number
     missing_facts: string[]
     entailment_issues: string[]
+    preservation_by_type: PreservationByType
   }
   // Automatic AI-detection scan run against this output text once humanize
   // completes — null only if the scan itself failed (never blocks the

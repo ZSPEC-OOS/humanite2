@@ -19,7 +19,7 @@ function chunk(overrides: Partial<ChunkResult> = {}): ChunkResult {
     text: 'Rewritten chunk text.',
     substitutions: 0,
     modelUsed: 'gpt-4o-mini',
-    gate: { bertscore_f1: 0.94, nli_entailment: 0.97, entity_overlap: 1, passed: true, failed_gate: null, missing_facts: [], entailment_issues: [] },
+    gate: { bertscore_f1: 0.94, nli_entailment: 0.97, entity_overlap: 1, passed: true, failed_gate: null, missing_facts: [], entailment_issues: [], preservation_by_type: {} },
     gatesUnavailable: false,
     retryCount: 0,
     ...overrides,
@@ -80,7 +80,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
     const chunks = [
       chunk({ text: 'Chunk one.', substitutions: 2, retryCount: 1 }),
       chunk({ text: 'Chunk two.', substitutions: 0, retryCount: 0 }),
-      chunk({ text: 'Chunk three.', substitutions: 3, retryCount: 1, gate: { bertscore_f1: 0.7, nli_entailment: 0.8, entity_overlap: 0.9, passed: false, failed_gate: 'semantic_similarity', missing_facts: [], entailment_issues: ['drift'] } }),
+      chunk({ text: 'Chunk three.', substitutions: 3, retryCount: 1, gate: { bertscore_f1: 0.7, nli_entailment: 0.8, entity_overlap: 0.9, passed: false, failed_gate: 'semantic_similarity', missing_facts: [], entailment_issues: ['drift'], preservation_by_type: {} } }),
     ]
     const postText = chunks.map(c => c.text).join('\n\n')
     const output = buildOutput(postText, chunks, generateWatermark('job-5', 'gpt-4o-mini'), detection)

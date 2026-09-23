@@ -11,6 +11,7 @@ import { ExportMenu }       from '@/components/output/ExportMenu'
 import { ScanReport }       from '@/components/scanner/ScanReport'
 import { Spinner }          from '@/components/ui/Spinner'
 import { ApiConfigModal }   from '@/components/settings/ApiConfigModal'
+import { PreservationReport } from '@/components/humanizer/PreservationReport'
 import { ThemeToggle }      from '@/components/theme/ThemeToggle'
 import { useTheme }         from '@/components/theme/ThemeProvider'
 import { ASYNC_MAX_CHARS, SYNC_MAX_CHARS } from '@/lib/limits'
@@ -53,6 +54,7 @@ export default function Dashboard() {
   const [menuOpen, setMenuOpen]       = useState(false)
   const [copied, setCopied]           = useState(false)
   const [apiConfigOpen, setApiConfigOpen] = useState(false)
+  const [preservationOpen, setPreservationOpen] = useState(false)
 
   useEffect(() => { if (hStatus === 'done') setMobileTab('output') }, [hStatus])
 
@@ -182,6 +184,11 @@ export default function Dashboard() {
   return (
     <>
     <ApiConfigModal open={apiConfigOpen} onClose={() => setApiConfigOpen(false)} />
+    <PreservationReport
+      open={preservationOpen}
+      onClose={() => setPreservationOpen(false)}
+      data={output?.quality_scores.preservation_by_type ?? {}}
+    />
 
     {/* ══════════════════════════════════════════════════════════════
         DESKTOP  (md+)
@@ -330,7 +337,11 @@ export default function Dashboard() {
                 )}
 
                 {output && (
-                  <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setPreservationOpen(true)}
+                    className="flex items-center gap-3 text-left rounded-xl -m-1.5 p-1.5 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors"
+                    title="See what was preserved from your original text"
+                  >
                     <div className="w-10 h-10 rounded-full flex items-center justify-center border bg-gray-50 border-gray-200 dark:bg-gray-800 dark:border-gray-700">
                       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden className={fidelityColor}>
                         <circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="1.4" />
@@ -354,7 +365,7 @@ export default function Dashboard() {
                           : 'Not yet scored'}
                       </p>
                     </div>
-                  </div>
+                  </button>
                 )}
 
               </div>
@@ -546,11 +557,14 @@ export default function Dashboard() {
                   {humanScore != null ? `${humanScore}% Human · ${scoreLabel}` : scoreLabel}
                 </span>
                 {output.quality_scores.passed && (
-                  <span className="text-xs px-2.5 py-1 rounded-full font-medium
+                  <button
+                    onClick={() => setPreservationOpen(true)}
+                    className="text-xs px-2.5 py-1 rounded-full font-medium
                                    bg-gray-100 border border-gray-200 text-gray-700
-                                   dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300">
+                                   dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300"
+                  >
                     Natural
-                  </span>
+                  </button>
                 )}
                 {aiDetLabel && (
                   <span className="text-xs px-2.5 py-1 rounded-full font-medium border

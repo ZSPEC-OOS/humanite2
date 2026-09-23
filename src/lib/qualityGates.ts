@@ -1,5 +1,5 @@
 import type OpenAI from 'openai'
-import type { FactLock } from './preprocess'
+import type { FactLock, FactLockType } from './preprocess'
 
 export interface GateThresholds {
   entityOverlap: number
@@ -18,6 +18,18 @@ export const DEFAULT_THRESHOLDS: GateThresholds = {
 
 export type FailedGate = 'entity_overlap' | 'entailment' | 'semantic_similarity' | null
 
+// Per-category breakdown backing the preservation report (spec §52) —
+// "Numbers 100%, Citations 100%, Quotes 100%" rather than one aggregate
+// entity_overlap score with no visibility into which category, if any,
+// actually failed.
+export interface CategoryPreservation {
+  total: number
+  preserved: number
+  missing: string[]
+}
+
+export type PreservationByType = Partial<Record<FactLockType, CategoryPreservation>>
+
 export interface QualityScores {
   bertscore_f1: number
   nli_entailment: number
@@ -26,6 +38,7 @@ export interface QualityScores {
   failed_gate: FailedGate
   missing_facts: string[]
   entailment_issues: string[]
+  preservation_by_type: PreservationByType
 }
 
 // ── Gate 1: entity overlap ───────────────────────────────────────────────────
@@ -37,13 +50,24 @@ export interface QualityScores {
 export function checkEntityOverlap(
   output: string,
   factLocks: FactLock[],
-): { score: number; missing: string[] } {
-  if (factLocks.length === 0) return { score: 1, missing: [] }
-  const missing = factLocks.filter(lock => !output.includes(lock.text)).map(lock => lock.text)
-  return {
-    score: (factLocks.length - missing.length) / factLocks.length,
-    missing,
+): { score: number; missing: string[]; by_type: PreservationByType } {
+  const by_type: PreservationByType = {}
+  const missing: string[] = []
+
+  for (const lock of factLocks) {
+    const entry = by_type[lock.lock_type] ?? { total: 0, preserved: 0, missing: [] }
+    entry.total += 1
+    if (output.includes(lock.text)) {
+      entry.preserved += 1
+    } else {
+      entry.missing.push(lock.text)
+      missing.push(lock.text)
+    }
+    by_type[lock.lock_type] = entry
   }
+
+  const score = factLocks.length === 0 ? 1 : (factLocks.length - missing.length) / factLocks.length
+  return { score, missing, by_type }
 }
 
 // ── Gate 2: semantic similarity ──────────────────────────────────────────────
@@ -146,6 +170,7 @@ export async function runQualityGates(
     failed_gate: failedGate,
     missing_facts: entity.missing,
     entailment_issues: entailment.issues,
+    preservation_by_type: entity.by_type,
   }
 }
 
