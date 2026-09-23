@@ -7,7 +7,7 @@ import { requireAuth, isAuthFailure } from '@/lib/require-auth'
 import { preprocess, FactLock } from '@/lib/preprocess'
 import { generateWatermark, hashContent } from '@/lib/watermark'
 import { chunkFactLockedText } from '@/lib/chunk'
-import { humanizeChunk, ChunkResult } from '@/lib/humanizePipeline'
+import { humanizeChunk, ChunkResult, joinChunkResults } from '@/lib/humanizePipeline'
 import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
 import { buildOutput, tryClassifyOutput } from '@/lib/humanizeOutput'
 import { isAllowedProviderBaseUrl } from '@/lib/providerAllowlist'
@@ -92,12 +92,12 @@ async function processHumanizeJobAsync(
         partialResult: {
           // Detection is skipped on partial saves (only meaningful once —
           // and cost-wise, once — on the final assembled text below).
-          output: buildOutput(results.map(r => r.text).join('\n\n'), results, partialWatermark, null),
+          output: buildOutput(joinChunkResults(results, chunks), results, partialWatermark, null),
         },
       }), 'persist humanize job progress')
     }
 
-    const postText = results.map(r => r.text).join('\n\n')
+    const postText = joinChunkResults(results, chunks)
     const modelUsed = results.at(-1)?.modelUsed ?? model
     const watermark = generateWatermark(jobId, modelUsed)
     const detection = await tryClassifyOutput(postText, userConfig?.gptzeroApiKey || undefined)
@@ -140,7 +140,7 @@ export async function POST(req: NextRequest) {
 
   let body: {
     text?: string
-    settings?: { intensity?: number; tone?: string; domain?: string; preserve_citations?: boolean }
+    settings?: { intensity?: number; tone?: string; domain?: string }
   }
   try {
     body = await req.json()
@@ -191,8 +191,8 @@ export async function POST(req: NextRequest) {
     const usage = await checkAndRecordUsage(auth.claims.sub, auth.claims.tier, prep.word_count)
     if (!usage.allowed) {
       return NextResponse.json(
-        { error: { code: 'USAGE_LIMIT_EXCEEDED', message: usage.reason } },
-        { status: 429 },
+        { error: { code: usage.code === 'UNAVAILABLE' ? 'USAGE_TRACKING_UNAVAILABLE' : 'USAGE_LIMIT_EXCEEDED', message: usage.reason } },
+        { status: usage.code === 'UNAVAILABLE' ? 503 : 429 },
       )
     }
   }
@@ -291,8 +291,8 @@ export async function POST(req: NextRequest) {
         processing_duration_ms: durationMs,
       },
       result_url: null,
-      warning: result.gatesUnavailable
-        ? 'Quality gates could not run against the configured model endpoint — output is unscored.'
+      warning: output.quality_scores.degraded
+        ? 'Some quality checks could not run against the configured model endpoint — output may be under-scored.'
         : null,
     })
   } catch (err) {

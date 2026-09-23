@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Document, Paragraph, TextRun, HeadingLevel, Packer } from 'docx'
 import { requireAuth, isAuthFailure } from '@/lib/require-auth'
+import { resolveVerification } from '@/lib/exportVerification'
 
 export async function POST(req: NextRequest) {
   const auth = await requireAuth(req)
@@ -9,7 +10,6 @@ export async function POST(req: NextRequest) {
   let body: {
     text?: string
     format?: string
-    watermark?: Record<string, string>
     job_id?: string
     title?: string
   }
@@ -25,7 +25,6 @@ export async function POST(req: NextRequest) {
   const text = body.text ?? ''
   const format = body.format ?? 'text'
   const title = body.title ?? 'Humanite Export'
-  const watermark = body.watermark ?? {}
 
   if (!text) {
     return NextResponse.json(
@@ -34,8 +33,9 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  const watermarkLine = watermark.fingerprint
-    ? `\n\n---\nVerified by Humanite · ${watermark.fingerprint} · ${watermark.issued_at ?? ''}`
+  const verification = await resolveVerification(body.job_id, auth.claims.sub, text)
+  const watermarkLine = verification
+    ? `\n\n---\nVerified by Humanite · ${verification.fingerprint} · ${verification.issuedAt}`
     : ''
 
   if (format === 'text') {
@@ -76,12 +76,12 @@ export async function POST(req: NextRequest) {
               spacing: { after: 300 },
             }),
             ...paragraphs,
-            ...(watermark.fingerprint
+            ...(verification
               ? [
                   new Paragraph({
                     children: [
                       new TextRun({
-                        text: `Verified by Humanite · ${watermark.fingerprint}`,
+                        text: `Verified by Humanite · ${verification.fingerprint}`,
                         size: 18,
                         color: '888888',
                       }),

@@ -166,4 +166,31 @@ describe('chunkFactLockedText', () => {
     const reassembled = chunks.map(c => c.text).join('')
     expect(reassembled.replace(/\s+/g, '')).toBe(text.replace(/\s+/g, ''))
   })
+
+  it('records the real separator between chunks, reproducing the source exactly when rejoined', () => {
+    const text = 'Para one here.\n\n' + 'Sentence one. Sentence two. Sentence three. '.repeat(5) + '\n\nFinal para.'
+    const chunks = chunkFactLockedText(text, [], 80)
+    expect(chunks.length).toBeGreaterThan(1)
+    const reassembled = chunks.map(c => c.text + c.separatorAfter).join('')
+    expect(reassembled).toBe(text)
+  })
+
+  it('the last chunk has no trailing separator', () => {
+    const text = 'Para one here.\n\n' + 'Sentence one. Sentence two. Sentence three. '.repeat(5) + '\n\nFinal para.'
+    const chunks = chunkFactLockedText(text, [], 80)
+    expect(chunks.at(-1)!.separatorAfter).toBe('')
+  })
+
+  it('a sentence-split oversized paragraph records a single space as its separator, not a paragraph break', () => {
+    const sentence = 'This is a reasonably long sentence about nothing in particular. '
+    // .trimEnd() mirrors preprocess()'s own trim() — sanitizedText reaching
+    // the real chunker never has trailing separator whitespace to lose.
+    const text = sentence.repeat(10).trimEnd() // one paragraph, no \n\n at all
+    const chunks = chunkFactLockedText(text, [], 200)
+    expect(chunks.length).toBeGreaterThan(1)
+    for (const c of chunks.slice(0, -1)) {
+      expect(c.separatorAfter).not.toContain('\n\n')
+    }
+    expect(chunks.map(c => c.text + c.separatorAfter).join('')).toBe(text)
+  })
 })

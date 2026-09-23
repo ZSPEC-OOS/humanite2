@@ -399,10 +399,13 @@ export default function Dashboard() {
                           output.quality_scores.passed === false
                             ? [...output.quality_scores.missing_facts.map(f => `Dropped: "${f}"`),
                                ...output.quality_scores.entailment_issues].join('\n') || undefined
+                            : output.quality_scores.passed === true && output.quality_scores.degraded
+                            ? 'Some quality checks could not run against the configured model endpoint — this only reflects the checks that did.'
                             : undefined
                         }
                       >
-                        {output.quality_scores.passed === true ? 'Natural'
+                        {output.quality_scores.passed === true && output.quality_scores.degraded ? 'Partially checked'
+                          : output.quality_scores.passed === true ? 'Natural'
                           : output.quality_scores.passed === false ? `Review (${output.quality_scores.failed_gate})`
                           : 'Not yet scored'}
                       </p>

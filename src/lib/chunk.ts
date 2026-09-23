@@ -97,6 +97,13 @@ export function chunkRanges(text: string, maxChars: number): Range[] {
 export interface TextChunk {
   text: string
   factLocks: FactLock[]
+  // The exact source text (a paragraph break, a sentence space, or nothing
+  // for the final chunk) that separated this chunk from the next one in
+  // `sanitizedText` — packSegments excludes it from both chunks' own text,
+  // so it must be threaded through explicitly for the caller to reproduce
+  // the original document structure on reassembly, instead of guessing a
+  // fixed separator that's only correct at a real paragraph boundary.
+  separatorAfter: string
 }
 
 // Merges adjacent ranges whenever a fact lock spans the boundary between
@@ -132,10 +139,11 @@ export function chunkFactLockedText(
   maxChars: number,
 ): TextChunk[] {
   const ranges = mergeRangesAcrossLocks(chunkRanges(sanitizedText, maxChars), factLocks)
-  return ranges.map(({ start, end }) => ({
+  return ranges.map(({ start, end }, i) => ({
     text: sanitizedText.slice(start, end),
     factLocks: factLocks
       .filter(l => l.char_start >= start && l.char_end <= end)
       .map(l => ({ ...l, char_start: l.char_start - start, char_end: l.char_end - start })),
+    separatorAfter: i + 1 < ranges.length ? sanitizedText.slice(end, ranges[i + 1]!.start) : '',
   }))
 }

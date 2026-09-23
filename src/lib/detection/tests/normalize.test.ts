@@ -101,6 +101,34 @@ describe('normalizeGPTZero', () => {
     expect(result.estimated_ai_like_fraction).toBe(0.5)
   })
 
+  it('weights estimated_ai_like_fraction by sentence length instead of a plain per-sentence average', () => {
+    // "Yes." (1 word, ai_score 1.0) must not count equally against a
+    // 50-word human-scored sentence — an unweighted mean would give 0.5,
+    // wildly overstating how much of the actual text reads as AI-like.
+    const longSentence = Array(50).fill('word').join(' ') + '.'
+    const text = `Yes. ${longSentence}`
+    const result = normalizeGPTZero({
+      classification: 'mixed',
+      sentences: [
+        { sentence: 'Yes.', generated_prob: 1.0 },
+        { sentence: longSentence, generated_prob: 0.0 },
+      ],
+    }, text)
+    // (1 word * 1.0 + 50 words * 0.0) / 51 words ≈ 0.0196
+    expect(result.estimated_ai_like_fraction).toBeCloseTo(1 / 51, 4)
+    expect(result.estimated_ai_like_fraction).toBeLessThan(0.05)
+  })
+
+  it('falls back to an unweighted mean when segment text is unavailable to weight by', () => {
+    // No `sentence`/`text` field on the raw response at all — buildSegments
+    // can't locate char offsets or text, but generated_prob is still there.
+    const result = normalizeGPTZero({
+      classification: 'mixed',
+      sentences: [{ generated_prob: 0.8 }, { generated_prob: 0.2 }],
+    }, TEXT)
+    expect(result.estimated_ai_like_fraction).toBe(0.5)
+  })
+
   it('rejects a non-object response as an invalid provider response', () => {
     expect(() => normalizeGPTZero(null, TEXT)).toThrow('GPTZero returned a non-object response.')
     expect(() => normalizeGPTZero('not json', TEXT)).toThrow('GPTZero returned a non-object response.')

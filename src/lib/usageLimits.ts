@@ -42,16 +42,23 @@ function todayKey(): string {
 export interface UsageCheckResult {
   allowed: boolean
   reason?: string
+  // Lets a caller tell "you're over budget" (429 — a real, known limit) apart
+  // from "we couldn't check your budget" (503 — an infrastructure problem).
+  // Only set when allowed is false.
+  code?: 'LIMIT_EXCEEDED' | 'UNAVAILABLE'
 }
 
 // Atomically checks today's usage against the caller's tier limits and, if
 // still under budget, records this request's contribution in the same
 // Firestore transaction — so two concurrent requests can't both read
-// "under budget" and both slip through. Fails open (allows the request,
-// logs a warning) if Firestore itself is unavailable, matching this app's
-// existing posture elsewhere (jobs, presets, and config sync all degrade
-// the same way — see tryPersist in firestore.ts) rather than making quota
-// tracking a single point of failure for the whole product.
+// "under budget" and both slip through. Fails CLOSED (rejects the request)
+// if Firestore itself is unavailable — unlike jobs/presets/config sync
+// elsewhere in this app, which fail open because a degraded UX is the only
+// cost. This function is only ever called on the path that spends this
+// deployment's own paid OPENAI_API_KEY/GPTZERO_API_KEY (callers skip it
+// entirely for a caller's own BYOK key — see humanize/route.ts and
+// scan/route.ts), so failing open here would mean one Firestore outage
+// removes all spend protection on keys this deployment pays for.
 export async function checkAndRecordUsage(
   userId: string,
   tier: string,
@@ -70,12 +77,14 @@ export async function checkAndRecordUsage(
       if (requests + 1 > limits.requestsPerDay) {
         return {
           allowed: false,
+          code: 'LIMIT_EXCEEDED',
           reason: `Daily request limit reached (${limits.requestsPerDay}/day). Resets at UTC midnight.`,
         }
       }
       if (usedWords + words > limits.wordsPerDay) {
         return {
           allowed: false,
+          code: 'LIMIT_EXCEEDED',
           reason: `Daily word limit reached (${limits.wordsPerDay.toLocaleString()} words/day). Resets at UTC midnight.`,
         }
       }
@@ -88,9 +97,13 @@ export async function checkAndRecordUsage(
       return { allowed: true }
     })
   } catch (err) {
-    console.warn('Usage limit check unavailable — allowing request without it', {
+    console.warn('Usage limit check unavailable — rejecting request rather than spending unmetered', {
       type: err instanceof Error ? err.constructor.name : typeof err,
     })
-    return { allowed: true }
+    return {
+      allowed: false,
+      code: 'UNAVAILABLE',
+      reason: 'Usage tracking is temporarily unavailable. Please try again shortly.',
+    }
   }
 }

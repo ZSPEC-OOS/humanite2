@@ -2,7 +2,6 @@ import { generateWatermark } from '@/lib/watermark'
 import { aggregateChunkResults, ChunkResult } from '@/lib/humanizePipeline'
 import { getDetectionGateway } from '@/lib/detection/gateway'
 import { detectWithCache } from '@/lib/detection/dedupe'
-import { preprocess } from '@/lib/preprocess'
 import { DetectionResult } from '@/lib/detection/contracts'
 import { recordScanTelemetry } from '@/lib/observability/scanTelemetry'
 
@@ -21,6 +20,8 @@ export function buildOutput(
       entity_overlap: agg.entity_overlap,
       passed: agg.passed,
       failed_gate: agg.failed_gate,
+      degraded: agg.degraded,
+      gates_available: agg.gates_available,
       retry_count: agg.retry_count,
       missing_facts: agg.missing_facts,
       entailment_issues: agg.entailment_issues,
@@ -51,13 +52,12 @@ export async function tryClassifyOutput(text: string, gptzeroApiKey?: string): P
   recordScanTelemetry({ event: 'scan_requested', trigger: 'auto', words, chars: text.length })
 
   try {
-    // Sanitized the same way /v1/scan sanitizes its input, so the two
-    // routes compute the identical cache key for the same underlying text
-    // — a manual re-check of freshly humanized text is a cache hit instead
-    // of a second paid GPTZero call.
-    const sanitized = preprocess(text).sanitized_text
+    // Sent to the detector exactly as /v1/scan now sends its own input (see
+    // the note there) — both routes must pass detectWithCache the identical
+    // string for identical text, or a manual re-check of freshly humanized
+    // text stops being a cache hit and becomes a second paid GPTZero call.
     const gateway = getDetectionGateway(gptzeroApiKey)
-    const { result, cacheHit } = await detectWithCache(gateway, sanitized, { mode: 'standard' }, !!gptzeroApiKey)
+    const { result, cacheHit } = await detectWithCache(gateway, text, { mode: 'standard' }, !!gptzeroApiKey)
 
     recordScanTelemetry({
       event: 'scan_completed',

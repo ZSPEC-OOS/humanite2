@@ -5,7 +5,7 @@ import { useHumanizeStore } from '@/stores/humanizeStore'
 
 beforeEach(() => {
   useHumanizeStore.setState({
-    settings: { intensity: 5, tone: 'balanced', domain: 'general', preserve_citations: true },
+    settings: { intensity: 5, tone: 'balanced', domain: 'general' },
   })
 })
 
@@ -45,13 +45,6 @@ describe('ControlPanel', () => {
     const selects = screen.getAllByRole('combobox')
     fireEvent.change(selects[1]!, { target: { value: 'academic' } })
     expect(useHumanizeStore.getState().settings.domain).toBe('academic')
-  })
-
-  it('renders preserve_citations checkbox', () => {
-    render(<ControlPanel />)
-    const checkbox = screen.getByRole('checkbox')
-    expect(checkbox).toBeTruthy()
-    expect((checkbox as HTMLInputElement).checked).toBe(true)
   })
 
   it('positions each intensity tick by its actual percent-of-range, not evenly spaced', () => {

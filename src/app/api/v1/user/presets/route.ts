@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json(snap.docs.map(d => {
     const p = d.data()
-    return { id: d.id, name: p.name, intensity: p.intensity, tone: p.tone, domain: p.domain, preserve_citations: p.preserveCitations, created_at: p.createdAt.toDate().toISOString() }
+    return { id: d.id, name: p.name, intensity: p.intensity, tone: p.tone, domain: p.domain, created_at: p.createdAt.toDate().toISOString() }
   }))
 }
 
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   const auth = await requireAuth(req)
   if (isAuthFailure(auth)) return auth
 
-  let body: { name?: string; intensity?: number; tone?: string; domain?: string; preserve_citations?: boolean }
+  let body: { name?: string; intensity?: number; tone?: string; domain?: string }
   try { body = await req.json() } catch {
     return NextResponse.json({ error: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' } }, { status: 400 })
   }
@@ -44,12 +44,11 @@ export async function POST(req: NextRequest) {
     intensity: Math.min(10, Math.max(1, body.intensity ?? 5)),
     tone: body.tone ?? 'balanced',
     domain: body.domain ?? 'general',
-    preserveCitations: body.preserve_citations ?? true,
     createdAt: now,
     updatedAt: now,
   }
 
   await db().collection('presets').doc(id).set(data)
 
-  return NextResponse.json({ id, name: data.name, intensity: data.intensity, tone: data.tone, domain: data.domain, preserve_citations: data.preserveCitations, created_at: now.toISOString() }, { status: 201 })
+  return NextResponse.json({ id, name: data.name, intensity: data.intensity, tone: data.tone, domain: data.domain, created_at: now.toISOString() }, { status: 201 })
 }

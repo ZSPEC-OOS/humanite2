@@ -51,4 +51,36 @@ describe('postprocess — respects fact locks', () => {
     // The unlocked opener is removed; the one inside the locked quotation survives.
     expect(result).toBe('the quote was: "In conclusion, we succeeded."')
   })
+
+  it('protects a locked quotation by content even when the model moved it to a new position', () => {
+    // This is the actual production shape: factLocks are computed against
+    // the ORIGINAL source text, but postprocess() runs against the model's
+    // REWRITTEN output — a different string where the locked span is very
+    // likely at a different offset. char_start/char_end from the original
+    // would be meaningless here; only content-based location works.
+    const original = 'The quote was: "In conclusion, we succeeded." That was the summary.'
+    const quoteStart = original.indexOf('"In conclusion')
+    const lockText = original.slice(quoteStart, quoteStart + '"In conclusion, we succeeded."'.length)
+    const locks: FactLock[] = [
+      { char_start: quoteStart, char_end: quoteStart + lockText.length, text: lockText, lock_type: 'quotation', label: 'QUOTE' },
+    ]
+
+    // The model reordered the sentences — the quote now sits much later.
+    const rewritten = 'That was the summary. The quote was: "In conclusion, we succeeded."'
+    const { text: result } = postprocess(rewritten, locks)
+    expect(result).toBe(rewritten) // opener inside the quote must survive untouched
+  })
+
+  it('assigns repeated identical locked text to distinct occurrences in the rewrite', () => {
+    const locks: FactLock[] = [
+      { char_start: 0, char_end: 4, text: '2024', lock_type: 'date', label: 'DATE' },
+      { char_start: 50, char_end: 54, text: '2024', lock_type: 'date', label: 'DATE' },
+    ]
+    // Neither occurrence contains filler text, so this just proves the
+    // function does not throw or misbehave when the same value repeats —
+    // covered more directly by the entity-overlap occurrence tests.
+    const rewritten = 'Filed in 2024, revised again in 2024 as planned.'
+    const { text: result } = postprocess(rewritten, locks)
+    expect(result).toBe(rewritten)
+  })
 })

@@ -72,6 +72,7 @@ describe('checkAndRecordUsage', () => {
     expect((await checkAndRecordUsage('user-1', 'free', 10)).allowed).toBe(true)
     const third = await checkAndRecordUsage('user-1', 'free', 10)
     expect(third.allowed).toBe(false)
+    expect(third.code).toBe('LIMIT_EXCEEDED')
     expect(third.reason).toMatch(/daily request limit/i)
   })
 
@@ -119,19 +120,24 @@ describe('checkAndRecordUsage', () => {
     expect((await checkAndRecordUsage('user-x', 'not-a-real-tier', 10)).allowed).toBe(false)
   })
 
-  it('fails open (allows the request) if the transaction itself fails', async () => {
+  it('fails closed (rejects the request) if the transaction itself fails', async () => {
+    // This function is only ever invoked on the server-funded key path (see
+    // the call-site guards in humanize/route.ts and scan/route.ts) — failing
+    // open here would mean a Firestore outage removes all spend protection
+    // on keys this deployment pays for, so it must not default to "allowed".
     txShouldThrow.value = true
     const result = await checkAndRecordUsage('user-1', 'free', 10)
-    expect(result.allowed).toBe(true)
+    expect(result.allowed).toBe(false)
+    expect(result.code).toBe('UNAVAILABLE')
   })
 
-  it('fails open even when db() itself throws synchronously (e.g. missing Firebase credentials)', async () => {
-    // This is the actual real-world failure mode — db() throws before any
-    // Firestore call is even attempted, not inside a rejected transaction.
-    // Caught live: a request would 500 here before the fix, because the doc
-    // reference used to be built outside the try/catch.
+  it('fails closed even when db() itself throws synchronously (e.g. missing Firebase credentials)', async () => {
+    // The doc reference is built inside the try/catch specifically so this
+    // failure mode (db() throwing before any Firestore call is even
+    // attempted) is caught the same way a rejected transaction is.
     dbShouldThrow.value = true
     const result = await checkAndRecordUsage('user-1', 'free', 10)
-    expect(result.allowed).toBe(true)
+    expect(result.allowed).toBe(false)
+    expect(result.code).toBe('UNAVAILABLE')
   })
 })

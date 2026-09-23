@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID, createHash } from 'crypto'
 import { db, tryPersist } from '@/lib/firestore'
 import { requireAuth, isAuthFailure } from '@/lib/require-auth'
-import { preprocess } from '@/lib/preprocess'
 import { getDetectionGateway } from '@/lib/detection/gateway'
 import { detectWithCache } from '@/lib/detection/dedupe'
 import { DetectionProviderError } from '@/lib/detection/contracts'
@@ -54,17 +53,20 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // Normalization only — the scanner analyzes text as data, so content that
-  // merely resembles markup (e.g. a document discussing <script> tags) is
-  // not rejected outright, only normalized (stripped tags, collapsed
-  // whitespace). See lib/preprocess.ts.
-  const sanitized = preprocess(text).sanitized_text
-
+  // Sent to the detector as-is (only trimmed above) — NOT run through the
+  // humanizer's preprocess() (HTML-tag stripping, whitespace collapsing).
+  // That normalization exists to make locked-fact matching reliable in the
+  // rewrite pipeline; here it would silently shift every segment's
+  // start_char/end_char away from the text the client actually has, since
+  // the client renders detection segments against exactly what it sent (see
+  // SegmentHeatmap.tsx) with no normalization of its own. The text is never
+  // rendered as HTML either way — see preprocess.ts's own note on that
+  // boundary — so there's no security reason to strip it here.
   const jobId = randomUUID()
   const scanId = randomUUID()
   const inputHash = createHash('sha256').update(text).digest('hex')
   const now = new Date()
-  const wordCount = sanitized.split(/\s+/).filter(Boolean).length
+  const wordCount = text.split(/\s+/).filter(Boolean).length
 
   // The caller's own saved GPTZero key, if any — looked up server-side by
   // their authenticated identity rather than trusted from the request body.
@@ -77,8 +79,8 @@ export async function POST(req: NextRequest) {
     const usage = await checkAndRecordUsage(auth.claims.sub, auth.claims.tier, wordCount)
     if (!usage.allowed) {
       return NextResponse.json(
-        { error: { code: 'USAGE_LIMIT_EXCEEDED', message: usage.reason } },
-        { status: 429 },
+        { error: { code: usage.code === 'UNAVAILABLE' ? 'USAGE_TRACKING_UNAVAILABLE' : 'USAGE_LIMIT_EXCEEDED', message: usage.reason } },
+        { status: usage.code === 'UNAVAILABLE' ? 503 : 429 },
       )
     }
   }
@@ -88,7 +90,7 @@ export async function POST(req: NextRequest) {
     jobType: 'scan',
     status: 'processing',
     inputTextHash: inputHash,
-    inputChars: sanitized.length,
+    inputChars: text.length,
     inputWords: wordCount,
     settings: { mode },
     createdAt: now,
@@ -97,13 +99,13 @@ export async function POST(req: NextRequest) {
     errorCode: null,
   }), 'create scan job')
 
-  recordScanTelemetry({ event: 'scan_requested', trigger: 'manual', words: wordCount, chars: sanitized.length })
+  recordScanTelemetry({ event: 'scan_requested', trigger: 'manual', words: wordCount, chars: text.length })
 
   try {
     const gateway = getDetectionGateway(userGptzeroKey)
     const { result: detectionResult, cacheHit } = await detectWithCache(
       gateway,
-      sanitized,
+      text,
       { mode, domainHint: body.domain_hint || 'general' },
       !!userGptzeroKey,
     )

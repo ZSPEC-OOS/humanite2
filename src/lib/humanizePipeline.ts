@@ -1,7 +1,8 @@
 import type OpenAI from 'openai'
 import type { FactLock } from './preprocess'
+import type { TextChunk } from './chunk'
 import { postprocess } from './postprocess'
-import { runQualityGates, QualityScores, PreservationByType } from './qualityGates'
+import { runQualityGates, QualityScores, PreservationByType, GateAvailability } from './qualityGates'
 
 export const SYSTEM_PROMPT = `You are a professional editor. Your only job is to rewrite the provided text \
 so it reads as natural, fluent human prose. You must:
@@ -157,12 +158,34 @@ export async function humanizeChunk(
   return { text: postText, substitutions, modelUsed, gate: gateResult, gatesUnavailable, retryCount }
 }
 
+// Reassembles chunk results using each chunk's own recorded separator
+// (see TextChunk.separatorAfter) instead of a fixed '\n\n' — the source
+// chunker splits on paragraph breaks when it can, but falls back to a
+// sentence space or nothing at all for an oversized paragraph, and blindly
+// rejoining with '\n\n' fabricates paragraph breaks that were never there.
+// Only emits a separator between two results that are BOTH already present,
+// so a partial (still-processing) join never gets a trailing separator
+// dangling off the last completed chunk.
+export function joinChunkResults(results: ChunkResult[], chunks: TextChunk[]): string {
+  return results
+    .map((r, i) => (i < results.length - 1 ? r.text + (chunks[i]?.separatorAfter ?? '') : r.text))
+    .join('')
+}
+
 export interface AggregatedQuality {
   semantic_similarity: number | null
   nli_entailment: number | null
   entity_overlap: number | null
   passed: boolean | null
   failed_gate: string | null
+  // True when at least one soft-quality gate (semantic similarity or
+  // entailment) never ran for at least one scored chunk — see gates_available.
+  // `passed` can still be true while `degraded` is true: it means "nothing
+  // that ran, failed", not "everything was checked". A caller that treats
+  // `passed: true` alone as a green light for e.g. a "verified" claim is
+  // exactly the gap this field closes.
+  degraded: boolean
+  gates_available: GateAvailability
   retry_count: number
   missing_facts: string[]
   entailment_issues: string[]
@@ -207,6 +230,8 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
       entity_overlap: null,
       passed: null,
       failed_gate: null,
+      degraded: true,
+      gates_available: { semantic_similarity: false, entailment: false },
       retry_count: totalRetries,
       missing_facts: missingFacts,
       entailment_issues: entailmentIssues,
@@ -222,6 +247,14 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
     return values.length === 0 ? null : round(values.reduce((sum, v) => sum + v, 0) / values.length)
   }
   const firstFailure = scored.find(r => !r.gate.passed)
+  // A gate must have actually run for EVERY scored chunk to count as
+  // "available" document-wide — one chunk silently missing entailment means
+  // the aggregate entailment score doesn't cover the whole document, even
+  // if every other chunk's entailment gate ran fine.
+  const gatesAvailable: GateAvailability = {
+    semantic_similarity: scored.every(r => r.gate.gates_available.semantic_similarity),
+    entailment: scored.every(r => r.gate.gates_available.entailment),
+  }
 
   return {
     semantic_similarity: average(g => g.semantic_similarity),
@@ -229,6 +262,8 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
     entity_overlap: average(g => g.entity_overlap),
     passed: scored.every(r => r.gate.passed),
     failed_gate: firstFailure?.gate.failed_gate ?? null,
+    degraded: !gatesAvailable.semantic_similarity || !gatesAvailable.entailment,
+    gates_available: gatesAvailable,
     retry_count: totalRetries,
     missing_facts: missingFacts,
     entailment_issues: entailmentIssues,
