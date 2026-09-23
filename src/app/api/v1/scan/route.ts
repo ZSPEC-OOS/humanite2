@@ -6,6 +6,7 @@ import { preprocess } from '@/lib/preprocess'
 import { getDetectionGateway } from '@/lib/detection/gateway'
 import { getCachedScanResult, hashScanInput, setCachedScanResult } from '@/lib/detection/dedupe'
 import { DetectionProviderError } from '@/lib/detection/contracts'
+import { recordScanTelemetry } from '@/lib/observability/scanTelemetry'
 
 // A single non-chunked detection call through DetectionGateway.
 export const maxDuration = 60
@@ -68,6 +69,8 @@ export async function POST(req: NextRequest) {
     errorCode: null,
   }), 'create scan job')
 
+  recordScanTelemetry({ event: 'scan_requested', trigger: 'manual', words: wordCount, chars: sanitized.length })
+
   try {
     const gateway = getDetectionGateway()
     const cacheKey = hashScanInput(sanitized, gateway.providerId)
@@ -93,6 +96,16 @@ export async function POST(req: NextRequest) {
       },
     }), 'complete scan job')
 
+    recordScanTelemetry({
+      event: 'scan_completed',
+      trigger: 'manual',
+      provider: detectionResult.provider.id,
+      classification: detectionResult.classification,
+      confidence_category: detectionResult.confidence_category,
+      cache_hit: cacheHit,
+      duration_ms: cacheHit ? 0 : detectionResult.processing_duration_ms,
+    })
+
     return NextResponse.json({
       job_id: jobId,
       status: 'completed',
@@ -113,8 +126,10 @@ export async function POST(req: NextRequest) {
         err.code === 'INVALID_INPUT' || err.code === 'TEXT_TOO_SHORT' || err.code === 'TEXT_TOO_LARGE' ? 400
         : err.code === 'PROVIDER_RATE_LIMITED' ? 429
         : 502
+      recordScanTelemetry({ event: 'scan_failed', trigger: 'manual', error_code: err.code, http_status: status })
       return NextResponse.json({ error: { code: err.code, message: err.message } }, { status })
     }
+    recordScanTelemetry({ event: 'scan_failed', trigger: 'manual', error_code: 'DEPENDENCY_UPSTREAM_ERROR', http_status: 502 })
     return NextResponse.json(
       { error: { code: 'DEPENDENCY_UPSTREAM_ERROR', message: 'An upstream service failed. Please retry.' } },
       { status: 502 },

@@ -2,6 +2,7 @@ import { generateWatermark } from '@/lib/watermark'
 import { aggregateChunkResults, ChunkResult } from '@/lib/humanizePipeline'
 import { getDetectionGateway } from '@/lib/detection/gateway'
 import { DetectionResult } from '@/lib/detection/contracts'
+import { recordScanTelemetry } from '@/lib/observability/scanTelemetry'
 
 export function buildOutput(
   postText: string,
@@ -41,9 +42,24 @@ export function buildOutput(
 // detector is an independent service and must not be gradeable by (or
 // dependent on) whatever model produced the text it's scanning.
 export async function tryClassifyOutput(text: string): Promise<DetectionResult | null> {
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0
+  recordScanTelemetry({ event: 'scan_requested', trigger: 'auto', words, chars: text.length })
+
   try {
-    return await getDetectionGateway().detect(text, { mode: 'standard' })
+    const result = await getDetectionGateway().detect(text, { mode: 'standard' })
+    recordScanTelemetry({
+      event: 'scan_completed',
+      trigger: 'auto',
+      provider: result.provider.id,
+      classification: result.classification,
+      confidence_category: result.confidence_category,
+      cache_hit: false, // the auto-scan path isn't wired to the dedupe cache (see dedupe.ts)
+      duration_ms: result.processing_duration_ms,
+    })
+    return result
   } catch (err) {
+    const code = err instanceof Error && 'code' in err ? String((err as { code: unknown }).code) : 'UNKNOWN_ERROR'
+    recordScanTelemetry({ event: 'scan_failed', trigger: 'auto', error_code: code })
     console.warn('Post-humanize detection scan failed — shipping without it', {
       type: err instanceof Error ? err.constructor.name : typeof err,
     })
