@@ -1,63 +1,7 @@
+// Detection contracts (permanent GPTZero architecture, schema v3.0).
 // Shared by /api/v1/scan and the post-humanize auto-check in
-// /api/v1/humanize, so both use the same detector contract instead of two
-// copies drifting apart.
-
-export interface FeatureContribution {
-  feature: string
-  observed_value: number
-  direction: 'ai_indicator' | 'human_indicator'
-  contribution: number
-}
-
-// A contiguous, smoothed region of the analyzed text (not a raw inference
-// window — overlapping windows are merged/smoothed server-side; see
-// services/scanner/src/aggregation/document.py). Char offsets are into the
-// exact text that was sent to the scanner, so the UI can highlight the
-// original text without re-tokenizing.
-export interface DetectionSegment {
-  id: string
-  start_char: number
-  end_char: number
-  start_token: number
-  end_token: number
-  ai_probability: number
-  classification: 'human-written' | 'ai-generated' | 'uncertain'
-  confidence: number
-}
-
-export interface Coverage {
-  analyzed_tokens: number
-  total_tokens: number
-  fraction: number
-}
-
-export interface ClassifyResult {
-  classification: 'human-written' | 'ai-generated' | 'mixed' | 'uncertain'
-  confidence: number
-  human_probability: number
-  ai_probability: number
-  uncertain_probability: number
-  // Token-level reconstruction across the whole document (spec §9) — the
-  // number to display as "Estimated AI-like content". ai_probability
-  // mirrors this for backward compatibility.
-  ai_fraction: number
-  coverage: Coverage
-  segments: DetectionSegment[]
-  per_sentence_perplexity: number[]
-  top_features: FeatureContribution[]
-  explanation: { summary: string; detail: string }
-  model_used: string
-  processing_duration_ms: number | null
-}
-
-// ── v3.0 contracts (permanent GPTZero architecture) ──────────────────────
-// The v2 types above no longer talk to services/scanner — DetectionGateway
-// (gateway.ts) is now the only detection backend, and legacyAdapter.ts
-// reshapes its v3.0 DetectionResult into the v2 types above so the API
-// routes' response shape, and everything downstream of it (scanStore,
-// ScanReport, the dashboard), keep working unchanged. Both the v2 types and
-// the adapter are deleted once those consumers move onto DetectionResult
-// directly (Phase 5).
+// /api/v1/humanize, so both use the same contract instead of two copies
+// drifting apart.
 
 export type DetectionClassification = 'human-written' | 'ai-generated' | 'mixed' | 'uncertain'
 export type ConfidenceCategory = 'high' | 'medium' | 'low' | 'unknown'
@@ -74,16 +18,16 @@ export interface ProbabilitySet {
   mixed: number | null
 }
 
-// GPTZero-era segment shape — distinct from the v2 DetectionSegment above,
-// which is keyed to the proprietary scanner's token-window aggregation.
-// 'mixed' is deliberately excluded: a provider calls a segment human/ai/
+// A per-sentence detection result. 'mixed' is deliberately excluded from a
+// segment's own classification: a provider calls a segment human/ai/
 // uncertain, and it's the document-level aggregate that can be 'mixed'.
-export interface DetectionSegmentV3 {
+export interface DetectionSegment {
   id: string
   text?: string
-  // GPTZero-derived segments know they lack an offset/classification when
-  // sentence-matching fails or a score is missing — an explicit `undefined`
-  // rather than an omitted key, hence `| undefined` alongside `?:` here.
+  // A segment knows it lacks an offset/classification when sentence-
+  // matching against the original text fails, or a score is missing — an
+  // explicit `undefined` rather than an omitted key, hence `| undefined`
+  // alongside `?:` here.
   start_char?: number | undefined
   end_char?: number | undefined
   classification?: 'human-written' | 'ai-generated' | 'uncertain' | undefined
@@ -123,7 +67,7 @@ export interface DetectionResult {
   // granular enough to support it (spec §13) — never manufactured from
   // probabilities.ai alone, and null when there isn't enough signal.
   estimated_ai_like_fraction: number | null
-  segments: DetectionSegmentV3[]
+  segments: DetectionSegment[]
   diagnostics: LocalDiagnostics | null
   processing_duration_ms: number
   warnings: string[]

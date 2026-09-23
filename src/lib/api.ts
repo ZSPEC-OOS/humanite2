@@ -1,5 +1,8 @@
 import { useUserStore } from '@/stores/userStore'
 import { useApiConfigStore } from '@/stores/apiConfigStore'
+import type { DetectionResult, DetectionSegment, LocalDiagnostics } from '@/lib/detection/contracts'
+
+export type { DetectionResult, DetectionSegment, LocalDiagnostics }
 
 // In production this is empty string (same-origin). Set NEXT_PUBLIC_API_URL only
 // when pointing at an external backend (legacy microservices deployment).
@@ -100,22 +103,8 @@ export interface HumanizeOutput {
   }
   // Automatic AI-detection scan run against this output text once humanize
   // completes — null only if the scan itself failed (never blocks the
-  // humanize response; see detection_warning). Same shape as
-  // ScanAPIResponse's core fields.
-  detection: {
-    classification: 'human-written' | 'ai-generated' | 'mixed' | 'uncertain'
-    confidence: number
-    human_probability: number
-    ai_probability: number
-    uncertain_probability: number
-    ai_fraction: number
-    coverage: Coverage
-    segments: DetectionSegment[]
-    per_sentence_perplexity: number[]
-    top_features: FeatureContribution[]
-    explanation: { summary: string; detail: string }
-    model_used: string
-  } | null
+  // humanize response; see detection_warning).
+  detection: DetectionResult | null
   // Set only when `detection` is null — distinguishes "not analyzed" from a
   // real "uncertain" classification, which is a populated `detection`.
   detection_warning: string | null
@@ -171,49 +160,11 @@ export async function apiHumanize(
 
 // ── Scan ──────────────────────────────────────────────────────────────────────
 
-export interface FeatureContribution {
-  feature: string
-  observed_value: number
-  direction: 'ai_indicator' | 'human_indicator'
-  contribution: number
-}
-
-export interface DetectionSegment {
-  id: string
-  start_char: number
-  end_char: number
-  start_token: number
-  end_token: number
-  ai_probability: number
-  classification: 'human-written' | 'ai-generated' | 'uncertain'
-  confidence: number
-}
-
-export interface Coverage {
-  analyzed_tokens: number
-  total_tokens: number
-  fraction: number
-}
-
-export interface ScanAPIResponse {
+export interface ScanAPIResponse extends DetectionResult {
   job_id: string
   status: string
   scan_id: string | null
-  classification: 'human-written' | 'ai-generated' | 'mixed' | 'uncertain' | null
-  confidence: number | null
-  human_probability: number | null
-  ai_probability: number | null
-  uncertain_probability: number | null
-  ai_fraction: number | null
-  coverage: Coverage | null
-  segments: DetectionSegment[]
-  per_sentence_perplexity: number[]
-  top_features: FeatureContribution[]
-  explanation: { summary: string; detail: string } | null
-  model_used: string | null
-  processing_duration_ms: number | null
   result_url: string | null
-  warning: string | null
 }
 
 export async function apiScan(

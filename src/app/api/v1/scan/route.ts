@@ -4,7 +4,6 @@ import { db, tryPersist } from '@/lib/firestore'
 import { requireAuth, isAuthFailure } from '@/lib/require-auth'
 import { preprocess } from '@/lib/preprocess'
 import { getDetectionGateway } from '@/lib/detection/gateway'
-import { toLegacyClassifyResult } from '@/lib/detection/legacyAdapter'
 import { DetectionProviderError } from '@/lib/detection/contracts'
 
 // A single non-chunked detection call through DetectionGateway.
@@ -15,8 +14,6 @@ const ABSOLUTE_MAX_CHARS = 300_000
 export async function POST(req: NextRequest) {
   const auth = await requireAuth(req)
   if (isAuthFailure(auth)) return auth
-
-  const started = performance.now()
 
   let body: { text?: string; mode?: string; domain_hint?: string }
   try {
@@ -72,7 +69,6 @@ export async function POST(req: NextRequest) {
       mode,
       domainHint: body.domain_hint || 'general',
     })
-    const result = toLegacyClassifyResult(detectionResult, sanitized)
 
     await tryPersist(() => db().collection('jobs').doc(jobId).update({ status: 'completed', completedAt: new Date(), updatedAt: new Date() }), 'complete scan job')
 
@@ -80,21 +76,8 @@ export async function POST(req: NextRequest) {
       job_id: jobId,
       status: 'completed',
       scan_id: scanId,
-      classification: result.classification,
-      confidence: result.confidence,
-      human_probability: result.human_probability,
-      ai_probability: result.ai_probability,
-      uncertain_probability: result.uncertain_probability,
-      ai_fraction: result.ai_fraction,
-      coverage: result.coverage,
-      segments: result.segments,
-      per_sentence_perplexity: result.per_sentence_perplexity,
-      top_features: result.top_features,
-      explanation: result.explanation,
-      model_used: result.model_used,
-      processing_duration_ms: Math.round(performance.now() - started),
       result_url: null,
-      warning: null,
+      ...detectionResult,
     })
   } catch (err) {
     await tryPersist(() => db().collection('jobs').doc(jobId).update({ status: 'failed', errorCode: 'INTERNAL_PIPELINE_ERROR', updatedAt: new Date() }), 'mark scan job failed')

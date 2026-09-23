@@ -10,8 +10,7 @@ import { chunkFactLockedText } from '@/lib/chunk'
 import { humanizeChunk, aggregateChunkResults, ChunkResult } from '@/lib/humanizePipeline'
 import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
 import { getDetectionGateway } from '@/lib/detection/gateway'
-import { toLegacyClassifyResult } from '@/lib/detection/legacyAdapter'
-import { ClassifyResult } from '@/lib/detection/contracts'
+import { DetectionResult } from '@/lib/detection/contracts'
 
 // Vercel clamps this to whatever the deployment's plan actually allows
 // (Hobby's ceiling is well under this) — raise it in the dashboard/CLI to
@@ -47,7 +46,7 @@ function buildOutput(
   postText: string,
   results: ChunkResult[],
   watermark: ReturnType<typeof generateWatermark>,
-  detection: ClassifyResult | null,
+  detection: DetectionResult | null,
 ) {
   const agg = aggregateChunkResults(results)
   return {
@@ -80,10 +79,9 @@ function buildOutput(
 // Deliberately does not take the humanizer's OpenAI client/model: the
 // detector is an independent service and must not be gradeable by (or
 // dependent on) whatever model produced the text it's scanning.
-async function tryClassifyOutput(text: string): Promise<ClassifyResult | null> {
+async function tryClassifyOutput(text: string): Promise<DetectionResult | null> {
   try {
-    const result = await getDetectionGateway().detect(text, { mode: 'standard' })
-    return toLegacyClassifyResult(result, text)
+    return await getDetectionGateway().detect(text, { mode: 'standard' })
   } catch (err) {
     console.warn('Post-humanize detection scan failed — shipping without it', {
       type: err instanceof Error ? err.constructor.name : typeof err,

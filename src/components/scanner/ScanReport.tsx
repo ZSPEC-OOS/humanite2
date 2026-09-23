@@ -1,8 +1,8 @@
 'use client'
 import { useScanStore } from '@/stores/scanStore'
-import { PerplexityChart } from './PerplexityChart'
 import { SegmentHeatmap } from './SegmentHeatmap'
 import { Spinner } from '@/components/ui/Spinner'
+import type { LocalDiagnostics } from '@/lib/api'
 
 interface ScanReportProps {
   // The exact text that was scanned — required to render the segment
@@ -38,7 +38,52 @@ const CLASS_CONFIG = {
   },
 } as const
 
-type ClassKey = keyof typeof CLASS_CONFIG
+const CONFIDENCE_LABEL: Record<string, string> = {
+  high: 'High', medium: 'Medium', low: 'Low', unknown: 'Unknown',
+}
+
+function providerLabel(id: string): string {
+  if (id === 'gptzero') return 'GPTZero'
+  if (id === 'mock') return 'a mock provider (development)'
+  return id
+}
+
+function level(value: number, lowMax: number, medMax: number): string {
+  if (value < lowMax) return 'Low'
+  if (value < medMax) return 'Moderate'
+  return 'High'
+}
+
+function DiagnosticPanel({ diagnostics: d }: { diagnostics: LocalDiagnostics }) {
+  const rows = [
+    { label: 'Sentence variation', value: level(d.sentence_length_stddev, 3, 7) },
+    { label: 'Lexical diversity', value: level(d.lexical_diversity, 0.4, 0.6) },
+    { label: 'Phrase repetition', value: level(d.repeated_bigram_rate, 0.05, 0.15) },
+    { label: 'Contraction use', value: level(d.contraction_rate, 0.01, 0.05) },
+    { label: 'First-person voice', value: level(d.first_person_rate, 0.02, 0.08) },
+    { label: 'Question use', value: level(d.question_rate, 0.05, 0.2) },
+  ]
+
+  return (
+    <div>
+      <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2.5">
+        Writing Characteristics
+      </p>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+        {rows.map(r => (
+          <div key={r.label} className="flex items-center justify-between text-xs">
+            <span className="text-gray-500 dark:text-gray-400">{r.label}</span>
+            <span className="font-medium text-gray-700 dark:text-gray-300">{r.value}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
+        {d.word_count.toLocaleString()} words · {d.sentence_count.toLocaleString()} sentences
+        {d.readability_score != null && ` · Flesch readability ${d.readability_score.toFixed(0)}`}
+      </p>
+    </div>
+  )
+}
 
 export function ScanReport({ text }: ScanReportProps = {}) {
   const { response, status, error } = useScanStore()
@@ -72,13 +117,11 @@ export function ScanReport({ text }: ScanReportProps = {}) {
     )
   }
 
-  if (!response || !response.classification) return null
+  if (!response) return null
 
-  const cls    = (response.classification as ClassKey) ?? 'uncertain'
-  const cfg    = CLASS_CONFIG[cls] ?? CLASS_CONFIG.uncertain
-  const conf   = response.confidence ?? 0
-  const hProb  = response.human_probability ?? 0
-  const aiProb = response.ai_probability   ?? 0
+  const cfg = CLASS_CONFIG[response.classification] ?? CLASS_CONFIG.uncertain
+  const { human, ai, mixed } = response.probabilities
+  const predicted = response.predicted_class_probability
 
   return (
     <div className="p-4 space-y-4 overflow-y-auto h-full">
@@ -91,25 +134,41 @@ export function ScanReport({ text }: ScanReportProps = {}) {
           </span>
           <div className="text-right">
             <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-              {(conf * 100).toFixed(0)}%
+              {predicted != null ? `${(predicted * 100).toFixed(0)}%` : '—'}
             </span>
-            <p className="text-xs text-gray-500 dark:text-gray-400">confidence</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {cfg.label.toLowerCase()} probability
+            </p>
           </div>
         </div>
-        <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-          <div className={`h-full rounded-full transition-all ${cfg.bar}`}
-               style={{ width: `${conf * 100}%` }} />
-        </div>
+        {predicted != null && (
+          <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div className={`h-full rounded-full transition-all ${cfg.bar}`}
+                 style={{ width: `${predicted * 100}%` }} />
+          </div>
+        )}
+        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+          Confidence: <span className="font-medium text-gray-700 dark:text-gray-300">
+            {CONFIDENCE_LABEL[response.confidence_category] ?? response.confidence_category}
+          </span>
+        </p>
       </div>
 
-      {/* Coverage — how much of the document was actually analyzed. Distinct
-          from confidence: a fully-covered document can still be low
-          confidence, and a partially-covered one (quick mode) should say so
-          rather than presenting a full-document number. */}
-      {response.coverage && (
+      {/* Provider warnings — e.g. a low-confidence or unrecognized result */}
+      {response.warnings.length > 0 && (
+        <div className="text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800
+                        border border-gray-200 dark:border-gray-700 rounded-xl p-3 space-y-1">
+          {response.warnings.map((w, i) => <p key={i}>⚠ {w}</p>)}
+        </div>
+      )}
+
+      {/* Estimated AI-like content — a share-of-document estimate, distinct
+          from the confidence above in how sure the detector is about the
+          overall verdict (spec §11); left out entirely when the response
+          isn't granular enough to justify one. */}
+      {response.estimated_ai_like_fraction != null && (
         <p className="text-xs text-gray-400 dark:text-gray-500">
-          Analyzed {response.coverage.analyzed_tokens.toLocaleString()} / {response.coverage.total_tokens.toLocaleString()} tokens
-          {' '}({(response.coverage.fraction * 100).toFixed(0)}% coverage)
+          Estimated AI-like content: {(response.estimated_ai_like_fraction * 100).toFixed(0)}%
         </p>
       )}
 
@@ -118,60 +177,31 @@ export function ScanReport({ text }: ScanReportProps = {}) {
         <SegmentHeatmap text={text} segments={response.segments} />
       )}
 
-      {/* Probability breakdown */}
+      {/* Class probabilities */}
       <div className="space-y-2.5">
         <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-          Probability Breakdown
+          Class Probabilities
         </p>
         {[
-          { label: 'Human', value: hProb,  color: 'bg-gray-900 dark:bg-gray-100' },
-          { label: 'AI',    value: aiProb, color: 'bg-gray-500 dark:bg-gray-400' },
+          { label: 'Human', value: human, color: 'bg-gray-900 dark:bg-gray-100' },
+          { label: 'AI', value: ai, color: 'bg-gray-700 dark:bg-gray-300' },
+          { label: 'Mixed', value: mixed, color: 'bg-gray-400 dark:bg-gray-500' },
         ].map(({ label, value, color }) => (
           <div key={label} className="flex items-center gap-3">
             <span className="text-xs text-gray-500 dark:text-gray-400 w-10">{label}</span>
             <div className="flex-1 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
               <div className={`h-full rounded-full transition-all ${color}`}
-                   style={{ width: `${value * 100}%` }} />
+                   style={{ width: `${(value ?? 0) * 100}%` }} />
             </div>
             <span className="text-xs font-medium text-gray-700 dark:text-gray-300 w-9 text-right tabular-nums">
-              {(value * 100).toFixed(0)}%
+              {value != null ? `${(value * 100).toFixed(0)}%` : '—'}
             </span>
           </div>
         ))}
       </div>
 
-      {/* Perplexity chart */}
-      {response.per_sentence_perplexity.length > 0 && (
-        <div>
-          <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
-            Per-Sentence Perplexity
-          </p>
-          <PerplexityChart scores={response.per_sentence_perplexity} />
-        </div>
-      )}
-
-      {/* Top features */}
-      {response.top_features.length > 0 && (
-        <div>
-          <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2.5">
-            Top Signals
-          </p>
-          <div className="space-y-2">
-            {response.top_features.map((f, i) => (
-              <div key={i} className="flex items-center gap-2.5">
-                <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-gray-900 dark:bg-gray-100" />
-                <span className="text-xs text-gray-500 dark:text-gray-400 flex-1 truncate">
-                  {f.feature.replace(/_/g, ' ')}
-                </span>
-                <div className="w-16 h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                  <div className="h-full rounded-full bg-gray-900 dark:bg-gray-100"
-                    style={{ width: `${f.contribution * 100}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Writing diagnostics — descriptive only, never a second opinion */}
+      {response.diagnostics && <DiagnosticPanel diagnostics={response.diagnostics} />}
 
       {/* Explanation */}
       {response.explanation && (
@@ -179,20 +209,19 @@ export function ScanReport({ text }: ScanReportProps = {}) {
           <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
             {response.explanation.summary}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-            {response.explanation.detail}
-          </p>
+          {response.explanation.detail && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+              {response.explanation.detail}
+            </p>
+          )}
         </div>
       )}
 
-      {/* Model info */}
-      {response.model_used && (
-        <p className="text-xs text-gray-400 dark:text-gray-500">
-          Model: {response.model_used}
-          {response.processing_duration_ms != null
-            ? ` · ${response.processing_duration_ms}ms` : ''}
-        </p>
-      )}
+      {/* Provider attribution + timing */}
+      <p className="text-xs text-gray-400 dark:text-gray-500">
+        Detection provided by {providerLabel(response.provider.id)}
+        {response.processing_duration_ms != null ? ` · ${response.processing_duration_ms}ms` : ''}
+      </p>
     </div>
   )
 }
