@@ -1,5 +1,4 @@
 import Link from 'next/link'
-import { ArrowIcon } from './icons'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
 
 const NAV_LINKS = [
@@ -25,19 +24,10 @@ export function SiteNav() {
       </nav>
 
       <div className="flex items-center gap-4">
-        <ThemeToggle />
         <Link href="/auth/login" className="hidden text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100 sm:block">
           Log in
         </Link>
-        <Link
-          href="/dashboard"
-          className="inline-flex items-center gap-2 rounded-full bg-gray-900 px-5 py-2.5
-                     text-sm font-semibold text-white transition-colors hover:bg-gray-800
-                     dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
-        >
-          Get Started
-          <ArrowIcon />
-        </Link>
+        <ThemeToggle />
       </div>
     </header>
   )
