@@ -13,44 +13,45 @@ const INTENSITY_TICKS = [
 ]
 
 const selectCls = `text-sm rounded-xl px-4 py-2 bg-white border border-gray-300 text-gray-700
-                   focus:outline-none focus:border-gray-900 appearance-none cursor-pointer
+                   dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300
+                   focus:outline-none focus:border-gray-900 dark:focus:border-gray-100 appearance-none cursor-pointer
                    min-w-[130px]`
 
 export function ControlPanel() {
   const { settings, setSettings } = useHumanizeStore()
 
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl px-5 py-4 shrink-0">
+    <div className="bg-white border border-gray-200 rounded-2xl px-5 py-4 shrink-0 dark:bg-gray-900 dark:border-gray-800">
       <div className="flex flex-wrap items-start gap-x-8 gap-y-5">
 
         {/* Intensity */}
         <div className="flex-1 min-w-[180px]">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-semibold text-gray-700">Intensity</span>
-            <span className="text-xs font-bold text-gray-900">{settings.intensity}</span>
+            <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Intensity</span>
+            <span className="text-xs font-bold text-gray-900 dark:text-gray-100">{settings.intensity}</span>
           </div>
           <input
             type="range" min={1} max={10} step={1}
             value={settings.intensity}
             onChange={e => setSettings({ intensity: Number(e.target.value) })}
             className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-            style={{ accentColor: '#111827' }}
+            style={{ accentColor: 'var(--accent)' }}
           />
           <div className="flex justify-between mt-2">
             {INTENSITY_TICKS.map(t => (
               <div key={t.v} className="flex flex-col items-center gap-0.5">
-                <span className="text-[10px] text-gray-500 font-medium tabular-nums">{t.v}</span>
-                <span className="text-[9px] text-gray-400">{t.label}</span>
+                <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium tabular-nums">{t.v}</span>
+                <span className="text-[9px] text-gray-400 dark:text-gray-500">{t.label}</span>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="w-px self-stretch bg-gray-200 hidden sm:block" />
+        <div className="w-px self-stretch bg-gray-200 dark:bg-gray-800 hidden sm:block" />
 
         {/* Tone */}
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">Tone</span>
+          <span className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">Tone</span>
           <select
             value={settings.tone}
             onChange={e => setSettings({ tone: e.target.value })}
@@ -64,11 +65,11 @@ export function ControlPanel() {
           </select>
         </div>
 
-        <div className="w-px self-stretch bg-gray-200 hidden sm:block" />
+        <div className="w-px self-stretch bg-gray-200 dark:bg-gray-800 hidden sm:block" />
 
         {/* Domain */}
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">Domain</span>
+          <span className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">Domain</span>
           <select
             value={settings.domain}
             onChange={e => setSettings({ domain: e.target.value })}
@@ -82,11 +83,11 @@ export function ControlPanel() {
           </select>
         </div>
 
-        <div className="w-px self-stretch bg-gray-200 hidden sm:block" />
+        <div className="w-px self-stretch bg-gray-200 dark:bg-gray-800 hidden sm:block" />
 
         {/* Preserve citations */}
         <label className="flex flex-col gap-2 cursor-pointer select-none">
-          <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+          <span className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
             Preserve citations
           </span>
           <div className="flex items-center gap-2.5">
@@ -95,9 +96,9 @@ export function ControlPanel() {
               checked={settings.preserve_citations}
               onChange={e => setSettings({ preserve_citations: e.target.checked })}
               className="w-5 h-5 rounded cursor-pointer"
-              style={{ accentColor: '#111827' }}
+              style={{ accentColor: 'var(--accent)' }}
             />
-            <span className="text-sm text-gray-500">
+            <span className="text-sm text-gray-500 dark:text-gray-400">
               {settings.preserve_citations ? 'On' : 'Off'}
             </span>
           </div>

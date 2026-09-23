@@ -44,7 +44,7 @@ export function ExportMenu() {
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-gray-400">Export:</span>
+      <span className="text-xs text-gray-400 dark:text-gray-500">Export:</span>
       {FORMATS.map(({ key, label }) => (
         <button
           key={key}
@@ -53,18 +53,20 @@ export function ExportMenu() {
           className="text-xs px-2.5 py-1 rounded-lg border
                      bg-gray-50 border-gray-200 text-gray-600
                      hover:bg-gray-100 hover:border-gray-300 hover:text-gray-900
+                     dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400
+                     dark:hover:bg-gray-700 dark:hover:border-gray-600 dark:hover:text-gray-100
                      disabled:opacity-40 disabled:cursor-not-allowed
                      transition-all"
         >
           {loading === key ? (
             <span className="flex items-center gap-1">
-              <Spinner className="w-2.5 h-2.5 border-gray-300 border-t-gray-600" />
+              <Spinner className="w-2.5 h-2.5 border-gray-300 border-t-gray-600 dark:border-gray-600 dark:border-t-gray-300" />
               {label}
             </span>
           ) : label}
         </button>
       ))}
-      {error && <span className="text-xs font-medium text-gray-900 ml-1">{error}</span>}
+      {error && <span className="text-xs font-medium text-gray-900 dark:text-gray-100 ml-1">{error}</span>}
     </div>
   )
 }

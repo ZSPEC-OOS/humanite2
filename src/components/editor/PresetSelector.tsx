@@ -88,20 +88,21 @@ export function PresetSelector() {
             onClick={handleSave}
             disabled={!saveName.trim() || saving}
             className="text-xs px-2.5 py-1.5 rounded-lg bg-gray-900 text-white
-                       hover:bg-gray-800 disabled:opacity-40 transition-colors"
+                       hover:bg-gray-800 disabled:opacity-40 transition-colors
+                       dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
           >
             {saving ? '…' : 'Save'}
           </button>
           <button
             onClick={() => { setShowSaveForm(false); setSaveName(''); setError(null) }}
-            className="text-xs text-gray-400 hover:text-gray-700 px-1"
+            className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300 px-1"
           >✕</button>
-          {error && <span className="text-xs font-medium text-gray-900">{error}</span>}
+          {error && <span className="text-xs font-medium text-gray-900 dark:text-gray-100">{error}</span>}
         </div>
       ) : (
         <button
           onClick={() => setShowSaveForm(true)}
-          className="text-xs text-gray-400 hover:text-gray-900 transition-colors"
+          className="text-xs text-gray-400 hover:text-gray-900 dark:text-gray-500 dark:hover:text-gray-100 transition-colors"
           title="Save current settings as preset"
         >
           + Save preset

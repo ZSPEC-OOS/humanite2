@@ -45,18 +45,19 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-white">
-      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-10 w-full max-w-sm">
+    <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
+      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-10 w-full max-w-sm dark:bg-gray-900 dark:border-gray-800">
         <div className="flex items-center justify-center mb-8">
-          <span className="text-xl font-bold text-gray-900">Humanite</span>
+          <span className="text-xl font-bold text-gray-900 dark:text-gray-100">Humanite</span>
         </div>
 
-        <h1 className="text-lg font-bold text-gray-900 mb-1 text-center">Create account</h1>
-        <p className="text-xs text-gray-500 text-center mb-6">Join Humanite today</p>
+        <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1 text-center">Create account</h1>
+        <p className="text-xs text-gray-500 dark:text-gray-400 text-center mb-6">Join Humanite today</p>
 
         {error && (
           <div className="mb-4 p-3 bg-gray-50 border border-gray-200
-                          rounded-xl text-sm font-medium text-gray-900">
+                          rounded-xl text-sm font-medium text-gray-900
+                          dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100">
             {error}
           </div>
         )}
@@ -90,20 +91,21 @@ export default function RegisterPage() {
             type="submit"
             disabled={loading}
             className="w-full py-2.5 rounded-xl text-sm font-semibold text-white
-                       bg-gray-900 hover:bg-gray-800 disabled:opacity-40 transition-colors mt-2"
+                       bg-gray-900 hover:bg-gray-800 disabled:opacity-40 transition-colors mt-2
+                       dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
           >
             {loading ? (
               <span className="flex items-center justify-center gap-2">
-                <Spinner className="w-3 h-3 border-white" />
+                <Spinner className="w-3 h-3 border-white dark:border-gray-900" />
                 Creating account…
               </span>
             ) : 'Create account'}
           </button>
         </form>
 
-        <p className="mt-5 text-xs text-center text-gray-400">
+        <p className="mt-5 text-xs text-center text-gray-400 dark:text-gray-500">
           Already have an account?{' '}
-          <a href="/auth/login" className="text-gray-900 font-medium hover:opacity-70">
+          <a href="/auth/login" className="text-gray-900 dark:text-gray-100 font-medium hover:opacity-70">
             Sign in
           </a>
         </p>

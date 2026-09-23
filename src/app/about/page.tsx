@@ -5,24 +5,24 @@ import { ArrowIcon } from '@/components/marketing/icons'
 
 export default function AboutPage() {
   return (
-    <main className="min-h-screen bg-white">
+    <main className="min-h-screen bg-white dark:bg-gray-950">
       <div className="flex min-h-screen flex-col">
         <SiteNav />
 
         <div className="flex-1 px-6 pb-20 pt-6 md:px-14">
           {/* Hero */}
           <div className="mx-auto max-w-2xl text-center">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500 dark:text-gray-400">
               About
             </p>
-            <h1 className="mt-4 font-display text-4xl font-bold text-gray-900 md:text-6xl">
+            <h1 className="mt-4 font-display text-4xl font-bold text-gray-900 dark:text-gray-100 md:text-6xl">
               More human ideas
             </h1>
           </div>
 
           {/* Mission */}
-          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-gray-200 bg-white p-8">
-            <p className="text-base leading-relaxed text-gray-700">
+          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900">
+            <p className="text-base leading-relaxed text-gray-700 dark:text-gray-300">
               AI writing tools help people think faster and write more — but left unedited,
               they tend to flatten everyone’s voice into the same predictable patterns:
               the same transition words, the same sentence rhythm, the same handful of
@@ -33,9 +33,9 @@ export default function AboutPage() {
           </div>
 
           {/* How it works, briefly */}
-          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-gray-200 bg-white p-8">
-            <h2 className="text-lg font-semibold text-gray-900">How we approach it</h2>
-            <p className="mt-3 text-sm leading-relaxed text-gray-600">
+          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">How we approach it</h2>
+            <p className="mt-3 text-sm leading-relaxed text-gray-600 dark:text-gray-400">
               Every rewrite goes through automated quality gates that check for dropped
               facts and meaning drift before you ever see the output — style should
               change, content shouldn’t. Numbers, dates, and citations are detected and
@@ -45,11 +45,11 @@ export default function AboutPage() {
           </div>
 
           {/* Contact */}
-          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-gray-200 bg-white p-8 text-center">
-            <h2 className="text-lg font-semibold text-gray-900">Get in touch</h2>
-            <p className="mt-2 text-sm text-gray-600">
+          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-gray-200 bg-white p-8 text-center dark:border-gray-800 dark:bg-gray-900">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Get in touch</h2>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
               Questions, feedback, or interested in Enterprise?{' '}
-              <a href="mailto:hello@humanite.app" className="font-medium text-gray-900 underline underline-offset-2">
+              <a href="mailto:hello@humanite.app" className="font-medium text-gray-900 underline underline-offset-2 dark:text-gray-100">
                 hello@humanite.app
               </a>
             </p>
@@ -61,7 +61,8 @@ export default function AboutPage() {
               href="/dashboard"
               className="inline-flex items-center gap-2.5 rounded-full bg-gray-900
                          px-8 py-4 text-base font-bold text-white
-                         transition-colors hover:bg-gray-800"
+                         transition-colors hover:bg-gray-800
+                         dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
             >
               Begin Transformation
               <ArrowIcon />

@@ -26,20 +26,20 @@ const FAQS = [
 
 export default function PricingPage() {
   return (
-    <main className="min-h-screen bg-white">
+    <main className="min-h-screen bg-white dark:bg-gray-950">
       <div className="flex min-h-screen flex-col">
         <SiteNav />
 
         <div className="flex-1 px-6 pb-20 pt-6 md:px-14">
           {/* Hero */}
           <div className="mx-auto max-w-2xl text-center">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500 dark:text-gray-400">
               Simple pricing
             </p>
-            <h1 className="mt-4 font-display text-4xl font-bold text-gray-900 md:text-6xl">
+            <h1 className="mt-4 font-display text-4xl font-bold text-gray-900 dark:text-gray-100 md:text-6xl">
               Pay for what you write
             </h1>
-            <p className="mx-auto mt-4 max-w-lg text-base leading-relaxed text-gray-600 md:text-lg">
+            <p className="mx-auto mt-4 max-w-lg text-base leading-relaxed text-gray-600 dark:text-gray-400 md:text-lg">
               Start free. Upgrade when you need longer documents, saved presets, and priority support.
             </p>
           </div>
@@ -49,29 +49,29 @@ export default function PricingPage() {
             {PRICING_TIERS.map(tier => (
               <div
                 key={tier.id}
-                className={`relative flex flex-col rounded-2xl border bg-white p-7 ${
-                  tier.highlighted ? 'border-gray-900 md:-translate-y-2' : 'border-gray-200'
+                className={`relative flex flex-col rounded-2xl border bg-white p-7 dark:bg-gray-900 ${
+                  tier.highlighted ? 'border-gray-900 dark:border-gray-100 md:-translate-y-2' : 'border-gray-200 dark:border-gray-800'
                 }`}
               >
                 {tier.highlighted && (
                   <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gray-900
-                                   px-3 py-1 text-xs font-bold text-white">
+                                   px-3 py-1 text-xs font-bold text-white dark:bg-gray-100 dark:text-gray-900">
                     Most popular
                   </span>
                 )}
 
-                <h2 className="text-lg font-semibold text-gray-900">{tier.name}</h2>
-                <p className="mt-1 text-sm text-gray-500">{tier.description}</p>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{tier.name}</h2>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{tier.description}</p>
 
                 <div className="mt-5 flex items-baseline gap-1">
-                  <span className="font-display text-4xl font-bold text-gray-900">{tier.price}</span>
-                  {tier.period && <span className="text-sm text-gray-500">{tier.period}</span>}
+                  <span className="font-display text-4xl font-bold text-gray-900 dark:text-gray-100">{tier.price}</span>
+                  {tier.period && <span className="text-sm text-gray-500 dark:text-gray-400">{tier.period}</span>}
                 </div>
 
                 <ul className="mt-6 flex-1 space-y-3">
                   {tier.features.map(f => (
-                    <li key={f} className="flex items-start gap-2.5 text-sm text-gray-600">
-                      <CheckIcon className="mt-0.5 shrink-0 text-gray-900" />
+                    <li key={f} className="flex items-start gap-2.5 text-sm text-gray-600 dark:text-gray-400">
+                      <CheckIcon className="mt-0.5 shrink-0 text-gray-900 dark:text-gray-100" />
                       {f}
                     </li>
                   ))}
@@ -82,7 +82,8 @@ export default function PricingPage() {
                     <CheckoutButton
                       plan={tier.id}
                       className="w-full rounded-full bg-gray-900 px-6 py-3 text-sm font-bold text-white
-                                 transition-colors hover:bg-gray-800 disabled:opacity-60"
+                                 transition-colors hover:bg-gray-800 disabled:opacity-60
+                                 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
                     >
                       {tier.cta}
                     </CheckoutButton>
@@ -90,7 +91,8 @@ export default function PricingPage() {
                     <Link
                       href={tier.ctaHref ?? '#'}
                       className="block w-full rounded-full bg-gray-900 px-6 py-3 text-center text-sm
-                                 font-semibold text-white transition-colors hover:bg-gray-800"
+                                 font-semibold text-white transition-colors hover:bg-gray-800
+                                 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
                     >
                       {tier.cta}
                     </Link>
@@ -102,14 +104,14 @@ export default function PricingPage() {
 
           {/* FAQ */}
           <div className="mx-auto mt-20 max-w-2xl">
-            <h2 className="text-center font-display text-2xl font-bold text-gray-900 md:text-3xl">
+            <h2 className="text-center font-display text-2xl font-bold text-gray-900 dark:text-gray-100 md:text-3xl">
               Questions, answered
             </h2>
             <div className="mt-8 space-y-4">
               {FAQS.map(item => (
-                <div key={item.q} className="rounded-2xl border border-gray-200 bg-white p-5">
-                  <p className="text-sm font-semibold text-gray-900">{item.q}</p>
-                  <p className="mt-1.5 text-sm leading-relaxed text-gray-600">{item.a}</p>
+                <div key={item.q} className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{item.q}</p>
+                  <p className="mt-1.5 text-sm leading-relaxed text-gray-600 dark:text-gray-400">{item.a}</p>
                 </div>
               ))}
             </div>
