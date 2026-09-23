@@ -3,8 +3,21 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --accent: #111827;
+  }
+
+  .dark {
+    --accent: #f3f4f6;
+  }
+
   body {
     background-color: #ffffff;
     color: #111827;
+  }
+
+  .dark body {
+    background-color: #030712;
+    color: #f3f4f6;
   }
 }

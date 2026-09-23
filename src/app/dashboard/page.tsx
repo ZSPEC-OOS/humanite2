@@ -11,6 +11,8 @@ import { ExportMenu }       from '@/components/output/ExportMenu'
 import { ScanReport }       from '@/components/scanner/ScanReport'
 import { Spinner }          from '@/components/ui/Spinner'
 import { ApiConfigModal }   from '@/components/settings/ApiConfigModal'
+import { ThemeToggle }      from '@/components/theme/ThemeToggle'
+import { useTheme }         from '@/components/theme/ThemeProvider'
 import { ASYNC_MAX_CHARS, SYNC_MAX_CHARS } from '@/lib/limits'
 
 const MAX_CHARS = ASYNC_MAX_CHARS
@@ -19,18 +21,20 @@ function wordCount(s: string) {
   return s.trim() ? s.trim().split(/\s+/).length : 0
 }
 
-function CircularScore({ pct }: { pct: number }) {
+function CircularScore({ pct, isDark }: { pct: number; isDark: boolean }) {
   const r = 26, circ = 2 * Math.PI * r
+  const track = isDark ? '#374151' : '#e5e7eb'
+  const fg    = isDark ? '#f3f4f6' : '#111827'
   return (
     <svg width="68" height="68" viewBox="0 0 68 68" aria-hidden>
-      <circle cx="34" cy="34" r={r} fill="none" stroke="#e5e7eb" strokeWidth="5" />
+      <circle cx="34" cy="34" r={r} fill="none" stroke={track} strokeWidth="5" />
       <circle
-        cx="34" cy="34" r={r} fill="none" stroke="#111827" strokeWidth="5"
+        cx="34" cy="34" r={r} fill="none" stroke={fg} strokeWidth="5"
         strokeDasharray={circ} strokeDashoffset={circ * (1 - pct / 100)}
         strokeLinecap="round" transform="rotate(-90 34 34)"
       />
       <text x="34" y="34" textAnchor="middle" dominantBaseline="central"
-        fill="#111827" fontSize="13" fontWeight="700">{pct}%</text>
+        fill={fg} fontSize="13" fontWeight="700">{pct}%</text>
     </svg>
   )
 }
@@ -43,6 +47,8 @@ export default function Dashboard() {
   const { scan, status: sStatus, reset: resetS, response: scanResp }  = useScanStore()
   const { text, setText, clearText }                                   = useEditorStore()
   const { hasCustomConfig, config: apiConfig }                         = useApiConfigStore()
+  const { theme }                      = useTheme()
+  const isDark                         = theme === 'dark'
   const [mobileTab, setMobileTab]     = useState<MobileTab>('input')
   const [menuOpen, setMenuOpen]       = useState(false)
   const [copied, setCopied]           = useState(false)
@@ -79,31 +85,34 @@ export default function Dashboard() {
                    : scanResp?.classification === 'ai-generated'  ? 'AI-like'
                    : scanResp?.classification === 'mixed'         ? 'Mixed'
                    : null
+  const fidelityColor = output?.quality_scores.passed != null
+    ? 'text-gray-900 dark:text-gray-100'
+    : 'text-gray-300 dark:text-gray-600'
 
   /* ── Shared panel JSX ── */
   const inputPanel = (
-    <div className="bg-white border border-gray-200 rounded-2xl flex flex-col h-full min-h-[260px]">
-      <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-gray-200 shrink-0">
-        <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden>
-          <rect x="2" y="2" width="16" height="16" rx="4" stroke="#9ca3af" strokeWidth="1.4" />
-          <path d="M5 7h10M5 10.5h7M5 14h5" stroke="#9ca3af" strokeWidth="1.4" strokeLinecap="round" />
+    <div className="bg-white border border-gray-200 rounded-2xl flex flex-col h-full min-h-[260px] dark:bg-gray-900 dark:border-gray-800">
+      <div className="flex items-center gap-2 px-4 pt-4 pb-3 border-b border-gray-200 shrink-0 dark:border-gray-800">
+        <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden className="text-gray-400 dark:text-gray-500">
+          <rect x="2" y="2" width="16" height="16" rx="4" stroke="currentColor" strokeWidth="1.4" />
+          <path d="M5 7h10M5 10.5h7M5 14h5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
-        <span className="text-sm font-semibold text-gray-500">AI-Generated Text</span>
+        <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">AI-Generated Text</span>
       </div>
       <textarea
         value={text}
         onChange={e => setText(e.target.value.slice(0, MAX_CHARS))}
         placeholder="Paste your AI-generated text here…"
-        className="flex-1 bg-transparent resize-none text-sm text-gray-800 leading-relaxed
-                   px-4 py-3 outline-none placeholder-gray-400 font-sans"
+        className="flex-1 bg-transparent resize-none text-sm text-gray-800 dark:text-gray-200 leading-relaxed
+                   px-4 py-3 outline-none placeholder-gray-400 dark:placeholder-gray-600 font-sans"
       />
-      <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 shrink-0">
-        <span className="text-xs text-gray-400">
+      <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 shrink-0 dark:border-gray-800">
+        <span className="text-xs text-gray-400 dark:text-gray-500">
           {wordCount(text)} Words
           {text.length > SYNC_MAX_CHARS && ' · processed in the background'}
         </span>
         <button onClick={handleClear} title="Clear"
-          className="text-gray-300 hover:text-gray-600 transition-colors">
+          className="text-gray-300 hover:text-gray-600 dark:text-gray-600 dark:hover:text-gray-300 transition-colors">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
             <path d="M2 14l12-12M14 14L2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
@@ -113,50 +122,50 @@ export default function Dashboard() {
   )
 
   const outputPanel = (
-    <div className="bg-white border border-gray-200 rounded-2xl flex flex-col h-full min-h-[260px]">
-      <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-gray-200 shrink-0">
+    <div className="bg-white border border-gray-200 rounded-2xl flex flex-col h-full min-h-[260px] dark:bg-gray-900 dark:border-gray-800">
+      <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-gray-200 shrink-0 dark:border-gray-800">
         <div className="flex items-center gap-2">
-          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden>
-            <circle cx="10" cy="10" r="7.5" stroke="#374151" strokeWidth="1.4" />
-            <path d="M7 10l2 2 4-4" stroke="#374151" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden className="text-gray-700 dark:text-gray-300">
+            <circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="1.4" />
+            <path d="M7 10l2 2 4-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          <span className="text-sm font-semibold text-gray-500">Humanized Text</span>
+          <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">Humanized Text</span>
         </div>
         {output?.quality_scores.passed && (
-          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" className="text-gray-900">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" className="text-gray-900 dark:text-gray-100">
             <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.4" />
             <path d="M6.5 10l2.5 2.5 5-5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         )}
       </div>
       {response?.warning && hStatus === 'done' && (
-        <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs text-gray-700 shrink-0">
+        <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs text-gray-700 shrink-0 dark:bg-gray-800 dark:border-gray-800 dark:text-gray-300">
           ⚠ {response.warning}
         </div>
       )}
-      <div className="flex-1 overflow-y-auto px-4 py-3 text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">
+      <div className="flex-1 overflow-y-auto px-4 py-3 text-sm text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-wrap">
         {hLoading ? (
           <div className="h-full flex items-center justify-center">
             <div className="text-center px-6">
-              <Spinner className="w-8 h-8 border-gray-200 border-t-gray-700 block mx-auto mb-3" />
-              <p className="text-xs text-gray-500">{progressMessage ?? 'Rewriting…'}</p>
+              <Spinner className="w-8 h-8 border-gray-200 border-t-gray-700 dark:border-gray-700 dark:border-t-gray-300 block mx-auto mb-3" />
+              <p className="text-xs text-gray-500 dark:text-gray-400">{progressMessage ?? 'Rewriting…'}</p>
             </div>
           </div>
         ) : hStatus === 'error' ? (
-          <p className="text-sm font-semibold text-gray-900">{error ?? 'Humanization failed.'}</p>
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{error ?? 'Humanization failed.'}</p>
         ) : outputText ? outputText : (
-          <span className="text-gray-300 italic">Your humanized text will appear here…</span>
+          <span className="text-gray-300 dark:text-gray-600 italic">Your humanized text will appear here…</span>
         )}
       </div>
-      <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 shrink-0">
-        <span className="text-xs text-gray-400">{wordCount(outputText)} Words</span>
+      <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 shrink-0 dark:border-gray-800">
+        <span className="text-xs text-gray-400 dark:text-gray-500">{wordCount(outputText)} Words</span>
         <div className="flex items-center gap-3">
           {output && <ExportMenu />}
           <button onClick={handleCopy} disabled={!outputText} title={copied ? 'Copied!' : 'Copy'}
-            className="text-gray-300 hover:text-gray-700 transition-colors disabled:opacity-30">
+            className="text-gray-300 hover:text-gray-700 dark:text-gray-600 dark:hover:text-gray-300 transition-colors disabled:opacity-30">
             {copied ? (
-              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
-                <path d="M2 8l4 4 8-8" stroke="#111827" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden className="text-gray-900 dark:text-gray-100">
+                <path d="M2 8l4 4 8-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             ) : (
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -177,24 +186,26 @@ export default function Dashboard() {
     {/* ══════════════════════════════════════════════════════════════
         DESKTOP  (md+)
         ══════════════════════════════════════════════════════════════ */}
-    <div className="hidden md:flex flex-col items-center min-h-screen py-6 px-6 bg-white">
+    <div className="hidden md:flex flex-col items-center min-h-screen py-6 px-6 bg-white dark:bg-gray-950">
       <div className="w-full max-w-6xl rounded-2xl overflow-hidden flex flex-col
-                      bg-white border border-gray-200"
+                      bg-white border border-gray-200 dark:bg-gray-900 dark:border-gray-800"
         style={{ minHeight: 'calc(100vh - 3rem)' }}>
         {/* Desktop header */}
-        <header className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 shrink-0">
+        <header className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 shrink-0 dark:border-gray-800">
           <div className="flex items-center gap-2.5">
-            <span className="text-base font-bold text-gray-900">
+            <span className="text-base font-bold text-gray-900 dark:text-gray-100">
               Humanite
             </span>
           </div>
           <div className="flex items-center gap-3">
             <PresetSelector />
+            <ThemeToggle className="w-7 h-7 rounded-lg" />
             <button
               onClick={() => setApiConfigOpen(true)}
               title={hasCustomConfig() ? `Using: ${apiConfig.nickname || apiConfig.modelId}` : 'Configure AI model'}
               className="relative flex items-center justify-center w-7 h-7 rounded-lg
                          text-gray-400 hover:text-gray-800 hover:bg-gray-100
+                         dark:text-gray-500 dark:hover:text-gray-100 dark:hover:bg-gray-800
                          transition-colors focus:outline-none"
             >
               <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden>
@@ -203,15 +214,16 @@ export default function Dashboard() {
                   stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
               </svg>
               {hasCustomConfig() && (
-                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-gray-900" />
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-gray-900 dark:bg-gray-100" />
               )}
             </button>
             <span className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full
-                             border border-gray-200 bg-gray-100 text-gray-600">
+                             border border-gray-200 bg-gray-100 text-gray-600
+                             dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
               {(tier ?? 'free').charAt(0).toUpperCase() + (tier ?? 'free').slice(1)} Plan
             </span>
             <button onClick={handleClear}
-              className="text-xs text-gray-400 hover:text-gray-700 transition-colors">Clear</button>
+              className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300 transition-colors">Clear</button>
           </div>
         </header>
         <div className="flex flex-col flex-1 min-h-0 p-5 gap-4">
@@ -228,21 +240,22 @@ export default function Dashboard() {
                 disabled={!canSubmit || hLoading}
                 className="relative w-[72px] h-[72px] rounded-full flex items-center justify-center
                            bg-gray-900 hover:bg-gray-800
+                           dark:bg-gray-100 dark:hover:bg-gray-200
                            disabled:opacity-40 disabled:cursor-not-allowed
                            transition-transform hover:scale-105 active:scale-95
-                           focus:outline-none focus:ring-2 focus:ring-gray-900/30"
+                           focus:outline-none focus:ring-2 focus:ring-gray-900/30 dark:focus:ring-gray-100/30"
               >
                 {hLoading
-                  ? <Spinner className="w-5 h-5 border-white/30 border-t-white" />
+                  ? <Spinner className="w-5 h-5 border-white/30 border-t-white dark:border-gray-900/30 dark:border-t-gray-900" />
                   : (
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <path d="M5 12h14M13 6l6 6-6 6" stroke="white" strokeWidth="2"
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden className="text-white dark:text-gray-900">
+                      <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2"
                         strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   )
                 }
               </button>
-              <span className="text-xs text-gray-400">Humanize</span>
+              <span className="text-xs text-gray-400 dark:text-gray-500">Humanize</span>
             </div>
 
             {outputPanel}
@@ -253,28 +266,29 @@ export default function Dashboard() {
 
           {/* Stats — only after first result */}
           {(output || showScan) && (
-            <div className="bg-white border border-gray-200 rounded-2xl px-6 py-4 shrink-0">
+            <div className="bg-white border border-gray-200 rounded-2xl px-6 py-4 shrink-0 dark:bg-gray-900 dark:border-gray-800">
               <div className="flex items-center gap-6 flex-wrap">
 
                 {output && (
                   <>
                     <div className="flex items-center gap-3">
                       {humanScore != null ? (
-                        <CircularScore pct={humanScore} />
+                        <CircularScore pct={humanScore} isDark={isDark} />
                       ) : (
                         <div className="w-[68px] h-[68px] rounded-full border border-gray-200
-                                        flex items-center justify-center text-gray-400 text-xs">
+                                        flex items-center justify-center text-gray-400 text-xs
+                                        dark:border-gray-700 dark:text-gray-500">
                           —
                         </div>
                       )}
                       <div>
-                        <p className="text-sm font-semibold text-gray-700">Human Score</p>
-                        <p className={`text-sm font-bold ${humanScore != null ? 'text-gray-900' : 'text-gray-400'}`}>
+                        <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Human Score</p>
+                        <p className={`text-sm font-bold ${humanScore != null ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}`}>
                           {scoreLabel}
                         </p>
                       </div>
                     </div>
-                    <div className="w-px h-12 bg-gray-200" />
+                    <div className="w-px h-12 bg-gray-200 dark:bg-gray-800" />
                   </>
                 )}
 
@@ -282,15 +296,16 @@ export default function Dashboard() {
                   <>
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full flex items-center justify-center
-                                      bg-gray-100 border border-gray-200">
-                        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
+                                      bg-gray-100 border border-gray-200
+                                      dark:bg-gray-800 dark:border-gray-700">
+                        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden className="text-gray-700 dark:text-gray-300">
                           <path d="M10 2l1.5 4.5L16 8l-4.5 2L10 14l-1.5-4L4 8l4.5-1.5L10 2z"
-                            stroke="#374151" strokeWidth="1.3" strokeLinejoin="round" />
+                            stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
                         </svg>
                       </div>
                       <div>
-                        <p className="text-sm font-semibold text-gray-700">AI Detection</p>
-                        <p className={`text-sm font-bold ${aiDetLabel ? 'text-gray-900' : 'text-gray-400'}`}>
+                        <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">AI Detection</p>
+                        <p className={`text-sm font-bold ${aiDetLabel ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}`}>
                           {aiDetLabel ?? 'Scanning…'}
                         </p>
                       </div>
@@ -299,9 +314,9 @@ export default function Dashboard() {
                           onClick={() => scan(outputText)}
                           disabled={sLoading}
                           title="Re-check the humanized text"
-                          className="text-gray-300 hover:text-gray-700 transition-colors disabled:opacity-30"
+                          className="text-gray-300 hover:text-gray-700 dark:text-gray-600 dark:hover:text-gray-300 transition-colors disabled:opacity-30"
                         >
-                          {sLoading ? <Spinner className="w-3.5 h-3.5 border-gray-200 border-t-gray-600" /> : (
+                          {sLoading ? <Spinner className="w-3.5 h-3.5 border-gray-200 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400" /> : (
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
                               <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" stroke="currentColor"
                                 strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -310,26 +325,22 @@ export default function Dashboard() {
                         </button>
                       )}
                     </div>
-                    {output && <div className="w-px h-12 bg-gray-200" />}
+                    {output && <div className="w-px h-12 bg-gray-200 dark:bg-gray-800" />}
                   </>
                 )}
 
                 {output && (
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full flex items-center justify-center border bg-gray-50 border-gray-200">
-                      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
-                        <circle cx="10" cy="10" r="7.5"
-                          stroke={output.quality_scores.passed != null ? '#111827' : '#d1d5db'}
-                          strokeWidth="1.4" />
-                        <path d="M6.5 10l2.5 2.5 5-5"
-                          stroke={output.quality_scores.passed != null ? '#111827' : '#d1d5db'}
-                          strokeWidth="1.4" strokeLinecap="round" />
+                    <div className="w-10 h-10 rounded-full flex items-center justify-center border bg-gray-50 border-gray-200 dark:bg-gray-800 dark:border-gray-700">
+                      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden className={fidelityColor}>
+                        <circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="1.4" />
+                        <path d="M6.5 10l2.5 2.5 5-5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                       </svg>
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-gray-700">Fidelity check</p>
+                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Fidelity check</p>
                       <p className={`text-sm font-bold ${
-                        output.quality_scores.passed != null ? 'text-gray-900' : 'text-gray-400'
+                        output.quality_scores.passed != null ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'
                       }`}
                         title={
                           output.quality_scores.passed === false
@@ -356,11 +367,11 @@ export default function Dashboard() {
     {/* ══════════════════════════════════════════════════════════════
         MOBILE  (<md)
         ══════════════════════════════════════════════════════════════ */}
-    <div className="relative md:hidden flex flex-col bg-white p-2" style={{ height: '100dvh' }}>
+    <div className="relative md:hidden flex flex-col bg-white dark:bg-gray-950 p-2" style={{ height: '100dvh' }}>
       {/* ── Drawer backdrop ── */}
       {menuOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/30"
+          className="fixed inset-0 z-40 bg-black/30 dark:bg-black/60"
           onClick={() => setMenuOpen(false)}
         />
       )}
@@ -370,55 +381,62 @@ export default function Dashboard() {
 
         className="fixed top-0 right-0 bottom-0 z-50 w-[82vw] max-w-xs flex flex-col
                    bg-white border-l border-gray-200
+                   dark:bg-gray-900 dark:border-gray-800
                    transition-transform duration-300 ease-out"
         style={{ transform: menuOpen ? 'translateX(0)' : 'translateX(100%)' }}
       >
         {/* Drawer header */}
-        <div className="flex items-center justify-between px-5 pt-12 pb-4 border-b border-gray-200 shrink-0">
-          <span className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Menu</span>
-          <button
-            onClick={() => setMenuOpen(false)}
-            className="w-8 h-8 flex items-center justify-center rounded-full
-                       bg-gray-100 text-gray-400 hover:text-gray-700 transition-colors"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-              <path d="M2 2l12 12M14 2L2 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-            </svg>
-          </button>
+        <div className="flex items-center justify-between px-5 pt-12 pb-4 border-b border-gray-200 shrink-0 dark:border-gray-800">
+          <span className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Menu</span>
+          <div className="flex items-center gap-2">
+            <ThemeToggle className="w-8 h-8" />
+            <button
+              onClick={() => setMenuOpen(false)}
+              className="w-8 h-8 flex items-center justify-center rounded-full
+                         bg-gray-100 text-gray-400 hover:text-gray-700
+                         dark:bg-gray-800 dark:text-gray-500 dark:hover:text-gray-300 transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                <path d="M2 2l12 12M14 2L2 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
           {/* Tier badge */}
-          <div className="px-5 py-4 border-b border-gray-200">
+          <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-800">
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold
                              px-3 py-1.5 rounded-full border border-gray-200
-                             bg-gray-100 text-gray-600">
+                             bg-gray-100 text-gray-600
+                             dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
               {(tier ?? 'free').charAt(0).toUpperCase() + (tier ?? 'free').slice(1)} Plan
             </span>
           </div>
 
           {/* Presets */}
-          <div className="px-5 py-4 border-b border-gray-200">
-            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Presets</p>
+          <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-800">
+            <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">Presets</p>
             <PresetSelector />
           </div>
 
           {/* AI Model Config */}
-          <div className="px-5 py-4 border-b border-gray-200">
-            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">AI Model</p>
+          <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-800">
+            <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">AI Model</p>
             <button
               onClick={() => { setMenuOpen(false); setApiConfigOpen(true) }}
               className="w-full flex items-center justify-between px-3.5 py-2.5
                          rounded-xl bg-gray-50 border border-gray-200
-                         hover:bg-gray-100 transition-colors text-left"
+                         hover:bg-gray-100 transition-colors text-left
+                         dark:bg-gray-800 dark:border-gray-700 dark:hover:bg-gray-700"
             >
               <div className="flex items-center gap-2.5">
-                <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden>
-                  <circle cx="10" cy="10" r="3" stroke="#374151" strokeWidth="1.4"/>
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden className="text-gray-700 dark:text-gray-300">
+                  <circle cx="10" cy="10" r="3" stroke="currentColor" strokeWidth="1.4"/>
                   <path d="M10 1v2M10 17v2M1 10h2M17 10h2M3.22 3.22l1.42 1.42M15.36 15.36l1.42 1.42M3.22 16.78l1.42-1.42M15.36 4.64l1.42-1.42"
-                    stroke="#374151" strokeWidth="1.4" strokeLinecap="round"/>
+                    stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
                 </svg>
-                <span className="text-sm text-gray-600">
+                <span className="text-sm text-gray-600 dark:text-gray-400">
                   {hasCustomConfig()
                     ? (apiConfig.nickname || apiConfig.modelId)
                     : 'Configure model'}
@@ -426,7 +444,7 @@ export default function Dashboard() {
               </div>
               <div className="flex items-center gap-2">
                 {hasCustomConfig() && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-gray-900" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-gray-900 dark:bg-gray-100" />
                 )}
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
                   <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -437,18 +455,19 @@ export default function Dashboard() {
 
           {/* Settings */}
           <div className="px-5 py-5">
-            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Settings</p>
+            <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">Settings</p>
             <ControlPanel />
           </div>
         </div>
 
         {/* Drawer footer actions */}
-        <div className="shrink-0 px-5 py-5 border-t border-gray-200 space-y-1"
+        <div className="shrink-0 px-5 py-5 border-t border-gray-200 dark:border-gray-800 space-y-1"
           style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}>
           <button
             onClick={() => { setMenuOpen(false); handleClear() }}
             className="w-full text-left text-sm text-gray-500 hover:text-gray-800
-                       py-2.5 px-3 rounded-xl hover:bg-gray-100 transition-all"
+                       dark:text-gray-400 dark:hover:text-gray-100
+                       py-2.5 px-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
           >
             Clear all
           </button>
@@ -456,26 +475,29 @@ export default function Dashboard() {
       </div>
 
       {/* ── Card shell ── */}
-      <div className="relative z-10 flex flex-col flex-1 min-h-0 overflow-hidden rounded-3xl bg-white border border-gray-200">
+      <div className="relative z-10 flex flex-col flex-1 min-h-0 overflow-hidden rounded-3xl bg-white border border-gray-200 dark:bg-gray-900 dark:border-gray-800">
 
       {/* ── Mobile header ── */}
-      <header className="shrink-0 flex items-center justify-between px-4 bg-white border-b border-gray-200"
+      <header className="shrink-0 flex items-center justify-between px-4 bg-white border-b border-gray-200 dark:bg-gray-900 dark:border-gray-800"
         style={{ height: '52px' }}>
         <div className="flex items-center gap-2">
-          <span className="text-sm font-bold text-gray-900">
+          <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
             Humanite
           </span>
         </div>
-        <button
-          onClick={() => setMenuOpen(true)}
-          className="w-9 h-9 flex flex-col items-center justify-center gap-[5px]
-                     rounded-xl bg-gray-100 hover:bg-gray-200 transition-colors"
-          aria-label="Open menu"
-        >
-          <span className="w-4 h-px bg-gray-500 rounded-full" />
-          <span className="w-4 h-px bg-gray-500 rounded-full" />
-          <span className="w-2.5 h-px bg-gray-500 rounded-full self-start ml-2.5" />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <ThemeToggle className="w-9 h-9" />
+          <button
+            onClick={() => setMenuOpen(true)}
+            className="w-9 h-9 flex flex-col items-center justify-center gap-[5px]
+                       rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 transition-colors"
+            aria-label="Open menu"
+          >
+            <span className="w-4 h-px bg-gray-500 dark:bg-gray-400 rounded-full" />
+            <span className="w-4 h-px bg-gray-500 dark:bg-gray-400 rounded-full" />
+            <span className="w-2.5 h-px bg-gray-500 dark:bg-gray-400 rounded-full self-start ml-2.5" />
+          </button>
+        </div>
       </header>
 
       {/* ── Main content (tab panels) ── */}
@@ -488,19 +510,19 @@ export default function Dashboard() {
               value={text}
               onChange={e => setText(e.target.value.slice(0, MAX_CHARS))}
               placeholder="Paste your AI-generated text here…"
-              className="flex-1 bg-transparent resize-none text-gray-800 leading-relaxed
-                         px-5 pt-5 pb-3 outline-none placeholder-gray-400 font-sans"
+              className="flex-1 bg-transparent resize-none text-gray-800 dark:text-gray-200 leading-relaxed
+                         px-5 pt-5 pb-3 outline-none placeholder-gray-400 dark:placeholder-gray-600 font-sans"
               style={{ fontSize: '16px' }}
             />
-            <div className="shrink-0 flex items-center justify-between px-5 py-3 border-t border-gray-200">
-              <span className="text-xs text-gray-400">
+            <div className="shrink-0 flex items-center justify-between px-5 py-3 border-t border-gray-200 dark:border-gray-800">
+              <span className="text-xs text-gray-400 dark:text-gray-500">
                 {wordCount(text)} words
                 {text.length > SYNC_MAX_CHARS && ' · background'}
               </span>
               {text.length > 0 && (
                 <button
                   onClick={handleClear}
-                  className="text-xs text-gray-400 hover:text-gray-700 transition-colors"
+                  className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300 transition-colors"
                 >
                   Clear
                 </button>
@@ -514,24 +536,26 @@ export default function Dashboard() {
           <div className="h-full flex flex-col">
             {/* Quality chips */}
             {output && (
-              <div className="shrink-0 flex gap-2 px-4 pt-3 pb-2 flex-wrap border-b border-gray-200">
+              <div className="shrink-0 flex gap-2 px-4 pt-3 pb-2 flex-wrap border-b border-gray-200 dark:border-gray-800">
                 <span className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium border ${
                   humanScore != null
-                    ? 'bg-gray-100 border-gray-300 text-gray-900'
-                    : 'bg-gray-50 border-gray-200 text-gray-500'
+                    ? 'bg-gray-100 border-gray-300 text-gray-900 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100'
+                    : 'bg-gray-50 border-gray-200 text-gray-500 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400'
                 }`}>
-                  {humanScore != null && <span className="w-1.5 h-1.5 rounded-full bg-gray-900" />}
+                  {humanScore != null && <span className="w-1.5 h-1.5 rounded-full bg-gray-900 dark:bg-gray-100" />}
                   {humanScore != null ? `${humanScore}% Human · ${scoreLabel}` : scoreLabel}
                 </span>
                 {output.quality_scores.passed && (
                   <span className="text-xs px-2.5 py-1 rounded-full font-medium
-                                   bg-gray-100 border border-gray-200 text-gray-700">
+                                   bg-gray-100 border border-gray-200 text-gray-700
+                                   dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300">
                     Natural
                   </span>
                 )}
                 {aiDetLabel && (
                   <span className="text-xs px-2.5 py-1 rounded-full font-medium border
-                                   bg-gray-100 border-gray-300 text-gray-900">
+                                   bg-gray-100 border-gray-300 text-gray-900
+                                   dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100">
                     {aiDetLabel}
                   </span>
                 )}
@@ -539,29 +563,29 @@ export default function Dashboard() {
             )}
 
             {response?.warning && hStatus === 'done' && (
-              <div className="shrink-0 px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs text-gray-700">
+              <div className="shrink-0 px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs text-gray-700 dark:bg-gray-800 dark:border-gray-800 dark:text-gray-300">
                 ⚠ {response.warning}
               </div>
             )}
 
             {/* Output text */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 leading-relaxed whitespace-pre-wrap text-gray-800"
+            <div className="flex-1 overflow-y-auto px-5 py-4 leading-relaxed whitespace-pre-wrap text-gray-800 dark:text-gray-200"
               style={{ fontSize: '16px' }}>
               {hLoading ? (
                 <div className="h-full flex items-center justify-center">
                   <div className="text-center px-6">
-                    <Spinner className="w-8 h-8 border-gray-200 border-t-gray-700 block mx-auto mb-3" />
-                    <p className="text-sm text-gray-500">{progressMessage ? 'Processing…' : 'Rewriting…'}</p>
-                    <p className="text-xs text-gray-400 mt-1">{progressMessage ?? 'Validating quality'}</p>
+                    <Spinner className="w-8 h-8 border-gray-200 border-t-gray-700 dark:border-gray-700 dark:border-t-gray-300 block mx-auto mb-3" />
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{progressMessage ? 'Processing…' : 'Rewriting…'}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{progressMessage ?? 'Validating quality'}</p>
                   </div>
                 </div>
               ) : hStatus === 'error' ? (
-                <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200">
-                  <p className="text-sm font-semibold text-gray-900">{error ?? 'Humanization failed.'}</p>
+                <div className="p-4 rounded-2xl bg-gray-50 border border-gray-200 dark:bg-gray-800 dark:border-gray-700">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{error ?? 'Humanization failed.'}</p>
                 </div>
               ) : outputText ? outputText : (
                 <div className="h-full flex items-center justify-center">
-                  <p className="text-sm text-gray-400 italic text-center px-6">
+                  <p className="text-sm text-gray-400 dark:text-gray-500 italic text-center px-6">
                     Your humanized text will appear here…
                   </p>
                 </div>
@@ -570,18 +594,18 @@ export default function Dashboard() {
 
             {/* Output actions */}
             {outputText && (
-              <div className="shrink-0 flex items-center justify-between px-4 py-3 border-t border-gray-200">
-                <span className="text-xs text-gray-400">{wordCount(outputText)} words</span>
+              <div className="shrink-0 flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-800">
+                <span className="text-xs text-gray-400 dark:text-gray-500">{wordCount(outputText)} words</span>
                 <div className="flex items-center gap-4">
                   {output && <ExportMenu />}
                   <button
                     onClick={handleCopy}
                     className="flex items-center gap-1.5 text-sm font-medium
-                               text-gray-700 hover:text-gray-900 transition-colors"
+                               text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100 transition-colors"
                   >
                     {copied ? (
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-                        <path d="M2 8l4 4 8-8" stroke="#111827" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden className="text-gray-900 dark:text-gray-100">
+                        <path d="M2 8l4 4 8-8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
                       </svg>
                     ) : (
                       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -606,9 +630,9 @@ export default function Dashboard() {
                   onClick={() => scan(outputText)}
                   disabled={sLoading}
                   className="flex items-center gap-1.5 text-xs font-medium text-gray-500
-                             hover:text-gray-800 transition-colors disabled:opacity-30"
+                             hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100 transition-colors disabled:opacity-30"
                 >
-                  {sLoading && <Spinner className="w-3 h-3 border-gray-200 border-t-gray-600" />}
+                  {sLoading && <Spinner className="w-3 h-3 border-gray-200 border-t-gray-600 dark:border-gray-700 dark:border-t-gray-400" />}
                   Re-check
                 </button>
               </div>
@@ -620,18 +644,18 @@ export default function Dashboard() {
 
       {/* ── Action bar (Input tab only) ── */}
       {mobileTab === 'input' && (
-        <div className="shrink-0 px-4 py-3 bg-white border-t border-gray-200">
+        <div className="shrink-0 px-4 py-3 bg-white border-t border-gray-200 dark:bg-gray-900 dark:border-gray-800">
           <button
             onClick={() => humanize(text)}
             disabled={!canSubmit || hLoading}
             className="w-full py-3.5 text-sm font-bold rounded-2xl text-white
-                       bg-gray-900
+                       bg-gray-900 dark:bg-gray-100 dark:text-gray-900
                        disabled:opacity-30 disabled:cursor-not-allowed
                        active:scale-[0.98] transition-transform focus:outline-none"
           >
             {hLoading ? (
               <span className="flex items-center justify-center gap-2">
-                <Spinner className="w-4 h-4 border-white/30 border-t-white" />
+                <Spinner className="w-4 h-4 border-white/30 border-t-white dark:border-gray-900/30 dark:border-t-gray-900" />
                 Humanizing…
               </span>
             ) : 'Humanize'}
@@ -641,7 +665,7 @@ export default function Dashboard() {
 
       {/* ── Tab bar ── */}
       <nav
-        className="shrink-0 flex bg-white border-t border-gray-200"
+        className="shrink-0 flex bg-white border-t border-gray-200 dark:bg-gray-900 dark:border-gray-800"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         {([
@@ -673,13 +697,13 @@ export default function Dashboard() {
               onClick={() => setMobileTab(tab.id as MobileTab)}
               className={`flex-1 flex flex-col items-center gap-1 py-3 text-[11px] font-medium
                           transition-colors relative
-                          ${active ? 'text-gray-900' : 'text-gray-400 hover:text-gray-600'}`}
+                          ${active ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300'}`}
             >
               {tab.icon}
               {tab.label}
               {hasBadge && !active && (
                 <span className="absolute top-2.5 right-[calc(50%-16px)] w-1.5 h-1.5
-                                 rounded-full bg-gray-900" />
+                                 rounded-full bg-gray-900 dark:bg-gray-100" />
               )}
             </button>
           )

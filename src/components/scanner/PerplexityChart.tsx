@@ -13,11 +13,11 @@ interface PerplexityChartProps {
 // to this document's own range* — a within-document outlier view, not an
 // absolute scale.
 function relativeShade(score: number, min: number, max: number): string {
-  if (max <= min) return 'bg-gray-400'
+  if (max <= min) return 'bg-gray-400 dark:bg-gray-500'
   const t = (score - min) / (max - min) // 0 = most predictable, 1 = least
-  if (t < 0.33) return 'bg-gray-300'
-  if (t < 0.66) return 'bg-gray-500'
-  return 'bg-gray-900'
+  if (t < 0.33) return 'bg-gray-300 dark:bg-gray-600'
+  if (t < 0.66) return 'bg-gray-500 dark:bg-gray-400'
+  return 'bg-gray-900 dark:bg-gray-100'
 }
 
 export function PerplexityChart({ scores }: PerplexityChartProps) {
@@ -43,30 +43,30 @@ export function PerplexityChart({ scores }: PerplexityChartProps) {
           )
         })}
         {scores.length > 30 && (
-          <span className="text-xs text-gray-400 self-end ml-1">
+          <span className="text-xs text-gray-400 dark:text-gray-500 self-end ml-1">
             +{scores.length - 30}
           </span>
         )}
       </div>
 
-      <div className="flex justify-between mt-1.5 text-xs text-gray-400">
+      <div className="flex justify-between mt-1.5 text-xs text-gray-400 dark:text-gray-500">
         <span>Sentence 1</span>
         <span>Avg: {avg.toFixed(0)}</span>
         <span>Sentence {Math.min(scores.length, 30)}</span>
       </div>
 
-      <div className="flex gap-3 mt-2 text-xs text-gray-400">
+      <div className="flex gap-3 mt-2 text-xs text-gray-400 dark:text-gray-500">
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-sm bg-gray-300" />
+          <span className="w-2 h-2 rounded-sm bg-gray-300 dark:bg-gray-600" />
           More predictable
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-sm bg-gray-900" />
+          <span className="w-2 h-2 rounded-sm bg-gray-900 dark:bg-gray-100" />
           Less predictable
         </span>
       </div>
 
-      <p className="mt-2 text-xs text-gray-400 leading-relaxed">
+      <p className="mt-2 text-xs text-gray-400 dark:text-gray-500 leading-relaxed">
         Perplexity measures language-model predictability. It is one detector
         input, shown here relative to this document&apos;s own sentences —
         not independent evidence of machine authorship.
