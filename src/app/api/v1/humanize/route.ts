@@ -9,7 +9,8 @@ import { generateWatermark } from '@/lib/watermark'
 import { chunkFactLockedText } from '@/lib/chunk'
 import { humanizeChunk, aggregateChunkResults, ChunkResult } from '@/lib/humanizePipeline'
 import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
-import { classify } from '@/lib/detection/client'
+import { getDetectionGateway } from '@/lib/detection/gateway'
+import { toLegacyClassifyResult } from '@/lib/detection/legacyAdapter'
 import { ClassifyResult } from '@/lib/detection/contracts'
 
 // Vercel clamps this to whatever the deployment's plan actually allows
@@ -81,7 +82,8 @@ function buildOutput(
 // dependent on) whatever model produced the text it's scanning.
 async function tryClassifyOutput(text: string): Promise<ClassifyResult | null> {
   try {
-    return await classify(text, 'standard')
+    const result = await getDetectionGateway().detect(text, { mode: 'standard' })
+    return toLegacyClassifyResult(result, text)
   } catch (err) {
     console.warn('Post-humanize detection scan failed — shipping without it', {
       type: err instanceof Error ? err.constructor.name : typeof err,

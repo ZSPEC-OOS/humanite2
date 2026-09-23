@@ -50,28 +50,14 @@ export interface ClassifyResult {
   processing_duration_ms: number | null
 }
 
-export type DetectorErrorCode =
-  | 'INVALID_INPUT'
-  | 'TEXT_TOO_SHORT'
-  | 'DETECTOR_TIMEOUT'
-  | 'DETECTOR_UNAVAILABLE'
-  | 'INFERENCE_ERROR'
-
-export class DetectorError extends Error {
-  constructor(
-    public code: DetectorErrorCode,
-    message: string,
-  ) {
-    super(message)
-    this.name = 'DetectorError'
-  }
-}
-
 // ── v3.0 contracts (permanent GPTZero architecture) ──────────────────────
-// Coexists with the v2 types above during the provider migration. The types
-// above stay wired to services/scanner until the API routes and stores are
-// switched over to DetectionGateway; once that lands, v2 is deleted rather
-// than kept as a compatibility layer.
+// The v2 types above no longer talk to services/scanner — DetectionGateway
+// (gateway.ts) is now the only detection backend, and legacyAdapter.ts
+// reshapes its v3.0 DetectionResult into the v2 types above so the API
+// routes' response shape, and everything downstream of it (scanStore,
+// ScanReport, the dashboard), keep working unchanged. Both the v2 types and
+// the adapter are deleted once those consumers move onto DetectionResult
+// directly (Phase 5).
 
 export type DetectionClassification = 'human-written' | 'ai-generated' | 'mixed' | 'uncertain'
 export type ConfidenceCategory = 'high' | 'medium' | 'low' | 'unknown'
