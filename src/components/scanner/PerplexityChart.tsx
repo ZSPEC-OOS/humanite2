@@ -15,9 +15,9 @@ interface PerplexityChartProps {
 function relativeShade(score: number, min: number, max: number): string {
   if (max <= min) return 'bg-gray-400'
   const t = (score - min) / (max - min) // 0 = most predictable, 1 = least
-  if (t < 0.33) return 'bg-indigo-300'
-  if (t < 0.66) return 'bg-indigo-500'
-  return 'bg-indigo-700'
+  if (t < 0.33) return 'bg-gray-300'
+  if (t < 0.66) return 'bg-gray-500'
+  return 'bg-gray-900'
 }
 
 export function PerplexityChart({ scores }: PerplexityChartProps) {
@@ -57,11 +57,11 @@ export function PerplexityChart({ scores }: PerplexityChartProps) {
 
       <div className="flex gap-3 mt-2 text-xs text-gray-400">
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-sm bg-indigo-300" />
+          <span className="w-2 h-2 rounded-sm bg-gray-300" />
           More predictable
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-sm bg-indigo-700" />
+          <span className="w-2 h-2 rounded-sm bg-gray-900" />
           Less predictable
         </span>
       </div>

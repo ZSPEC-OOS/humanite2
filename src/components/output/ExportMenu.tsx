@@ -64,7 +64,7 @@ export function ExportMenu() {
           ) : label}
         </button>
       ))}
-      {error && <span className="text-xs text-red-500 ml-1">{error}</span>}
+      {error && <span className="text-xs font-medium text-gray-900 ml-1">{error}</span>}
     </div>
   )
 }

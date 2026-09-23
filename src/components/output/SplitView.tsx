@@ -79,9 +79,9 @@ export function SplitView({ mobileOutputOnly = false }: { mobileOutputOnly?: boo
   if (status === 'error') {
     return (
       <div className="h-full flex items-center justify-center p-6">
-        <div className="max-w-md w-full bg-red-50 border border-red-200
-                        rounded-xl p-4 text-sm text-red-600">
-          <p className="font-semibold mb-1 text-red-700">Error</p>
+        <div className="max-w-md w-full bg-gray-50 border border-gray-200
+                        rounded-xl p-4 text-sm text-gray-900">
+          <p className="font-semibold mb-1">Error</p>
           <p>{error}</p>
         </div>
       </div>
@@ -118,15 +118,15 @@ export function SplitView({ mobileOutputOnly = false }: { mobileOutputOnly?: boo
                 Not yet scored
               </span>
             ) : output.quality_scores.passed ? (
-              <span className="flex items-center gap-1.5 text-xs text-green-700
-                               bg-green-50 border border-green-200 rounded-full px-2.5 py-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+              <span className="flex items-center gap-1.5 text-xs text-gray-900
+                               bg-gray-100 border border-gray-300 rounded-full px-2.5 py-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-gray-900" />
                 BERTScore {output.quality_scores.bertscore_f1.toFixed(3)}
               </span>
             ) : (
-              <span className="flex items-center gap-1.5 text-xs text-amber-700
-                               bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-900
+                               bg-gray-100 border border-gray-400 rounded-full px-2.5 py-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-gray-600" />
                 Gate not met
               </span>
             )}
@@ -136,8 +136,8 @@ export function SplitView({ mobileOutputOnly = false }: { mobileOutputOnly?: boo
 
       {/* Warning banner */}
       {warn && (
-        <div className="px-4 py-2 bg-amber-50 border-b border-amber-200
-                        text-xs text-amber-700 shrink-0">
+        <div className="px-4 py-2 bg-gray-50 border-b border-gray-200
+                        text-xs text-gray-700 shrink-0">
           ⚠ {warn}
         </div>
       )}
@@ -194,11 +194,11 @@ export function SplitView({ mobileOutputOnly = false }: { mobileOutputOnly?: boo
           <div className="flex-1 overflow-y-auto p-4">
             <div className="flex gap-4 text-xs text-gray-500 mb-3">
               <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-3 rounded-sm bg-green-100 border border-green-300" />
+                <span className="inline-block w-3 h-3 rounded-sm bg-gray-200 border border-gray-300" />
                 Added
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-3 rounded-sm bg-red-100 border border-red-300" />
+                <span className="inline-block w-3 h-3 rounded-sm bg-gray-50 border border-gray-300" />
                 Removed
               </span>
             </div>

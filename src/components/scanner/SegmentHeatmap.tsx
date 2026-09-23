@@ -8,8 +8,8 @@ interface SegmentHeatmapProps {
 }
 
 const SEGMENT_STYLE: Record<DetectionSegment['classification'], string> = {
-  'ai-generated': 'bg-red-100 hover:bg-red-200',
-  'human-written': 'bg-green-100 hover:bg-green-200',
+  'ai-generated': 'bg-gray-300 hover:bg-gray-400',
+  'human-written': 'bg-transparent hover:bg-gray-100',
   uncertain: 'bg-gray-100 hover:bg-gray-200',
 }
 
@@ -54,13 +54,13 @@ export function SegmentHeatmap({ text, segments }: SegmentHeatmapProps) {
 
       <div className="flex gap-3 mt-2 text-xs text-gray-400">
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-sm bg-red-200" /> AI-like
+          <span className="w-2 h-2 rounded-sm bg-gray-300" /> AI-like
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-sm bg-green-200" /> Human-like
+          <span className="w-2 h-2 rounded-sm border border-gray-200 bg-white" /> Human-like
         </span>
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-sm bg-gray-200" /> Uncertain / not analyzed
+          <span className="w-2 h-2 rounded-sm bg-gray-100" /> Uncertain / not analyzed
         </span>
       </div>
 

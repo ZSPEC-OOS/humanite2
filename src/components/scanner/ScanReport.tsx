@@ -17,19 +17,19 @@ interface ScanReportProps {
 // evasion guarantee the detector cannot back up).
 const CLASS_CONFIG = {
   'human-written': {
-    bg: 'bg-green-50', border: 'border-green-200',
-    badge: 'bg-green-100 text-green-700 border border-green-300',
-    bar: 'bg-green-500', label: 'Human-like', icon: '✓',
+    bg: 'bg-white', border: 'border-gray-200',
+    badge: 'bg-gray-900 text-white',
+    bar: 'bg-gray-900', label: 'Human-like', icon: '✓',
   },
   'ai-generated': {
-    bg: 'bg-red-50', border: 'border-red-200',
-    badge: 'bg-red-100 text-red-700 border border-red-300',
-    bar: 'bg-red-500', label: 'AI-like', icon: '⚠',
+    bg: 'bg-gray-50', border: 'border-gray-300',
+    badge: 'bg-gray-900 text-white',
+    bar: 'bg-gray-900', label: 'AI-like', icon: '⚠',
   },
   mixed: {
-    bg: 'bg-amber-50', border: 'border-amber-200',
-    badge: 'bg-amber-100 text-amber-700 border border-amber-300',
-    bar: 'bg-amber-500', label: 'Mixed', icon: '◑',
+    bg: 'bg-gray-50', border: 'border-gray-200',
+    badge: 'bg-gray-700 text-white',
+    bar: 'bg-gray-700', label: 'Mixed', icon: '◑',
   },
   uncertain: {
     bg: 'bg-gray-50', border: 'border-gray-200',
@@ -64,8 +64,8 @@ export function ScanReport({ text }: ScanReportProps = {}) {
 
   if (status === 'error') {
     return (
-      <div className="p-4 m-3 text-sm text-red-600 bg-red-50
-                      border border-red-200 rounded-xl">
+      <div className="p-4 m-3 text-sm font-medium text-gray-900 bg-gray-50
+                      border border-gray-200 rounded-xl">
         {error}
       </div>
     )
@@ -123,8 +123,8 @@ export function ScanReport({ text }: ScanReportProps = {}) {
           Probability Breakdown
         </p>
         {[
-          { label: 'Human', value: hProb,  color: 'bg-green-500' },
-          { label: 'AI',    value: aiProb, color: 'bg-red-500' },
+          { label: 'Human', value: hProb,  color: 'bg-gray-900' },
+          { label: 'AI',    value: aiProb, color: 'bg-gray-500' },
         ].map(({ label, value, color }) => (
           <div key={label} className="flex items-center gap-3">
             <span className="text-xs text-gray-500 w-10">{label}</span>
@@ -158,16 +158,13 @@ export function ScanReport({ text }: ScanReportProps = {}) {
           <div className="space-y-2">
             {response.top_features.map((f, i) => (
               <div key={i} className="flex items-center gap-2.5">
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                  f.direction === 'ai_indicator' ? 'bg-red-500' : 'bg-green-500'
-                }`} />
+                <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-gray-900" />
                 <span className="text-xs text-gray-500 flex-1 truncate">
                   {f.feature.replace(/_/g, ' ')}
                 </span>
                 <div className="w-16 h-1 bg-gray-200 rounded-full overflow-hidden">
-                  <div className={`h-full rounded-full ${
-                    f.direction === 'ai_indicator' ? 'bg-red-500' : 'bg-green-500'
-                  }`} style={{ width: `${f.contribution * 100}%` }} />
+                  <div className="h-full rounded-full bg-gray-900"
+                    style={{ width: `${f.contribution * 100}%` }} />
                 </div>
               </div>
             ))}

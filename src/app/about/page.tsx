@@ -1,15 +1,12 @@
 import Link from 'next/link'
 import { SiteNav } from '@/components/marketing/SiteNav'
 import { SiteFooter } from '@/components/marketing/SiteFooter'
-import { PageBackground } from '@/components/marketing/PageBackground'
 import { ArrowIcon } from '@/components/marketing/icons'
 
 export default function AboutPage() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-white">
-      <PageBackground />
-
-      <div className="relative z-10 flex min-h-screen flex-col">
+    <main className="min-h-screen bg-white">
+      <div className="flex min-h-screen flex-col">
         <SiteNav />
 
         <div className="flex-1 px-6 pb-20 pt-6 md:px-14">
@@ -24,7 +21,7 @@ export default function AboutPage() {
           </div>
 
           {/* Mission */}
-          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-white/60 bg-white/85 p-8 shadow-sm backdrop-blur-md">
+          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-gray-200 bg-white p-8">
             <p className="text-base leading-relaxed text-gray-700">
               AI writing tools help people think faster and write more — but left unedited,
               they tend to flatten everyone’s voice into the same predictable patterns:
@@ -36,7 +33,7 @@ export default function AboutPage() {
           </div>
 
           {/* How it works, briefly */}
-          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-white/60 bg-white/85 p-8 shadow-sm backdrop-blur-md">
+          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-gray-200 bg-white p-8">
             <h2 className="text-lg font-semibold text-gray-900">How we approach it</h2>
             <p className="mt-3 text-sm leading-relaxed text-gray-600">
               Every rewrite goes through automated quality gates that check for dropped
@@ -48,7 +45,7 @@ export default function AboutPage() {
           </div>
 
           {/* Contact */}
-          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-white/60 bg-white/85 p-8 text-center shadow-sm backdrop-blur-md">
+          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-gray-200 bg-white p-8 text-center">
             <h2 className="text-lg font-semibold text-gray-900">Get in touch</h2>
             <p className="mt-2 text-sm text-gray-600">
               Questions, feedback, or interested in Enterprise?{' '}
@@ -62,9 +59,9 @@ export default function AboutPage() {
           <div className="mx-auto mt-14 max-w-xl text-center">
             <Link
               href="/dashboard"
-              className="inline-flex items-center gap-2.5 rounded-full bg-gradient-to-r from-orange-500 to-red-500
-                         px-8 py-4 text-base font-bold text-white shadow-lg shadow-orange-500/25
-                         transition-transform hover:scale-[1.02] active:scale-[0.98]"
+              className="inline-flex items-center gap-2.5 rounded-full bg-gray-900
+                         px-8 py-4 text-base font-bold text-white
+                         transition-colors hover:bg-gray-800"
             >
               Begin Transformation
               <ArrowIcon />

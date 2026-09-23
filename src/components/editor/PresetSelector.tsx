@@ -96,7 +96,7 @@ export function PresetSelector() {
             onClick={() => { setShowSaveForm(false); setSaveName(''); setError(null) }}
             className="text-xs text-gray-400 hover:text-gray-700 px-1"
           >✕</button>
-          {error && <span className="text-xs text-red-500">{error}</span>}
+          {error && <span className="text-xs font-medium text-gray-900">{error}</span>}
         </div>
       ) : (
         <button

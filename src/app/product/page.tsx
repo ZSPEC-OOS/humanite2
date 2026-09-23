@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { SiteNav } from '@/components/marketing/SiteNav'
 import { SiteFooter } from '@/components/marketing/SiteFooter'
-import { PageBackground } from '@/components/marketing/PageBackground'
 import { ArrowIcon } from '@/components/marketing/icons'
 
 const FEATURES = [
@@ -49,10 +48,8 @@ const FEATURES = [
 
 export default function ProductPage() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-white">
-      <PageBackground />
-
-      <div className="relative z-10 flex min-h-screen flex-col">
+    <main className="min-h-screen bg-white">
+      <div className="flex min-h-screen flex-col">
         <SiteNav />
 
         <div className="flex-1 px-6 pb-20 pt-6 md:px-14">
@@ -70,9 +67,9 @@ export default function ProductPage() {
             </p>
             <Link
               href="/dashboard"
-              className="mt-8 inline-flex items-center gap-2.5 rounded-full bg-gradient-to-r from-orange-500 to-red-500
-                         px-8 py-4 text-base font-bold text-white shadow-lg shadow-orange-500/25
-                         transition-transform hover:scale-[1.02] active:scale-[0.98]"
+              className="mt-8 inline-flex items-center gap-2.5 rounded-full bg-gray-900
+                         px-8 py-4 text-base font-bold text-white
+                         transition-colors hover:bg-gray-800"
             >
               Try it free
               <ArrowIcon />
@@ -82,7 +79,7 @@ export default function ProductPage() {
           {/* Feature grid */}
           <div className="mx-auto mt-16 grid max-w-5xl gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map(f => (
-              <div key={f.title} className="rounded-2xl border border-white/60 bg-white/85 p-6 shadow-sm backdrop-blur-md">
+              <div key={f.title} className="rounded-2xl border border-gray-200 bg-white p-6">
                 <span className="text-2xl" aria-hidden>{f.icon}</span>
                 <h3 className="mt-3 text-sm font-semibold text-gray-900">{f.title}</h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-gray-600">{f.description}</p>
@@ -99,8 +96,8 @@ export default function ProductPage() {
                 { step: '2', title: 'Set tone & intensity', desc: 'Pick a preset or dial in exactly how much should change.' },
                 { step: '3', title: 'Review & export', desc: 'Check the quality-gate results, then export or copy your result.' },
               ].map(s => (
-                <div key={s.step} className="rounded-2xl border border-white/60 bg-white/85 p-5 shadow-sm backdrop-blur-md">
-                  <span className="font-display text-2xl font-bold text-orange-500">{s.step}</span>
+                <div key={s.step} className="rounded-2xl border border-gray-200 bg-white p-5">
+                  <span className="font-display text-2xl font-bold text-gray-900">{s.step}</span>
                   <h3 className="mt-2 text-sm font-semibold text-gray-900">{s.title}</h3>
                   <p className="mt-1 text-sm leading-relaxed text-gray-600">{s.desc}</p>
                 </div>

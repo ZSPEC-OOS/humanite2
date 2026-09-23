@@ -34,7 +34,7 @@ export function CheckoutButton({ plan, children, className }: Props) {
       <button onClick={handleClick} disabled={loading} className={className}>
         {loading ? 'Redirecting…' : children}
       </button>
-      {error && <p className="max-w-xs text-center text-xs text-red-500">{error}</p>}
+      {error && <p className="max-w-xs text-center text-xs font-medium text-gray-900">{error}</p>}
     </div>
   )
 }
