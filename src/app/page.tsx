@@ -68,12 +68,15 @@ export default function LandingPage() {
             More human ideas for a brighter tomorrow
           </p>
 
-          <h1
+          <Image
             data-edit-id="hero-headline"
-            className="mt-5 font-display text-6xl font-bold leading-none text-gray-900 md:text-8xl"
-          >
-            Humanite<sup className="text-[0.35em] align-super">™</sup>
-          </h1>
+            src="/images/Logotrans.png"
+            alt="Humanite"
+            width={1448}
+            height={1043}
+            priority
+            className="mt-5 h-auto w-[280px] md:w-[440px]"
+          />
 
           <p
             data-edit-id="hero-subhead"
