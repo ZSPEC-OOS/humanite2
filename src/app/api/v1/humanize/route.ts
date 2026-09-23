@@ -12,6 +12,8 @@ import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
 import { buildOutput, tryClassifyOutput } from '@/lib/humanizeOutput'
 import { isAllowedProviderBaseUrl } from '@/lib/providerAllowlist'
 import { checkAndRecordUsage } from '@/lib/usageLimits'
+import { getUserApiConfig } from '@/lib/userApiConfig'
+import type { StoredApiConfig } from '@/lib/r2'
 
 // Vercel clamps this to whatever the deployment's plan actually allows
 // (Hobby's ceiling is well under this) — raise it in the dashboard/CLI to
@@ -26,8 +28,8 @@ export const maxDuration = 300
 // Sized for a large-context model (deepseek-flash's ~1M-token window handles
 // a chunk this size with enormous headroom) — the ceiling here is really
 // "how much can finish inside maxDuration=300s", not the model's context
-// limit. A small/slow model configured via api_config will take longer per
-// chunk than this was tuned for.
+// limit. A small/slow model configured via the caller's saved config will
+// take longer per chunk than this was tuned for.
 const CHUNK_MAX_CHARS = 24_000
 const MAX_GATE_RETRIES = 2
 
@@ -37,11 +39,15 @@ interface HumanizeSettings {
   domain: string
 }
 
-interface ApiConfig {
-  api_key?: string
-  model_id?: string
-  base_url?: string
-  gptzero_api_key?: string
+// A stored base_url is re-validated here (not just at save time in
+// /v1/user/api-config) rather than trusted blindly — cheap, and covers any
+// data written before that check existed or by another path. Falls back to
+// the server default instead of failing the whole request: this is the
+// caller's own previously-saved data, not a malicious per-request payload,
+// so a bad stored value is treated as "ignore it", not "reject the job".
+function safeBaseUrl(userConfig: StoredApiConfig | null): string | undefined {
+  const url = userConfig?.baseUrl?.trim()
+  return url && isAllowedProviderBaseUrl(url) ? url : undefined
 }
 
 // ── Async background processing ──────────────────────────────────────────────
@@ -54,14 +60,14 @@ async function processHumanizeJobAsync(
   sanitizedText: string,
   factLocks: FactLock[],
   settings: HumanizeSettings,
-  apiCfg: ApiConfig | undefined,
+  userConfig: StoredApiConfig | null,
 ) {
   try {
     const client = new OpenAI({
-      apiKey: apiCfg?.api_key || process.env.OPENAI_API_KEY,
-      baseURL: apiCfg?.base_url || process.env.OPENAI_BASE_URL,
+      apiKey: userConfig?.apiKey || process.env.OPENAI_API_KEY,
+      baseURL: safeBaseUrl(userConfig) || process.env.OPENAI_BASE_URL,
     })
-    const model = apiCfg?.model_id || process.env.OPENAI_MODEL || 'gpt-4o-mini'
+    const model = userConfig?.modelId || process.env.OPENAI_MODEL || 'gpt-4o-mini'
     const start = Date.now()
     const chunks = chunkFactLockedText(sanitizedText, factLocks, CHUNK_MAX_CHARS)
 
@@ -94,7 +100,7 @@ async function processHumanizeJobAsync(
     const postText = results.map(r => r.text).join('\n\n')
     const modelUsed = results.at(-1)?.modelUsed ?? model
     const watermark = generateWatermark(jobId, modelUsed)
-    const detection = await tryClassifyOutput(postText, apiCfg?.gptzero_api_key)
+    const detection = await tryClassifyOutput(postText, userConfig?.gptzeroApiKey || undefined)
     const output = buildOutput(postText, results, watermark, detection)
     const durationMs = Date.now() - start
 
@@ -135,7 +141,6 @@ export async function POST(req: NextRequest) {
   let body: {
     text?: string
     settings?: { intensity?: number; tone?: string; domain?: string; preserve_citations?: boolean }
-    api_config?: ApiConfig
   }
   try {
     body = await req.json()
@@ -152,22 +157,6 @@ export async function POST(req: NextRequest) {
   const tone = settingsIn.tone ?? 'balanced'
   const domain = settingsIn.domain ?? 'general'
   const settings: HumanizeSettings = { intensity, tone, domain }
-
-  // Reject a custom generation endpoint outright rather than letting the
-  // server call whatever address was supplied — see providerAllowlist.ts.
-  // Checked before any other work so a rejected request never reaches the
-  // async/job-creation path.
-  if (body.api_config?.base_url && !isAllowedProviderBaseUrl(body.api_config.base_url)) {
-    return NextResponse.json(
-      {
-        error: {
-          code: 'PROVIDER_BASE_URL_NOT_ALLOWED',
-          message: 'This base_url is not on the list of supported AI providers.',
-        },
-      },
-      { status: 400 },
-    )
-  }
 
   if (text.length < 20) {
     return NextResponse.json(
@@ -189,10 +178,16 @@ export async function POST(req: NextRequest) {
 
   const prep = preprocess(text)
 
+  // The caller's own saved model config, if any — looked up server-side by
+  // their authenticated identity rather than trusted from the request body.
+  // The browser doesn't hold (or send) the raw key at all; see
+  // apiConfigStore.ts and ApiConfigModal.tsx.
+  const userConfig = await getUserApiConfig(auth.claims.sub)
+
   // Skipped entirely for a caller using their own generation key — this
   // quota exists to protect this deployment's own paid OPENAI_API_KEY, not
   // to restrict usage of a key that isn't this deployment's to pay for.
-  if (!body.api_config?.api_key) {
+  if (!userConfig?.apiKey) {
     const usage = await checkAndRecordUsage(auth.claims.sub, auth.claims.tier, prep.word_count)
     if (!usage.allowed) {
       return NextResponse.json(
@@ -234,7 +229,7 @@ export async function POST(req: NextRequest) {
         { status: 503 },
       )
     }
-    waitUntil(processHumanizeJobAsync(jobId, prep.sanitized_text, prep.fact_locks, settings, body.api_config))
+    waitUntil(processHumanizeJobAsync(jobId, prep.sanitized_text, prep.fact_locks, settings, userConfig))
     return NextResponse.json({
       job_id: jobId,
       status: 'pending',
@@ -254,12 +249,11 @@ export async function POST(req: NextRequest) {
 
   // ── Short document: process synchronously within this request ─────────────
   try {
-    const apiCfg = body.api_config
     const client = new OpenAI({
-      apiKey: apiCfg?.api_key || process.env.OPENAI_API_KEY,
-      baseURL: apiCfg?.base_url || process.env.OPENAI_BASE_URL,
+      apiKey: userConfig?.apiKey || process.env.OPENAI_API_KEY,
+      baseURL: safeBaseUrl(userConfig) || process.env.OPENAI_BASE_URL,
     })
-    const model = apiCfg?.model_id || process.env.OPENAI_MODEL || 'gpt-4o-mini'
+    const model = userConfig?.modelId || process.env.OPENAI_MODEL || 'gpt-4o-mini'
     const start = Date.now()
 
     const result = await humanizeChunk(
@@ -269,7 +263,7 @@ export async function POST(req: NextRequest) {
     const durationMs = Date.now() - start
 
     const watermark = generateWatermark(jobId, result.modelUsed)
-    const detection = await tryClassifyOutput(result.text, apiCfg?.gptzero_api_key)
+    const detection = await tryClassifyOutput(result.text, userConfig?.gptzeroApiKey || undefined)
     const output = buildOutput(result.text, [result], watermark, detection)
 
     await tryPersist(() => db().collection('jobs').doc(jobId).update({

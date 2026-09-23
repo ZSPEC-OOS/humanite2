@@ -1,41 +1,60 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { useApiConfigStore, ApiConfig } from '@/stores/apiConfigStore'
+import { useApiConfigStore, ModelConfigDraft } from '@/stores/apiConfigStore'
 
 interface Props {
   open: boolean
   onClose: () => void
 }
 
+const EMPTY_DRAFT: ModelConfigDraft = { nickname: '', modelId: '', baseUrl: '', apiKey: '', gptzeroApiKey: '' }
+
 export function ApiConfigModal({ open, onClose }: Props) {
-  const { config, setConfig, clearConfig, hasCustomConfig, hasCustomGptzeroKey, syncFromServer } = useApiConfigStore()
-  const [draft, setDraft] = useState<ApiConfig>(config)
+  const { config, saveModelConfig, clearConfig, hasCustomConfig, hasCustomGptzeroKey, syncFromServer } = useApiConfigStore()
+  // Key fields always start blank — the store never holds a raw key to
+  // pre-fill them with (see apiConfigStore.ts). Leaving one blank on save
+  // means "keep whatever's already stored", not "clear it".
+  const [draft, setDraft] = useState<ModelConfigDraft>(EMPTY_DRAFT)
   const [showKey, setShowKey] = useState(false)
   const [showGptzeroKey, setShowGptzeroKey] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    if (open) { setDraft(config); setSaved(false); setShowKey(false); setShowGptzeroKey(false) }
+    if (open) {
+      setDraft({ nickname: config.nickname, modelId: config.modelId, baseUrl: config.baseUrl, apiKey: '', gptzeroApiKey: '' })
+      setSaved(false)
+      setShowKey(false)
+      setShowGptzeroKey(false)
+    }
   }, [open, config])
 
-  // Pull the latest config saved from any other device — resolves into
-  // `config` above, which the effect above then reflects into `draft`.
+  // Pull the latest config metadata saved from any other device — resolves
+  // into `config` above, which the effect above then reflects into `draft`.
   useEffect(() => {
     if (open) syncFromServer()
   }, [open, syncFromServer])
 
   if (!open) return null
 
-  const patch = (field: keyof ApiConfig) => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const patch = (field: keyof ModelConfigDraft) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setDraft(prev => ({ ...prev, [field]: e.target.value }))
 
-  const handleSave = () => {
-    setConfig(draft)
-    setSaved(true)
-    setTimeout(() => { setSaved(false); onClose() }, 800)
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await saveModelConfig(draft)
+      setSaved(true)
+      setTimeout(() => { setSaved(false); onClose() }, 800)
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const handleClear = () => { clearConfig(); setDraft({ nickname: '', modelId: '', baseUrl: '', apiKey: '', gptzeroApiKey: '' }) }
+  const handleClear = async () => {
+    await clearConfig()
+    setDraft(EMPTY_DRAFT)
+  }
 
   const isActive = hasCustomConfig() || hasCustomGptzeroKey()
 
@@ -83,8 +102,8 @@ export function ApiConfigModal({ open, onClose }: Props) {
         <div className="px-5 py-5 space-y-4">
           <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
             Override the server&apos;s default model. Leave blank to use the server default.
-            Saved on this device and synced across your other devices when
-            cloud sync is configured.
+            Saved on our server and synced across your other devices — your key is never
+            stored in this browser, and isn&apos;t sent back to it after saving.
           </p>
 
           {/* Nickname */}
@@ -151,7 +170,7 @@ export function ApiConfigModal({ open, onClose }: Props) {
                 type={showKey ? 'text' : 'password'}
                 value={draft.apiKey}
                 onChange={patch('apiKey')}
-                placeholder="sk-…"
+                placeholder={config.hasApiKey ? `Configured (${config.apiKeyHint}) — enter a new key to replace` : 'sk-…'}
                 className="w-full bg-white border border-gray-300 rounded-xl
                            px-3.5 py-2.5 pr-10 text-sm text-gray-800 placeholder-gray-400
                            outline-none focus:border-gray-900 transition-colors
@@ -200,7 +219,7 @@ export function ApiConfigModal({ open, onClose }: Props) {
                   type={showGptzeroKey ? 'text' : 'password'}
                   value={draft.gptzeroApiKey}
                   onChange={patch('gptzeroApiKey')}
-                  placeholder="Your GPTZero API key"
+                  placeholder={config.hasGptzeroKey ? `Configured (${config.gptzeroKeyHint}) — enter a new key to replace` : 'Your GPTZero API key'}
                   className="w-full bg-white border border-gray-300 rounded-xl
                              px-3.5 py-2.5 pr-10 text-sm text-gray-800 placeholder-gray-400
                              outline-none focus:border-gray-900 transition-colors
@@ -253,13 +272,13 @@ export function ApiConfigModal({ open, onClose }: Props) {
             </button>
             <button
               onClick={handleSave}
-              disabled={!draft.apiKey.trim() && !draft.modelId.trim() && !draft.gptzeroApiKey.trim()}
+              disabled={saving || (!draft.apiKey.trim() && !draft.modelId.trim() && !draft.gptzeroApiKey.trim())}
               className="text-xs font-semibold text-white px-4 py-2 rounded-xl
                          disabled:opacity-30 disabled:cursor-not-allowed transition-colors
                          bg-gray-900 hover:bg-gray-800
                          dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
             >
-              {saved ? 'Saved ✓' : 'Save'}
+              {saved ? 'Saved ✓' : saving ? 'Saving…' : 'Save'}
             </button>
           </div>
         </div>

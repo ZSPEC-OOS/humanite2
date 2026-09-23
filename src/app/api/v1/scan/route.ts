@@ -8,6 +8,7 @@ import { detectWithCache } from '@/lib/detection/dedupe'
 import { DetectionProviderError } from '@/lib/detection/contracts'
 import { recordScanTelemetry } from '@/lib/observability/scanTelemetry'
 import { checkAndRecordUsage } from '@/lib/usageLimits'
+import { getUserApiConfig } from '@/lib/userApiConfig'
 
 // A single non-chunked detection call through DetectionGateway.
 export const maxDuration = 60
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
   const auth = await requireAuth(req)
   if (isAuthFailure(auth)) return auth
 
-  let body: { text?: string; mode?: string; domain_hint?: string; api_config?: { gptzero_api_key?: string } }
+  let body: { text?: string; mode?: string; domain_hint?: string }
   try {
     body = await req.json()
   } catch {
@@ -65,9 +66,14 @@ export async function POST(req: NextRequest) {
   const now = new Date()
   const wordCount = sanitized.split(/\s+/).filter(Boolean).length
 
+  // The caller's own saved GPTZero key, if any — looked up server-side by
+  // their authenticated identity rather than trusted from the request body.
+  const userConfig = await getUserApiConfig(auth.claims.sub)
+  const userGptzeroKey = userConfig?.gptzeroApiKey?.trim() || undefined
+
   // Skipped entirely for a caller using their own GPTZero key — see the
   // identical note in humanize/route.ts.
-  if (!body.api_config?.gptzero_api_key) {
+  if (!userGptzeroKey) {
     const usage = await checkAndRecordUsage(auth.claims.sub, auth.claims.tier, wordCount)
     if (!usage.allowed) {
       return NextResponse.json(
@@ -94,7 +100,6 @@ export async function POST(req: NextRequest) {
   recordScanTelemetry({ event: 'scan_requested', trigger: 'manual', words: wordCount, chars: sanitized.length })
 
   try {
-    const userGptzeroKey = body.api_config?.gptzero_api_key?.trim() || undefined
     const gateway = getDetectionGateway(userGptzeroKey)
     const { result: detectionResult, cacheHit } = await detectWithCache(
       gateway,

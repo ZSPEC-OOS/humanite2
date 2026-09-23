@@ -1,6 +1,5 @@
 import { jwtDecode } from 'jwt-decode'
 import { useUserStore } from '@/stores/userStore'
-import { useApiConfigStore } from '@/stores/apiConfigStore'
 import type { DetectionResult, DetectionSegment, LocalDiagnostics } from '@/lib/detection/contracts'
 import type { PreservationByType } from '@/lib/qualityGates'
 
@@ -204,22 +203,12 @@ export async function apiHumanize(
   text: string,
   settings: HumanizeSettings,
 ): Promise<HumanizeAPIResponse> {
-  const { config, hasCustomConfig, hasCustomGptzeroKey } = useApiConfigStore.getState()
-  const body: Record<string, unknown> = { text, settings }
-  const apiConfig: Record<string, string> = {}
-  if (hasCustomConfig()) {
-    apiConfig.api_key = config.apiKey
-    apiConfig.model_id = config.modelId
-    if (config.baseUrl.trim()) apiConfig.base_url = config.baseUrl.trim()
-  }
-  // Independent of the generation-model fields above — a user may set only
-  // this, only those, both, or neither.
-  if (hasCustomGptzeroKey()) apiConfig.gptzero_api_key = config.gptzeroApiKey.trim()
-  if (Object.keys(apiConfig).length > 0) body.api_config = apiConfig
-
+  // No api_config here — the server looks up this authenticated user's own
+  // saved model config (if any) itself. The browser doesn't hold the raw
+  // key to send even if it wanted to; see apiConfigStore.ts.
   return apiFetch<HumanizeAPIResponse>('/v1/humanize', {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify({ text, settings }),
   })
 }
 
@@ -240,17 +229,12 @@ export async function apiScan(
   text: string,
   mode: 'quick' | 'standard' = 'standard',
 ): Promise<ScanAPIResponse> {
-  // Detection runs on an independent scanner service, not the user's
-  // configured generation model — the only api_config field ever sent here
-  // is the caller's own GPTZero key, and only when they've set one.
-  const { config, hasCustomGptzeroKey } = useApiConfigStore.getState()
-  const body: Record<string, unknown> = { text, mode }
-  if (hasCustomGptzeroKey()) {
-    body.api_config = { gptzero_api_key: config.gptzeroApiKey.trim() }
-  }
+  // No api_config here either — the server looks up this authenticated
+  // user's own saved GPTZero key (if any) itself, the same way it does for
+  // the generation model above.
   return apiFetch<ScanAPIResponse>('/v1/scan', {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify({ text, mode }),
   })
 }
 
