@@ -38,7 +38,6 @@ const DEFAULT_SETTINGS: HumanizeSettings = {
   intensity: 5,
   tone: 'balanced',
   domain: 'general',
-  preserve_citations: true,
 }
 
 function sleep(ms: number) {

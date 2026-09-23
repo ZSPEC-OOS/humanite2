@@ -30,8 +30,7 @@ export function ExportMenu() {
     if (!output.watermark || !response?.job_id) return
     setLoading(format); setError(null)
     try {
-      const blob     = await apiExport(output.text, format,
-                         output.watermark as Record<string, string>, response.job_id)
+      const blob     = await apiExport(output.text, format, response.job_id)
       const ext      = FORMATS.find(f => f.key === format)?.ext ?? format
       const filename = `humanite-${response.job_id.slice(0, 8)}.${ext}`
       downloadBlob(blob, filename)

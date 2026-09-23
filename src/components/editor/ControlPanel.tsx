@@ -98,27 +98,6 @@ export function ControlPanel() {
           </select>
         </div>
 
-        <div className="w-px self-stretch bg-gray-200 dark:bg-gray-800 hidden sm:block" />
-
-        {/* Preserve citations */}
-        <label className="flex flex-col gap-2 cursor-pointer select-none">
-          <span className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-            Preserve citations
-          </span>
-          <div className="flex items-center gap-2.5">
-            <input
-              type="checkbox"
-              checked={settings.preserve_citations}
-              onChange={e => setSettings({ preserve_citations: e.target.checked })}
-              className="w-5 h-5 rounded cursor-pointer"
-              style={{ accentColor: 'var(--accent)' }}
-            />
-            <span className="text-sm text-gray-500 dark:text-gray-400">
-              {settings.preserve_citations ? 'On' : 'Off'}
-            </span>
-          </div>
-        </label>
-
       </div>
     </div>
   )

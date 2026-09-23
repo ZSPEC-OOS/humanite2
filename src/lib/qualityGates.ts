@@ -30,6 +30,18 @@ export interface CategoryPreservation {
 
 export type PreservationByType = Partial<Record<FactLockType, CategoryPreservation>>
 
+// Which of the two externally-dependent gates actually ran and contributed
+// to `passed` — entity_overlap has no equivalent flag since it always runs
+// (see below). `passed: true` only means "no gate that DID run failed"; a
+// caller that needs to know whether that covered the whole picture, or just
+// entity_overlap because both other gates were down, must check this
+// instead of inferring it from a null score (a per-chunk average can mask a
+// per-chunk null — see aggregateChunkResults in humanizePipeline.ts).
+export interface GateAvailability {
+  semantic_similarity: boolean
+  entailment: boolean
+}
+
 export interface QualityScores {
   // null only when this specific gate failed to run (e.g. a custom model
   // endpoint doesn't support the embedding call semantic similarity needs)
@@ -41,6 +53,7 @@ export interface QualityScores {
   entity_overlap: number
   passed: boolean
   failed_gate: FailedGate
+  gates_available: GateAvailability
   missing_facts: string[]
   entailment_issues: string[]
   preservation_by_type: PreservationByType
@@ -224,6 +237,10 @@ export async function runQualityGates(
     entity_overlap: round(entity.score),
     passed: failedGate === null,
     failed_gate: failedGate,
+    gates_available: {
+      semantic_similarity: similarityResult.status === 'fulfilled',
+      entailment: entailmentResult.status === 'fulfilled',
+    },
     missing_facts: entity.missing,
     entailment_issues: entailment?.issues ?? [],
     preservation_by_type: entity.by_type,

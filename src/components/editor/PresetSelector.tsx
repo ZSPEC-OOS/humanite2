@@ -21,7 +21,6 @@ export function PresetSelector() {
       intensity: preset.intensity,
       tone: preset.tone,
       domain: preset.domain,
-      preserve_citations: preset.preserve_citations,
     })
   }
 
@@ -34,7 +33,6 @@ export function PresetSelector() {
         intensity: settings.intensity,
         tone: settings.tone,
         domain: settings.domain,
-        preserve_citations: settings.preserve_citations,
       })
       setPresets(prev => [created, ...prev])
       setSaveName('')

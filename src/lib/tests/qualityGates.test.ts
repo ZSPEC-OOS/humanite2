@@ -297,6 +297,12 @@ describe('runQualityGates', () => {
     expect(result.entity_overlap).toBe(1)
   })
 
+  it('flags semantic_similarity as unavailable (not just null) when the embedding call fails, while entailment stays available', async () => {
+    const client = clientWithFailingEmbeddings('{"entailment_probability": 1.0, "issues": []}')
+    const result = await runQualityGates(client, 'gpt-4o-mini', 'the cat sat', 'the cat sat', [lock('cat')])
+    expect(result.gates_available).toEqual({ semantic_similarity: false, entailment: true })
+  })
+
   it('does not fail the whole result just because semantic similarity could not be checked', async () => {
     const client = clientWithFailingEmbeddings('{"entailment_probability": 1.0, "issues": []}')
     const result = await runQualityGates(client, 'gpt-4o-mini', 'the cat sat', 'the cat sat', [lock('cat')])
@@ -323,6 +329,14 @@ describe('runQualityGates', () => {
     expect(result.nli_entailment).toBeNull()
     expect(result.entity_overlap).toBe(0)
     expect(result.failed_gate).toBe('entity_overlap')
+    expect(result.passed).toBe(false)
+    expect(result.gates_available).toEqual({ semantic_similarity: false, entailment: false })
+  })
+
+  it('marks both gates available when everything ran normally, even if one of them failed its threshold', async () => {
+    const client = mockClient('{"entailment_probability": 0.1, "issues": ["invented a claim"]}', [[1, 0], [1, 0]])
+    const result = await runQualityGates(client, 'gpt-4o-mini', 'orig', 'output', [])
+    expect(result.gates_available).toEqual({ semantic_similarity: true, entailment: true })
     expect(result.passed).toBe(false)
   })
 })

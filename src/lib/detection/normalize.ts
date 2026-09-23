@@ -140,13 +140,30 @@ function buildSegments(sentences: GPTZeroSentence[] | undefined, originalText: s
   })
 }
 
+function wordCount(text: string): number {
+  const trimmed = text.trim()
+  return trimmed ? trimmed.split(/\s+/).length : 0
+}
+
 // Spec §13 — derived only when the response is granular enough to support
 // it (per-sentence scores present); never manufactured from
-// probabilities.ai alone.
+// probabilities.ai alone. Weighted by each segment's word count rather than
+// a plain per-sentence average — an unweighted mean lets a one-word
+// sentence ("Yes.") outvote a fifty-word one, which can put the reported
+// fraction far from what share of the actual text reads as AI-like.
 function estimateAiLikeFraction(segments: DetectionSegment[]): number | null {
   const scored = segments.filter((s): s is DetectionSegment & { ai_score: number } => s.ai_score != null)
   if (scored.length === 0) return null
-  return round(scored.reduce((sum, s) => sum + s.ai_score, 0) / scored.length)
+  const weights = scored.map(s => wordCount(s.text ?? ''))
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0)
+  // No segment carried usable text to weight by (shouldn't normally happen —
+  // segments come from the same sentence list their scores do) — an
+  // unweighted mean is still a better answer than null or a division by zero.
+  if (totalWeight === 0) {
+    return round(scored.reduce((sum, s) => sum + s.ai_score, 0) / scored.length)
+  }
+  const weightedSum = scored.reduce((sum, s, i) => sum + s.ai_score * weights[i]!, 0)
+  return round(weightedSum / totalWeight)
 }
 
 export function normalizeGPTZero(raw: unknown, originalText: string): DetectionProviderResult {

@@ -141,7 +141,6 @@ export interface HumanizeSettings {
   intensity: number
   tone: string
   domain: string
-  preserve_citations: boolean
 }
 
 export interface HumanizeOutput {
@@ -156,6 +155,11 @@ export interface HumanizeOutput {
     entity_overlap: number | null
     passed: boolean | null
     failed_gate: string | null
+    // True when semantic_similarity and/or nli_entailment never ran for at
+    // least part of the document — `passed: true` under degradation means
+    // "nothing that ran failed", not "everything was checked".
+    degraded: boolean
+    gates_available: { semantic_similarity: boolean; entailment: boolean }
     retry_count: number
     missing_facts: string[]
     entailment_issues: string[]
@@ -277,7 +281,6 @@ export interface Preset {
   intensity: number
   tone: string
   domain: string
-  preserve_citations: boolean
   created_at: string
 }
 
@@ -303,10 +306,13 @@ export async function apiDeletePreset(presetId: string): Promise<void> {
 export async function apiExport(
   text: string,
   format: 'text' | 'markdown' | 'docx',
-  watermark: Record<string, string>,
   jobId: string,
   title = 'Humanite Export',
 ): Promise<Blob> {
+  // No watermark object sent — the server looks up job_id itself and only
+  // stamps "Verified by Humanite" if this text hashes to what that job
+  // actually produced. A client-supplied fingerprint was never a real
+  // signal; see export/route.ts's resolveVerification().
   const token = useUserStore.getState().accessToken
   const resp = await fetch(`${API_BASE}/api/v1/export`, {
     method: 'POST',
@@ -314,7 +320,7 @@ export async function apiExport(
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ text, format, watermark, job_id: jobId, title }),
+    body: JSON.stringify({ text, format, job_id: jobId, title }),
   })
 
   if (!resp.ok) {

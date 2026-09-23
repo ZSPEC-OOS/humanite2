@@ -11,7 +11,7 @@ export async function GET(req: NextRequest, { params }: { params: { presetId: st
     return NextResponse.json({ error: { code: 'PRESET_NOT_FOUND', message: 'Preset not found.' } }, { status: 404 })
   }
   const p = doc.data()!
-  return NextResponse.json({ id: doc.id, name: p.name, intensity: p.intensity, tone: p.tone, domain: p.domain, preserve_citations: p.preserveCitations, created_at: p.createdAt.toDate().toISOString() })
+  return NextResponse.json({ id: doc.id, name: p.name, intensity: p.intensity, tone: p.tone, domain: p.domain, created_at: p.createdAt.toDate().toISOString() })
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { presetId: string } }) {
