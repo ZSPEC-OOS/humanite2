@@ -100,17 +100,22 @@ export interface HumanizeOutput {
   }
   // Automatic AI-detection scan run against this output text once humanize
   // completes — null only if the scan itself failed (never blocks the
-  // humanize response). Same shape as ScanAPIResponse's core fields.
+  // humanize response; see detection_warning). Same shape as
+  // ScanAPIResponse's core fields.
   detection: {
     classification: 'human-written' | 'ai-generated' | 'mixed' | 'uncertain'
     confidence: number
     human_probability: number
     ai_probability: number
     uncertain_probability: number
+    per_sentence_perplexity: number[]
     top_features: FeatureContribution[]
     explanation: { summary: string; detail: string }
     model_used: string
   } | null
+  // Set only when `detection` is null — distinguishes "not analyzed" from a
+  // real "uncertain" classification, which is a populated `detection`.
+  detection_warning: string | null
   watermark: {
     type: string
     fingerprint: string
@@ -192,18 +197,11 @@ export async function apiScan(
   text: string,
   mode: 'quick' | 'standard' = 'standard',
 ): Promise<ScanAPIResponse> {
-  const { config, hasCustomConfig } = useApiConfigStore.getState()
-  const body: Record<string, unknown> = { text, mode }
-  if (hasCustomConfig()) {
-    body.api_config = {
-      api_key: config.apiKey,
-      model_id: config.modelId,
-      ...(config.baseUrl.trim() ? { base_url: config.baseUrl.trim() } : {}),
-    }
-  }
+  // Detection runs on an independent scanner service, not the user's
+  // configured generation model — no api_config is sent here.
   return apiFetch<ScanAPIResponse>('/v1/scan', {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify({ text, mode }),
   })
 }
 

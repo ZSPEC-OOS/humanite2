@@ -34,35 +34,20 @@ AI_TEXT = (
 )
 
 
-# ── Rule filter tests ──────────────────────────────────────────────────────────
+# ── Evidence-sufficiency gate tests ─────────────────────────────────────────────
 
-class TestRuleFilter:
-    def test_bot_signature_returns_ai_generated(self):
-        from src.detection.rule_filter import rule_filter
-        text = (
-            "As an AI language model, I cannot provide that information. "
-            "However, I can explain the general principles involved in "
-            "a way that is both accurate and informative for educational purposes."
-        )
-        assert rule_filter(text) == "ai-generated"
+class TestEvidenceGate:
+    def test_short_text_is_underdetermined(self):
+        from src.detection.rule_filter import is_underdetermined
+        assert is_underdetermined("This is too short.") is True
 
-    def test_short_text_returns_uncertain(self):
-        from src.detection.rule_filter import rule_filter
-        assert rule_filter("This is too short.") == "uncertain"
-
-    def test_exactly_49_words_returns_uncertain(self):
-        from src.detection.rule_filter import rule_filter
+    def test_exactly_49_words_is_underdetermined(self):
+        from src.detection.rule_filter import is_underdetermined
         text = " ".join(["word"] * 49)
-        assert rule_filter(text) == "uncertain"
+        assert is_underdetermined(text) is True
 
-    def test_multiple_human_signals_returns_human(self):
-        from src.detection.rule_filter import rule_filter
-        result = rule_filter(HUMAN_TEXT)
-        # May return "human-written" or None — either is correct
-        assert result in ("human-written", None)
-
-    def test_standard_text_returns_none(self):
-        from src.detection.rule_filter import rule_filter
+    def test_standard_text_is_not_underdetermined(self):
+        from src.detection.rule_filter import is_underdetermined
         text = (
             "The Federal Reserve held interest rates steady at its September meeting. "
             "Officials cited continued uncertainty about the inflation trajectory "
@@ -70,17 +55,49 @@ class TestRuleFilter:
             "though some analysts were surprised by the tone of the statement "
             "and its implications for the December meeting timeline."
         )
-        assert rule_filter(text) is None   # No rule fires → continue to ML
+        assert is_underdetermined(text) is False
+
+
+# ── Lexical rule features (weak evidence, not a verdict) ────────────────────────
+
+class TestLexicalRuleFeatures:
+    def test_bot_signature_counted_as_feature_not_verdict(self):
+        """A bot-signature match must surface as a numeric feature, not force
+        a classification the way the old rule_filter() did."""
+        from src.detection.features import extract_features, FEATURE_NAMES
+        text = (
+            "As an AI language model, I cannot provide that information. "
+            "However, I can explain the general principles involved in "
+            "a way that is both accurate and informative for educational purposes."
+        )
+        feat = dict(zip(FEATURE_NAMES, extract_features(text)))
+        assert feat["bot_signature_count"] >= 1
+
+    def test_human_signals_counted_as_features(self):
+        from src.detection.features import extract_features, FEATURE_NAMES
+        feat = dict(zip(FEATURE_NAMES, extract_features(HUMAN_TEXT)))
+        assert feat["first_person_marker_count"] + feat["informal_phrase_count"] >= 3
+
+    def test_standard_text_has_no_lexical_rule_hits(self):
+        from src.detection.features import extract_features, FEATURE_NAMES
+        text = (
+            "The Federal Reserve held interest rates steady at its September meeting. "
+            "Officials cited continued uncertainty about the inflation trajectory "
+            "as a reason to pause."
+        )
+        feat = dict(zip(FEATURE_NAMES, extract_features(text)))
+        assert feat["bot_signature_count"] == 0
+        assert feat["bot_pattern_count"] == 0
 
 
 # ── Feature extraction tests ───────────────────────────────────────────────────
 
 class TestFeatureExtraction:
-    def test_returns_18_features(self):
+    def test_returns_22_features(self):
         from src.detection.features import extract_features, FEATURE_NAMES
         vec = extract_features(HUMAN_TEXT)
-        assert vec.shape == (18,)
-        assert len(FEATURE_NAMES) == 18
+        assert vec.shape == (22,)
+        assert len(FEATURE_NAMES) == 22
 
     def test_all_features_finite(self):
         import numpy as np
@@ -160,8 +177,13 @@ class TestPerplexity:
 # ── HTTP endpoint tests (mocked classifier) ───────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_bot_signature_returns_ai_generated():
-    """Rule filter should catch bot signatures before any ML call."""
+async def test_bot_signature_influences_but_does_not_force_verdict():
+    """
+    A bot-signature phrase should push the classifier toward ai-generated
+    (it also has heavy AI-vocabulary/transition-word density), but the
+    verdict must come from the classifier — not a 99%-confidence rule
+    override, and not labeled model_used="rule_filter".
+    """
     from httpx import AsyncClient, ASGITransport
     from src.main import app
 
@@ -171,8 +193,7 @@ async def test_bot_signature_returns_ai_generated():
     assert resp.status_code == 200
     data = resp.json()
     assert data["classification"] == "ai-generated"
-    assert data["confidence"] >= 0.95
-    assert data["model_used"] == "rule_filter"
+    assert data["model_used"] != "rule_filter"
 
 
 @pytest.mark.asyncio

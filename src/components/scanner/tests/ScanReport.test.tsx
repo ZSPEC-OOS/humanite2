@@ -52,7 +52,7 @@ describe('ScanReport', () => {
   it('renders classification badge for ai-generated', () => {
     useScanStore.setState({ status: 'done', response: MOCK_SCAN_RESPONSE })
     render(<ScanReport />)
-    expect(screen.getByText(/AI GENERATED/i)).toBeTruthy()
+    expect(screen.getByText(/AI-LIKE/i)).toBeTruthy()
   })
 
   it('renders confidence percentage', () => {

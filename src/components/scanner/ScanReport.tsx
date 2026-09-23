@@ -3,16 +3,19 @@ import { useScanStore } from '@/stores/scanStore'
 import { PerplexityChart } from './PerplexityChart'
 import { Spinner } from '@/components/ui/Spinner'
 
+// Terminology contract: report inference, not proof — "AI-like" /
+// "Human-like", never "Detected" / "Undetectable" (which implies an
+// evasion guarantee the detector cannot back up).
 const CLASS_CONFIG = {
   'human-written': {
     bg: 'bg-green-50', border: 'border-green-200',
     badge: 'bg-green-100 text-green-700 border border-green-300',
-    bar: 'bg-green-500', label: 'Human Written', icon: '✓',
+    bar: 'bg-green-500', label: 'Human-like', icon: '✓',
   },
   'ai-generated': {
     bg: 'bg-red-50', border: 'border-red-200',
     badge: 'bg-red-100 text-red-700 border border-red-300',
-    bar: 'bg-red-500', label: 'AI Generated', icon: '⚠',
+    bar: 'bg-red-500', label: 'AI-like', icon: '⚠',
   },
   mixed: {
     bg: 'bg-amber-50', border: 'border-amber-200',

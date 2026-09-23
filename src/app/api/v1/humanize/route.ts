@@ -9,7 +9,8 @@ import { generateWatermark } from '@/lib/watermark'
 import { chunkFactLockedText } from '@/lib/chunk'
 import { humanizeChunk, aggregateChunkResults, ChunkResult } from '@/lib/humanizePipeline'
 import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
-import { classify, ClassifyResult } from '@/lib/detection'
+import { classify } from '@/lib/detection/client'
+import { ClassifyResult } from '@/lib/detection/contracts'
 
 // Vercel clamps this to whatever the deployment's plan actually allows
 // (Hobby's ceiling is well under this) — raise it in the dashboard/CLI to
@@ -61,6 +62,10 @@ function buildOutput(
       entailment_issues: agg.entailment_issues,
     },
     detection,
+    // Distinguishes "not analyzed" (detection is null, this is set) from a
+    // real "uncertain" classification (detection is populated) — the UI
+    // should not conflate the two.
+    detection_warning: detection ? null : 'AI detection unavailable',
     watermark,
     postprocessor_substitutions: results.reduce((sum, r) => sum + r.substitutions, 0),
   }
@@ -70,9 +75,13 @@ function buildOutput(
 // should never break the humanize response itself. Runs once against the
 // final assembled text rather than per-chunk: cheaper, and detectors read
 // documents holistically rather than fragment-by-fragment anyway.
-async function tryClassifyOutput(client: OpenAI, model: string, text: string): Promise<ClassifyResult | null> {
+//
+// Deliberately does not take the humanizer's OpenAI client/model: the
+// detector is an independent service and must not be gradeable by (or
+// dependent on) whatever model produced the text it's scanning.
+async function tryClassifyOutput(text: string): Promise<ClassifyResult | null> {
   try {
-    return await classify(client, model, text, 'standard')
+    return await classify(text, 'standard')
   } catch (err) {
     console.warn('Post-humanize detection scan failed — shipping without it', {
       type: err instanceof Error ? err.constructor.name : typeof err,
@@ -131,7 +140,7 @@ async function processHumanizeJobAsync(
     const postText = results.map(r => r.text).join('\n\n')
     const modelUsed = results.at(-1)?.modelUsed ?? model
     const watermark = generateWatermark(jobId, modelUsed)
-    const detection = await tryClassifyOutput(client, modelUsed, postText)
+    const detection = await tryClassifyOutput(postText)
     const output = buildOutput(postText, results, watermark, detection)
     const durationMs = Date.now() - start
 
@@ -207,15 +216,7 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  let prep: ReturnType<typeof preprocess>
-  try {
-    prep = preprocess(text)
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'VALIDATION_INJECTION_ATTEMPT', message: 'Input contains disallowed content.' } },
-      { status: 400 },
-    )
-  }
+  const prep = preprocess(text)
 
   const jobId = randomUUID()
   const inputHash = createHash('sha256').update(text).digest('hex')
@@ -284,7 +285,7 @@ export async function POST(req: NextRequest) {
     const durationMs = Date.now() - start
 
     const watermark = generateWatermark(jobId, result.modelUsed)
-    const detection = await tryClassifyOutput(client, result.modelUsed, result.text)
+    const detection = await tryClassifyOutput(result.text)
     const output = buildOutput(result.text, [result], watermark, detection)
 
     await tryPersist(() => db().collection('jobs').doc(jobId).update({
