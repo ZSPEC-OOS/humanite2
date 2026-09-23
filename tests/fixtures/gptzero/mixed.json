@@ -1,0 +1,29 @@
+{
+  "status": 200,
+  "body": {
+    "documents": [
+      {
+        "document_classification": "MIXED",
+        "class_probabilities": { "human": 0.34, "ai": 0.45, "mixed": 0.21 },
+        "confidence_category": "medium",
+        "sentences": [
+          {
+            "sentence": "I rewrote the intro a few times before it finally sounded right to me.",
+            "generated_prob": 0.08,
+            "highlight_sentence_for_ai": false
+          },
+          {
+            "sentence": "Furthermore, this comprehensive framework facilitates optimal outcomes across diverse use cases.",
+            "generated_prob": 0.93,
+            "highlight_sentence_for_ai": true
+          },
+          {
+            "sentence": "Anyway, I think the rest of the draft is in decent shape.",
+            "generated_prob": 0.11,
+            "highlight_sentence_for_ai": false
+          }
+        ]
+      }
+    ]
+  }
+}

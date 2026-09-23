@@ -1,0 +1,24 @@
+{
+  "status": 200,
+  "body": {
+    "documents": [
+      {
+        "document_classification": "HUMAN_ONLY",
+        "class_probabilities": { "human": 0.94, "ai": 0.04, "mixed": 0.02 },
+        "confidence_category": "high",
+        "sentences": [
+          {
+            "sentence": "I spent most of the afternoon trying to fix a leak under the kitchen sink.",
+            "generated_prob": 0.03,
+            "highlight_sentence_for_ai": false
+          },
+          {
+            "sentence": "Turns out it was just a loose washer, so at least it was an easy fix.",
+            "generated_prob": 0.06,
+            "highlight_sentence_for_ai": false
+          }
+        ]
+      }
+    ]
+  }
+}
