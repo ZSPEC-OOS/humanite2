@@ -46,7 +46,7 @@ export default function LandingPage() {
           </p>
 
           <h1 className="mt-5 font-display text-5xl font-bold text-gray-900 dark:text-gray-100 md:text-7xl">
-            Humanite<sup className="text-[0.4em]">™</sup>
+            Humanite
           </h1>
 
           <p className="mt-5 font-display text-3xl text-gray-900 dark:text-gray-100 md:text-5xl">
