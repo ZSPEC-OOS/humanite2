@@ -91,7 +91,7 @@ export default function Dashboard() {
 
   if (!authReady) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
+      <div className="bg-rock min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
         <Spinner className="w-8 h-8 border-gray-200 border-t-gray-700 dark:border-gray-700 dark:border-t-gray-300" />
       </div>
     )
@@ -233,7 +233,7 @@ export default function Dashboard() {
     {/* ══════════════════════════════════════════════════════════════
         DESKTOP  (md+)
         ══════════════════════════════════════════════════════════════ */}
-    <div className="hidden md:flex flex-col items-center min-h-screen py-6 px-6 bg-white dark:bg-gray-950">
+    <div className="bg-rock hidden md:flex flex-col items-center min-h-screen py-6 px-6 bg-white dark:bg-gray-950">
       <div className="w-full max-w-6xl rounded-2xl overflow-hidden flex flex-col
                       bg-white border border-gray-200 dark:bg-gray-900 dark:border-gray-800"
         style={{ minHeight: 'calc(100vh - 3rem)' }}>
@@ -423,7 +423,7 @@ export default function Dashboard() {
     {/* ══════════════════════════════════════════════════════════════
         MOBILE  (<md)
         ══════════════════════════════════════════════════════════════ */}
-    <div className="relative md:hidden flex flex-col bg-white dark:bg-gray-950 p-2" style={{ height: '100dvh' }}>
+    <div className="bg-rock relative md:hidden flex flex-col bg-white dark:bg-gray-950 p-2" style={{ height: '100dvh' }}>
       {/* ── Drawer backdrop ── */}
       {menuOpen && (
         <div

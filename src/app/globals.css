@@ -21,3 +21,17 @@
     color: #f3f4f6;
   }
 }
+
+@layer utilities {
+  /* Rock texture, tiled edge-to-edge and repeated down the page (light mode only). */
+  .bg-rock {
+    background-image: url('/rock.png');
+    background-repeat: repeat-y;
+    background-position: top center;
+    background-size: 100% auto;
+  }
+
+  .dark .bg-rock {
+    background-image: none;
+  }
+}

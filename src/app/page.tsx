@@ -35,7 +35,7 @@ const FEATURES = [
 
 export default function LandingPage() {
   return (
-    <main className="relative min-h-screen bg-white dark:bg-gray-950">
+    <main className="bg-rock relative min-h-screen bg-white dark:bg-gray-950">
       <div className="flex min-h-screen flex-col">
         <SiteNav />
 
