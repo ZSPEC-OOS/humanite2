@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { authLogin, APIError } from '@/lib/api'
 import { Spinner } from '@/components/ui/Spinner'
@@ -31,7 +32,9 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
       <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-10 w-full max-w-sm dark:bg-gray-900 dark:border-gray-800">
         <div className="flex items-center justify-center mb-8">
-          <span className="text-xl font-bold text-gray-900 dark:text-gray-100">Humanite</span>
+          <Link href="/" className="font-display text-xl text-gray-900 dark:text-gray-100">
+            Humanite
+          </Link>
         </div>
 
         <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1 text-center">Sign in</h1>
