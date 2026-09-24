@@ -29,7 +29,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
+    <div className="bg-rock min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
       <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-10 w-full max-w-sm dark:bg-gray-900 dark:border-gray-800">
         <div className="flex items-center justify-center mb-8">
           <Link href="/" className="font-display text-xl text-gray-900 dark:text-gray-100">
