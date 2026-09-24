@@ -37,7 +37,7 @@ export default function LoginPage() {
           </Link>
         </div>
 
-        <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1 text-center">Sign in</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1 text-center">Sign in</h1>
         <p className="text-xs text-gray-500 dark:text-gray-400 text-center mb-6">Welcome back</p>
 
         {error && (
