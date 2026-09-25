@@ -23,15 +23,15 @@
 }
 
 @layer utilities {
-  /* Rock texture, tiled edge-to-edge and repeated down the page (light mode only). */
+  /* Marble/rock texture, tiled edge-to-edge and repeated down the page. */
   .bg-rock {
-    background-image: url('/rock.png');
+    background-image: url('/theme-light.png');
     background-repeat: repeat-y;
     background-position: top center;
     background-size: 100% auto;
   }
 
   .dark .bg-rock {
-    background-image: none;
+    background-image: url('/theme-dark.png');
   }
 }
