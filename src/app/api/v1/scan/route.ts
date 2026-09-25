@@ -6,7 +6,7 @@ import { getDetectionGateway } from '@/lib/detection/gateway'
 import { detectWithCache } from '@/lib/detection/dedupe'
 import { DetectionProviderError } from '@/lib/detection/contracts'
 import { recordScanTelemetry } from '@/lib/observability/scanTelemetry'
-import { checkAndRecordUsage } from '@/lib/usageLimits'
+import { checkAndRecordScanUsage } from '@/lib/usageLimits'
 import { getUserApiConfig } from '@/lib/userApiConfig'
 
 // A single non-chunked detection call through DetectionGateway.
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
   // Skipped entirely for a caller using their own GPTZero key — see the
   // identical note in humanize/route.ts.
   if (!userGptzeroKey) {
-    const usage = await checkAndRecordUsage(auth.claims.sub, auth.claims.tier, wordCount)
+    const usage = await checkAndRecordScanUsage(auth.claims.sub, auth.claims.tier, wordCount)
     if (!usage.allowed) {
       return NextResponse.json(
         { error: { code: usage.code === 'UNAVAILABLE' ? 'USAGE_TRACKING_UNAVAILABLE' : 'USAGE_LIMIT_EXCEEDED', message: usage.reason } },

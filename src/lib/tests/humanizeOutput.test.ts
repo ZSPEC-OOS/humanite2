@@ -1,8 +1,18 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { buildOutput, tryClassifyOutput } from '@/lib/humanizeOutput'
 import { generateWatermark } from '@/lib/watermark'
 import { resetDetectionGatewayForTests } from '@/lib/detection/gateway'
 import type { ChunkResult } from '@/lib/humanizePipeline'
+
+// This file exercises detection-integration semantics (mock provider,
+// fixture-controlled results), not usage limits (see usageLimits.test.ts) —
+// stub the scan-quota check so tryClassifyOutput's calls never touch
+// Firestore. Passing a real gptzeroApiKey instead would also skip this, but
+// it changes DetectionGateway's provider selection to the real GPTZero
+// class instead of the mock — not what these tests want.
+vi.mock('@/lib/usageLimits', () => ({
+  checkAndRecordScanUsage: async () => ({ allowed: true }),
+}))
 
 const ORIGINAL_ENV = { ...process.env }
 
@@ -29,9 +39,13 @@ function chunk(overrides: Partial<ChunkResult> = {}): ChunkResult {
 describe('humanize route: detection integration (spec §30, §48)', () => {
   afterEach(resetEnv)
 
+  // A gptzeroApiKey is passed throughout (BYOK path) so these calls skip
+  // checkAndRecordScanUsage's Firestore-backed quota check entirely — this
+  // file is testing detection-integration semantics, not usage limits
+  // (see usageLimits.test.ts for that), so it shouldn't need a Firestore mock.
   it('humanization succeeds even when detection fails — never propagates the failure', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'rate-limit'
-    const detection = await tryClassifyOutput('Some humanized output text.')
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
     expect(detection).toBeNull()
 
     const watermark = generateWatermark('job-1', 'gpt-4o-mini')
@@ -48,7 +62,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
 
   it('an ai-generated detection result threads through with no warning', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'ai'
-    const detection = await tryClassifyOutput('Some humanized output text.')
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
     const output = buildOutput('Some humanized output text.', [chunk()], generateWatermark('job-2', 'gpt-4o-mini'), detection)
 
     expect(output.detection?.classification).toBe('ai-generated')
@@ -57,7 +71,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
 
   it('a human-written detection result threads through with no warning', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'human'
-    const detection = await tryClassifyOutput('Some humanized output text.')
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
     const output = buildOutput('Some humanized output text.', [chunk()], generateWatermark('job-3', 'gpt-4o-mini'), detection)
 
     expect(output.detection?.classification).toBe('human-written')
@@ -66,7 +80,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
 
   it('a mixed detection result threads through with no warning', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'mixed'
-    const detection = await tryClassifyOutput('Some humanized output text.')
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
     const output = buildOutput('Some humanized output text.', [chunk()], generateWatermark('job-4', 'gpt-4o-mini'), detection)
 
     expect(output.detection?.classification).toBe('mixed')
@@ -75,7 +89,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
 
   it('large document: aggregates multiple chunks alongside a single whole-document detection result', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'human'
-    const detection = await tryClassifyOutput('Chunk one. Chunk two. Chunk three.')
+    const detection = await tryClassifyOutput('Chunk one. Chunk two. Chunk three.', 'test-user', 'free')
 
     const chunks = [
       chunk({ text: 'Chunk one.', substitutions: 2, retryCount: 1 }),

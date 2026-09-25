@@ -4,6 +4,7 @@ import { getDetectionGateway } from '@/lib/detection/gateway'
 import { detectWithCache } from '@/lib/detection/dedupe'
 import { DetectionResult } from '@/lib/detection/contracts'
 import { recordScanTelemetry } from '@/lib/observability/scanTelemetry'
+import { checkAndRecordScanUsage } from '@/lib/usageLimits'
 
 export function buildOutput(
   postText: string,
@@ -47,9 +48,25 @@ export function buildOutput(
 // dependent on) whatever model produced the text it's scanning. It does
 // accept the caller's own GPTZero key (from api_config.gptzero_api_key),
 // threaded straight through to getDetectionGateway() — see gateway.ts.
-export async function tryClassifyOutput(text: string, gptzeroApiKey?: string): Promise<DetectionResult | null> {
+//
+// This auto-scan spends the deployment's own GPTZero budget exactly like an
+// explicit /v1/scan call does, so it draws from the same scan quota (see
+// checkAndRecordScanUsage in usageLimits.ts) — skipped entirely for a caller
+// using their own GPTZero key, same precedence as the generation quota.
+// A plan with no scan quota (or one that's exhausted for today) simply gets
+// no auto-scan on this humanize call, same as any other detection failure:
+// output is never blocked on it.
+export async function tryClassifyOutput(text: string, userId: string, tier: string, gptzeroApiKey?: string): Promise<DetectionResult | null> {
   const words = text.trim() ? text.trim().split(/\s+/).length : 0
   recordScanTelemetry({ event: 'scan_requested', trigger: 'auto', words, chars: text.length })
+
+  if (!gptzeroApiKey) {
+    const usage = await checkAndRecordScanUsage(userId, tier, words)
+    if (!usage.allowed) {
+      recordScanTelemetry({ event: 'scan_failed', trigger: 'auto', error_code: usage.code ?? 'LIMIT_EXCEEDED' })
+      return null
+    }
+  }
 
   try {
     // Sent to the detector exactly as /v1/scan now sends its own input (see
