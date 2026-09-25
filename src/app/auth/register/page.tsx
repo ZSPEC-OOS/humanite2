@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { authRegister, APIError } from '@/lib/api'
 import { Spinner } from '@/components/ui/Spinner'
@@ -33,13 +34,15 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
+    <div className="bg-rock min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
       <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-10 w-full max-w-sm dark:bg-gray-900 dark:border-gray-800">
         <div className="flex items-center justify-center mb-8">
-          <span className="text-xl font-bold text-gray-900 dark:text-gray-100">Humanite</span>
+          <Link href="/" className="font-display text-xl text-gray-900 dark:text-gray-100">
+            Humanite
+          </Link>
         </div>
 
-        <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1 text-center">Create account</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1 text-center">Create account</h1>
         <p className="text-xs text-gray-500 dark:text-gray-400 text-center mb-6">Join Humanite today</p>
 
         {error && (
