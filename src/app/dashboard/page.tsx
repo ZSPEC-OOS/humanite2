@@ -14,6 +14,7 @@ import { ScanReport }       from '@/components/scanner/ScanReport'
 import { Spinner }          from '@/components/ui/Spinner'
 import { ApiConfigModal }   from '@/components/settings/ApiConfigModal'
 import { PreservationReport } from '@/components/humanizer/PreservationReport'
+import { RecentTransformations } from '@/components/history/RecentTransformations'
 import { ThemeToggle }      from '@/components/theme/ThemeToggle'
 import { useTheme }         from '@/components/theme/ThemeProvider'
 import { restoreSession }   from '@/lib/api'
@@ -58,6 +59,7 @@ export default function Dashboard() {
   const [copied, setCopied]           = useState(false)
   const [apiConfigOpen, setApiConfigOpen] = useState(false)
   const [preservationOpen, setPreservationOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [authReady, setAuthReady]     = useState(false)
   const router = useRouter()
 
@@ -234,6 +236,39 @@ export default function Dashboard() {
         DESKTOP  (md+)
         ══════════════════════════════════════════════════════════════ */}
     <div className="bg-rock hidden md:flex flex-col items-center min-h-screen py-6 px-6 bg-white dark:bg-gray-950">
+
+      {/* ── Recent Transformations sidebar (desktop) ── */}
+      {historyOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/30 dark:bg-black/60"
+          onClick={() => setHistoryOpen(false)}
+        />
+      )}
+      <div
+        className="fixed top-0 left-0 bottom-0 z-50 w-80 flex flex-col
+                   bg-white border-r border-gray-200
+                   dark:bg-gray-900 dark:border-gray-800
+                   transition-transform duration-300 ease-out"
+        style={{ transform: historyOpen ? 'translateX(0)' : 'translateX(-100%)' }}
+      >
+        <div className="flex items-center justify-between px-5 py-5 border-b border-gray-200 shrink-0 dark:border-gray-800">
+          <span className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Recent Transformations</span>
+          <button
+            onClick={() => setHistoryOpen(false)}
+            className="w-8 h-8 flex items-center justify-center rounded-full
+                       bg-gray-100 text-gray-400 hover:text-gray-700
+                       dark:bg-gray-800 dark:text-gray-500 dark:hover:text-gray-300 transition-colors"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+              <path d="M2 2l12 12M14 2L2 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          <RecentTransformations onSelect={() => setHistoryOpen(false)} />
+        </div>
+      </div>
+
       <div className="w-full max-w-6xl rounded-2xl overflow-hidden flex flex-col
                       bg-white border border-gray-200 dark:bg-gray-900 dark:border-gray-800"
         style={{ minHeight: 'calc(100vh - 3rem)' }}>
@@ -246,6 +281,19 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center gap-3">
             <PresetSelector />
+            <button
+              onClick={() => setHistoryOpen(true)}
+              title="Recent transformations"
+              className="flex items-center justify-center w-7 h-7 rounded-lg
+                         text-gray-400 hover:text-gray-800 hover:bg-gray-100
+                         dark:text-gray-500 dark:hover:text-gray-100 dark:hover:bg-gray-800
+                         transition-colors focus:outline-none"
+            >
+              <svg width="15" height="15" viewBox="0 0 20 20" fill="none" aria-hidden>
+                <circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="1.4" />
+                <path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
             <ThemeToggle className="w-7 h-7 rounded-lg" />
             <button
               onClick={() => setApiConfigOpen(true)}
@@ -507,6 +555,12 @@ export default function Dashboard() {
                 </svg>
               </div>
             </button>
+          </div>
+
+          {/* Recent Transformations */}
+          <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-800">
+            <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">Recent Transformations</p>
+            <RecentTransformations onSelect={() => { setMenuOpen(false); setMobileTab('output') }} />
           </div>
 
           {/* Settings */}

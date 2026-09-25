@@ -301,6 +301,31 @@ export async function apiDeletePreset(presetId: string): Promise<void> {
   return apiFetch<void>(`/v1/user/presets/${presetId}`, { method: 'DELETE' })
 }
 
+// ── Transformation history ──────────────────────────────────────────────────
+
+export interface TransformationSummary {
+  id: string
+  created_at: string
+  input_preview: string
+  output_preview: string
+  word_count: number
+}
+
+export interface TransformationDetail {
+  id: string
+  created_at: string
+  input_text: string
+  output: HumanizeOutput
+}
+
+export async function apiListTransformations(): Promise<TransformationSummary[]> {
+  return apiFetch<TransformationSummary[]>('/v1/user/transformations')
+}
+
+export async function apiGetTransformation(id: string): Promise<TransformationDetail> {
+  return apiFetch<TransformationDetail>(`/v1/user/transformations/${id}`)
+}
+
 // ── Export ────────────────────────────────────────────────────────────────────
 
 export async function apiExport(

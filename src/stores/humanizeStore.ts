@@ -31,6 +31,7 @@ interface HumanizeState {
   progressMessage: string | null
   setSettings: (patch: Partial<HumanizeSettings>) => void
   humanize: (text: string) => Promise<void>
+  loadFromHistory: (output: HumanizeOutput) => void
   reset: () => void
 }
 
@@ -149,6 +150,29 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
       const msg = e instanceof Error ? e.message : 'Humanization failed.'
       set({ status: 'error', error: msg, progressMessage: null })
     }
+  },
+
+  // Hydrates a past result from history (see RecentTransformations) — same
+  // shape as a live humanize response, just built from a Firestore record
+  // instead of a fresh API call, so every existing consumer (output panel,
+  // stats bar, ScanReport) renders it identically with no branching.
+  loadFromHistory: (output) => {
+    useScanStore.getState().reset()
+    if (output.detection) applyDetectionToScanStore(output)
+    set({
+      response: {
+        job_id: output.watermark.job_id,
+        status: 'completed',
+        output,
+        preprocessing_metadata: null,
+        processing_metadata: null,
+        result_url: null,
+        warning: null,
+      },
+      status: 'done',
+      error: null,
+      progressMessage: null,
+    })
   },
 
   reset: () => set({ response: null, status: 'idle', error: null, progressMessage: null }),
