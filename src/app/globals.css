@@ -23,15 +23,45 @@
 }
 
 @layer utilities {
-  /* Marble/rock texture, tiled edge-to-edge and repeated down the page. */
+  /* Marble/rock texture as a top banner: scaled to container width (never
+     upscaled beyond that), not repeated. A gradient layer on top fades the
+     texture's own last 40% into the solid page background, so it blends
+     into the rest of the (much taller) page instead of stopping on a hard
+     edge. The Xvw figure matches each source image's fixed height:width
+     ratio, so the gradient's box lines up with the image's rendered height
+     at any viewport width.
+
+     Mobile gets its own portrait-rotated crop (rotating the source 90°
+     lets a crisp, non-upscaled image cover far more of a tall phone
+     screen than the landscape crop would); md+ swaps in the original
+     landscape image. */
   .bg-rock {
-    background-image: url('/theme-light.png');
-    background-repeat: repeat-y;
-    background-position: top center;
-    background-size: 100% auto;
+    background-image:
+      linear-gradient(to bottom, transparent 60%, #ffffff 100%),
+      url('/theme-light-mobile.webp');
+    background-repeat: no-repeat, no-repeat;
+    background-position: top, top center;
+    background-size: 100% 177.7vw, 100% auto;
   }
 
   .dark .bg-rock {
-    background-image: url('/theme-dark.png');
+    background-image:
+      linear-gradient(to bottom, transparent 60%, #030712 100%),
+      url('/theme-dark-mobile.webp');
+  }
+
+  @media (min-width: 768px) {
+    .bg-rock {
+      background-image:
+        linear-gradient(to bottom, transparent 60%, #ffffff 100%),
+        url('/theme-light.webp');
+      background-size: 100% 56.3vw, 100% auto;
+    }
+
+    .dark .bg-rock {
+      background-image:
+        linear-gradient(to bottom, transparent 60%, #030712 100%),
+        url('/theme-dark.webp');
+    }
   }
 }

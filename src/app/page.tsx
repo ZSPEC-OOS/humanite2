@@ -42,7 +42,7 @@ export default function LandingPage() {
         {/* Hero */}
         <div className="flex flex-1 flex-col items-center px-6 pb-16 pt-4 text-center md:pt-6">
           <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500 dark:text-gray-400">
-            From generated to genuine
+            From Artificial Language to Authentic Expression
           </p>
 
           <h1 className="mt-5 font-display text-5xl font-bold text-gray-900 dark:text-gray-100 md:text-7xl">
