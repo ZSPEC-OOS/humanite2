@@ -24,12 +24,17 @@
 
 @layer utilities {
   /* Marble/rock texture as a top banner: scaled to container width (never
-     upscaled beyond that), not repeated. A gradient layer on top fades the
-     texture's own last 40% into the solid page background, so it blends
-     into the rest of the (much taller) page instead of stopping on a hard
-     edge. The Xvw figure matches each source image's fixed height:width
-     ratio, so the gradient's box lines up with the image's rendered height
-     at any viewport width.
+     upscaled beyond that), not repeated. Three stacked background layers,
+     topmost first:
+       1. a readability overlay that calms the marble directly behind the
+          hero copy (theme-tuned independently, see below) without ever
+          touching text opacity;
+       2. a fade gradient that blends the texture's own last 40% into the
+          solid page background, so it doesn't stop on a hard edge;
+       3. the marble image itself.
+     The Xvw figure on layers 1-2 matches each source image's fixed
+     height:width ratio, so both gradients' boxes line up with the image's
+     rendered height at any viewport width.
 
      Mobile gets its own portrait-rotated crop (rotating the source 90°
      lets a crisp, non-upscaled image cover far more of a tall phone
@@ -37,15 +42,17 @@
      landscape image. */
   .bg-rock {
     background-image:
+      radial-gradient(circle at 50% 42%, rgba(255,255,255,0.46) 0%, rgba(255,255,255,0.30) 42%, rgba(255,255,255,0.15) 70%, rgba(255,255,255,0.05) 100%),
       linear-gradient(to bottom, transparent 60%, #ffffff 100%),
       url('/theme-light-mobile.webp');
-    background-repeat: no-repeat, no-repeat;
-    background-position: top, top center;
-    background-size: 100% 177.7vw, 100% auto;
+    background-repeat: no-repeat, no-repeat, no-repeat;
+    background-position: top, top, top center;
+    background-size: 100% 177.7vw, 100% 177.7vw, 100% auto;
   }
 
   .dark .bg-rock {
     background-image:
+      radial-gradient(circle at 50% 42%, rgba(3,8,18,0.22) 0%, rgba(3,8,18,0.40) 45%, rgba(3,8,18,0.56) 100%),
       linear-gradient(to bottom, transparent 60%, #030712 100%),
       url('/theme-dark-mobile.webp');
   }
@@ -53,13 +60,15 @@
   @media (min-width: 768px) {
     .bg-rock {
       background-image:
+        radial-gradient(circle at 50% 42%, rgba(255,255,255,0.46) 0%, rgba(255,255,255,0.30) 42%, rgba(255,255,255,0.15) 70%, rgba(255,255,255,0.05) 100%),
         linear-gradient(to bottom, transparent 60%, #ffffff 100%),
         url('/theme-light.webp');
-      background-size: 100% 56.3vw, 100% auto;
+      background-size: 100% 56.3vw, 100% 56.3vw, 100% auto;
     }
 
     .dark .bg-rock {
       background-image:
+        radial-gradient(circle at 50% 42%, rgba(3,8,18,0.22) 0%, rgba(3,8,18,0.40) 45%, rgba(3,8,18,0.56) 100%),
         linear-gradient(to bottom, transparent 60%, #030712 100%),
         url('/theme-dark.webp');
     }

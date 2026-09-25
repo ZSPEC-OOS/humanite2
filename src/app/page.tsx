@@ -41,19 +41,19 @@ export default function LandingPage() {
 
         {/* Hero */}
         <div className="flex flex-1 flex-col items-center px-6 pb-16 pt-4 text-center md:pt-6">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500 dark:text-gray-400">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[rgba(10,22,43,0.78)] dark:text-[rgba(255,255,255,0.84)]">
             From generated to genuine
           </p>
 
-          <h1 className="mt-5 font-display text-5xl font-bold text-gray-900 dark:text-gray-100 md:text-7xl">
+          <h1 className="mt-5 font-display text-5xl font-bold text-[#0A162B] dark:text-[#F8F9FC] md:text-7xl">
             Humanite
           </h1>
 
-          <p className="mt-5 font-display text-3xl text-gray-900 dark:text-gray-100 md:text-5xl">
+          <p className="mt-5 font-display text-3xl text-[#0A162B] dark:text-[#F8F9FC] md:text-5xl">
             From Artificial Language to Authentic Expression
           </p>
 
-          <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-gray-600 dark:text-gray-400 md:text-lg">
+          <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-[rgba(10,22,43,0.84)] dark:text-[rgba(255,255,255,0.82)] md:text-lg">
             Humanite converts AI-generated text into natural, human-sounding writing
             — so your ideas feel real, relatable, and uniquely yours.
           </p>
@@ -71,30 +71,30 @@ export default function LandingPage() {
 
           {/* Comparison cards */}
           <div className="relative mx-auto mt-12 grid w-full max-w-4xl gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-gray-200 bg-white p-6 text-left dark:border-gray-800 dark:bg-gray-900">
+            <div className="rounded-2xl border border-[rgba(15,23,42,0.07)] bg-[rgba(255,255,255,0.95)] p-6 text-left shadow-[0_8px_28px_rgba(15,23,42,0.06)] dark:border-[rgba(255,255,255,0.08)] dark:bg-[rgba(12,23,40,0.92)] dark:shadow-none">
               <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <AIIcon />
-                  <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">AI Text</span>
+                  <span className="text-sm font-semibold text-[#101827] dark:text-[rgba(255,255,255,0.95)]">AI Text</span>
                 </div>
-                <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-[rgba(16,24,39,0.64)] dark:bg-gray-800 dark:text-[rgba(255,255,255,0.64)]">
                   Generic
                 </span>
               </div>
-              <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-400">{AI_TEXT}</p>
+              <p className="text-sm leading-relaxed text-[rgba(16,24,39,0.80)] dark:text-[rgba(255,255,255,0.80)]">{AI_TEXT}</p>
             </div>
 
-            <div className="rounded-2xl border border-gray-200 bg-white p-6 text-left dark:border-gray-800 dark:bg-gray-900">
+            <div className="rounded-2xl border border-[rgba(15,23,42,0.07)] bg-[rgba(255,255,255,0.95)] p-6 text-left shadow-[0_8px_28px_rgba(15,23,42,0.06)] dark:border-[rgba(255,255,255,0.08)] dark:bg-[rgba(12,23,40,0.92)] dark:shadow-none">
               <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <HumanIcon />
-                  <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Human Text</span>
+                  <span className="text-sm font-semibold text-[#101827] dark:text-[rgba(255,255,255,0.95)]">Human Text</span>
                 </div>
-                <span className="flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                <span className="flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-[rgba(16,24,39,0.64)] dark:bg-gray-800 dark:text-[rgba(255,255,255,0.64)]">
                   More human +
                 </span>
               </div>
-              <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-400">{HUMAN_TEXT}</p>
+              <p className="text-sm leading-relaxed text-[rgba(16,24,39,0.80)] dark:text-[rgba(255,255,255,0.80)]">{HUMAN_TEXT}</p>
             </div>
 
             <div
@@ -112,8 +112,8 @@ export default function LandingPage() {
               <span
                 key={label}
                 className="rounded-full border border-gray-200 bg-white
-                           px-4 py-2 text-xs font-medium text-gray-700
-                           dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300"
+                           px-4 py-2 text-xs font-medium text-[rgba(10,22,43,0.66)]
+                           dark:border-gray-800 dark:bg-gray-900 dark:text-[rgba(255,255,255,0.68)]"
               >
                 {label}
               </span>
