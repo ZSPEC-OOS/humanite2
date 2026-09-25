@@ -13,6 +13,7 @@ import { buildOutput, tryClassifyOutput } from '@/lib/humanizeOutput'
 import { checkAndRecordUsage } from '@/lib/usageLimits'
 import { getUserApiConfig } from '@/lib/userApiConfig'
 import { resolveProvider } from '@/lib/providerResolution'
+import { saveTransformation } from '@/lib/transformations'
 import type { StoredApiConfig } from '@/lib/r2'
 
 // Vercel clamps this to whatever the deployment's plan actually allows
@@ -50,6 +51,8 @@ async function processHumanizeJobAsync(
   factLocks: FactLock[],
   settings: HumanizeSettings,
   userConfig: StoredApiConfig | null,
+  userId: string,
+  originalText: string,
 ) {
   try {
     const { apiKey, baseURL, model } = resolveProvider(userConfig)
@@ -89,6 +92,8 @@ async function processHumanizeJobAsync(
     const detection = await tryClassifyOutput(postText, userConfig?.gptzeroApiKey || undefined)
     const output = buildOutput(postText, results, watermark, detection)
     const durationMs = Date.now() - start
+
+    await saveTransformation({ jobId, userId, inputText: originalText, output, modelUsed })
 
     await tryPersist(() => db().collection('jobs').doc(jobId).update({
       status: 'completed',
@@ -215,7 +220,7 @@ export async function POST(req: NextRequest) {
         { status: 503 },
       )
     }
-    waitUntil(processHumanizeJobAsync(jobId, prep.sanitized_text, prep.fact_locks, settings, userConfig))
+    waitUntil(processHumanizeJobAsync(jobId, prep.sanitized_text, prep.fact_locks, settings, userConfig, auth.claims.sub, text))
     return NextResponse.json({
       job_id: jobId,
       status: 'pending',
@@ -248,6 +253,8 @@ export async function POST(req: NextRequest) {
     const watermark = generateWatermark(jobId, result.modelUsed)
     const detection = await tryClassifyOutput(result.text, userConfig?.gptzeroApiKey || undefined)
     const output = buildOutput(result.text, [result], watermark, detection)
+
+    await saveTransformation({ jobId, userId: auth.claims.sub, inputText: text, output, modelUsed: result.modelUsed })
 
     await tryPersist(() => db().collection('jobs').doc(jobId).update({
       status: 'completed',
