@@ -45,8 +45,17 @@ export default function LandingPage() {
             From generated to genuine
           </p>
 
-          <h1 className="mt-5 font-display text-5xl font-bold text-[#0A162B] dark:text-[#F8F9FC] md:text-7xl">
-            Humanite
+          <h1 className="mt-5 flex justify-center">
+            <img
+              src="/humanite-logo-light.webp"
+              alt="Humanite"
+              className="h-12 w-auto md:h-20 dark:hidden"
+            />
+            <img
+              src="/humanite-logo-dark.webp"
+              alt="Humanite"
+              className="hidden h-12 w-auto md:h-20 dark:block"
+            />
           </h1>
 
           <p className="mt-5 font-display text-3xl text-[#0A162B] dark:text-[#F8F9FC] md:text-5xl">
