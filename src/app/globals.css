@@ -23,26 +23,40 @@
 }
 
 @layer utilities {
-  /* Marble/rock texture: one cropped instance filling the viewport, not tiled.
-     Mobile gets a smaller source image; md+ swaps in the full-size one. */
+  /* Marble/rock texture as a top banner: scaled to container width (never
+     upscaled beyond that), not repeated. A gradient layer on top fades the
+     texture's own last 40% into the solid page background, so it blends
+     into the rest of the (much taller) page instead of stopping on a hard
+     edge. 56.3vw matches the source images' fixed height:width ratio, so
+     the gradient's box lines up with the image's rendered height at any
+     viewport width. Mobile gets a smaller source image; md+ swaps in the
+     full-size one. */
   .bg-rock {
-    background-image: url('/theme-light-mobile.webp');
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: cover;
+    background-image:
+      linear-gradient(to bottom, transparent 60%, #ffffff 100%),
+      url('/theme-light-mobile.webp');
+    background-repeat: no-repeat, no-repeat;
+    background-position: top, top center;
+    background-size: 100% 56.3vw, 100% auto;
   }
 
   .dark .bg-rock {
-    background-image: url('/theme-dark-mobile.webp');
+    background-image:
+      linear-gradient(to bottom, transparent 60%, #030712 100%),
+      url('/theme-dark-mobile.webp');
   }
 
   @media (min-width: 768px) {
     .bg-rock {
-      background-image: url('/theme-light.webp');
+      background-image:
+        linear-gradient(to bottom, transparent 60%, #ffffff 100%),
+        url('/theme-light.webp');
     }
 
     .dark .bg-rock {
-      background-image: url('/theme-dark.webp');
+      background-image:
+        linear-gradient(to bottom, transparent 60%, #030712 100%),
+        url('/theme-dark.webp');
     }
   }
 }
