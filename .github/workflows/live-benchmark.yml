@@ -1,0 +1,149 @@
+name: Humanite Live Launch Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Which benchmark should run?"
+        required: true
+        default: "launch-readiness"
+        type: choice
+        options:
+          - launch-readiness
+          - baseline-300
+          - scaleup-sample
+
+permissions:
+  contents: read
+
+env:
+  RUN_LIVE_BENCHMARK: "true"
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+  OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+
+  # Reuse the same DeepSeek credential for the provider-specific acceptance test.
+  DEEPSEEK_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  DEEPSEEK_MODEL: ${{ secrets.OPENAI_MODEL }}
+
+jobs:
+  baseline:
+    if: ${{ inputs.suite == 'launch-readiness' || inputs.suite == 'baseline-300' }}
+    name: 300-item baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run 300-item live benchmark
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm benchmark 2>&1 | tee benchmark-baseline.log
+
+      - name: Save benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: humanite-baseline-results
+          path: |
+            tests/benchmark/results/
+            benchmark-baseline.log
+          if-no-files-found: warn
+
+  acceptance:
+    if: ${{ inputs.suite == 'launch-readiness' }}
+    name: Acceptance - ${{ matrix.test }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - styleAcceptance.test.ts
+          - intensityAcceptance.test.ts
+          - repairAcceptance.test.ts
+          - claimVerificationAcceptance.test.ts
+          - candidateSelectionAcceptance.test.ts
+          - documentAcceptance.test.ts
+          - providerCapabilitiesAcceptance.test.ts
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run acceptance test
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm vitest run "tests/benchmark/tests/${{ matrix.test }}" \
+            2>&1 | tee "acceptance-${{ matrix.test }}.log"
+
+      - name: Save acceptance log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-${{ matrix.test }}
+          path: acceptance-${{ matrix.test }}.log
+          if-no-files-found: warn
+
+  scaleup:
+    if: ${{ inputs.suite == 'scaleup-sample' }}
+    name: 5-tone x 3-intensity sample
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run scale-up sample
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm benchmark:scaleup 2>&1 | tee benchmark-scaleup.log
+
+      - name: Save scale-up results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: humanite-scaleup-results
+          path: |
+            tests/benchmark/results/
+            benchmark-scaleup.log
+          if-no-files-found: warn
