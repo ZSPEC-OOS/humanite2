@@ -1,6 +1,7 @@
 import type OpenAI from 'openai'
 import type { FactLock, FactLockType } from './preprocess'
 import { runStructuredJudge, type StructuredJudgeResult } from './evaluation/judge'
+import { resolveCapabilities } from './providers'
 
 export interface GateThresholds {
   entityOverlap: number
@@ -155,9 +156,13 @@ export async function checkSemanticSimilarity(
   client: OpenAI,
   original: string,
   output: string,
+  // Provider-specific (see providers/types.ts's embeddingModel) — defaults
+  // to OpenAI's own model so every pre-Phase-9 direct caller of this
+  // function (this module's own tests included) is unaffected.
+  embeddingModel = 'text-embedding-3-small',
 ): Promise<number> {
   const resp = await client.embeddings.create({
-    model: 'text-embedding-3-small',
+    model: embeddingModel,
     input: [original, output],
   })
   const [a, b] = resp.data.map(d => d.embedding)
@@ -229,6 +234,15 @@ async function runJudge(
   return { entailment: result, style: null }
 }
 
+// A capability this endpoint doesn't support is never attempted at all —
+// "a missing capability marks that metric unavailable instead of failing a
+// call" (Phase 9) — but still flows through the SAME Promise.allSettled and
+// gates_available bookkeeping a genuine network failure already used, via
+// a pre-rejected promise instead of a real request.
+function unsupported(reason: string): Promise<never> {
+  return Promise.reject(new Error(reason))
+}
+
 // ── Orchestrator ──────────────────────────────────────────────────────────────
 // Failure priority: an exact-match fact drop is the most concrete, highest-
 // confidence defect, so it's reported first when multiple gates fail at once.
@@ -255,9 +269,19 @@ export async function runQualityGates(
   // excluded from the pass/fail decision rather than counted as a failure.
   const entity = checkEntityOverlap(output, factLocks)
 
+  // Phase 9: gates choose infrastructure by capability. `client.baseURL` is
+  // always a concrete string on a real SDK client (defaulting to OpenAI's
+  // own endpoint when never overridden) — undefined only for a bare mock
+  // object in a test, which resolves the same as "no override".
+  const capabilities = resolveCapabilities(client.baseURL)
+
   const [similarityResult, judgeResult] = await Promise.allSettled([
-    checkSemanticSimilarity(client, original, output),
-    runJudge(client, model, original, output, styleContext),
+    capabilities.embeddings
+      ? checkSemanticSimilarity(client, original, output, capabilities.embeddingModel!)
+      : unsupported('embeddings not supported by this provider'),
+    capabilities.jsonOutput
+      ? runJudge(client, model, original, output, styleContext)
+      : unsupported('structured JSON output not supported by this provider'),
   ])
 
   if (similarityResult.status === 'rejected') {

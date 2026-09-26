@@ -406,4 +406,72 @@ describe('runQualityGates', () => {
     expect(result.passed).toBe(true)
     expect(result.failed_gate).toBeNull()
   })
+
+  // ── Phase 9: capability-gated infrastructure ───────────────────────────────
+
+  it('never attempts an embeddings call at all against a provider with no embeddings capability', async () => {
+    const chatCreate = vi.fn().mockResolvedValue({
+      model: 'llama3', choices: [{ message: { content: '{"entailment_probability": 1.0, "issues": []}' } }],
+    })
+    const embedCreate = vi.fn().mockResolvedValue({ data: [] })
+    const client = {
+      baseURL: 'https://api.groq.com/openai/v1',
+      chat: { completions: { create: chatCreate } },
+      embeddings: { create: embedCreate },
+    } as unknown as OpenAI
+
+    const result = await runQualityGates(client, 'llama3', 'orig', 'output', [])
+
+    expect(embedCreate).not.toHaveBeenCalled()
+    expect(result.semantic_similarity).toBeNull()
+    expect(result.gates_available.semantic_similarity).toBe(false)
+    // entailment still ran fine — groq supports jsonOutput.
+    expect(result.entailment).toBe(1)
+    expect(result.gates_available.entailment).toBe(true)
+  })
+
+  it('never attempts the judge call at all against a provider with no jsonOutput capability', async () => {
+    const chatCreate = vi.fn().mockResolvedValue({ model: 'claude', choices: [{ message: { content: 'irrelevant' } }] })
+    const embedCreate = vi.fn().mockResolvedValue({ data: [{ embedding: [1, 0] }, { embedding: [1, 0] }] })
+    const client = {
+      baseURL: 'https://api.anthropic.com/v1',
+      chat: { completions: { create: chatCreate } },
+      embeddings: { create: embedCreate },
+    } as unknown as OpenAI
+
+    const result = await runQualityGates(client, 'claude', 'orig', 'output', [])
+
+    expect(chatCreate).not.toHaveBeenCalled()
+    expect(result.entailment).toBeNull()
+    expect(result.gates_available.entailment).toBe(false)
+    // Anthropic has no embeddings capability declared either — the whole
+    // provider offers neither soft gate, but a genuine fact drop must still
+    // be caught deterministically, with no external dependency at all.
+    expect(embedCreate).not.toHaveBeenCalled()
+    expect(result.entity_preservation).toBe(1)
+  })
+
+  it('requests the provider-specific embedding model, not a hardcoded OpenAI one', async () => {
+    const chatCreate = vi.fn().mockResolvedValue({ model: 'mistral-large', choices: [{ message: { content: '{"entailment_probability": 1.0, "issues": []}' } }] })
+    const embedCreate = vi.fn().mockResolvedValue({ data: [{ embedding: [1, 0] }, { embedding: [1, 0] }] })
+    const client = {
+      baseURL: 'https://api.mistral.ai/v1',
+      chat: { completions: { create: chatCreate } },
+      embeddings: { create: embedCreate },
+    } as unknown as OpenAI
+
+    await runQualityGates(client, 'mistral-large', 'orig', 'output', [])
+
+    expect(embedCreate).toHaveBeenCalledWith(expect.objectContaining({ model: 'mistral-embed' }))
+  })
+
+  it('a missing capability degrades the same way a genuine call failure already does — passed stays true off what did run', async () => {
+    const chatCreate = vi.fn().mockResolvedValue({ model: 'llama3', choices: [{ message: { content: '{"entailment_probability": 1.0, "issues": []}' } }] })
+    const client = { baseURL: 'https://api.groq.com/openai/v1', chat: { completions: { create: chatCreate } }, embeddings: { create: vi.fn() } } as unknown as OpenAI
+
+    const result = await runQualityGates(client, 'llama3', 'orig', 'output containing 42', [lock('42')])
+
+    expect(result.passed).toBe(true)
+    expect(result.failed_gate).toBeNull()
+  })
 })

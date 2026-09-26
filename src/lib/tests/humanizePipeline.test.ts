@@ -622,6 +622,76 @@ describe('humanizeChunk — Phase 8 candidate generation and selection', () => {
   })
 })
 
+describe('humanizeChunk — Phase 9 provider capabilities', () => {
+  function mockClientFor(baseURL: string, chatResponses: Array<{ content: string; finish_reason?: string }>, embeddings: number[][] = []) {
+    const chatCreate = vi.fn()
+    for (const r of chatResponses) {
+      chatCreate.mockResolvedValueOnce({ model: 'llama3', choices: [{ message: { content: r.content }, finish_reason: r.finish_reason ?? 'stop' }] })
+    }
+    const embedCreate = vi.fn().mockResolvedValue({ data: embeddings.map(e => ({ embedding: e })) })
+    const client = { baseURL, chat: { completions: { create: chatCreate } }, embeddings: { create: embedCreate } } as unknown as OpenAI
+    return { client, chatCreate, embedCreate }
+  }
+
+  it('the single-candidate retry path never attempts an embeddings call against a provider with no embeddings capability', async () => {
+    const { client, chatCreate, embedCreate } = mockClientFor('https://api.groq.com/openai/v1', [
+      { content: 'Revenue rose to 42 units.' },
+      { content: '{"entailment_probability": 1.0, "tone_alignment": 1, "domain_alignment": 1, "coherence": 1, "naturalness": 1}' },
+      { content: '{"claims": []}' },
+    ])
+
+    const result = await humanizeChunk(client, 'llama3', 'fallback', 'Revenue rose to 42 units.', [], 3, 'balanced', 'general', 0)
+
+    expect(embedCreate).not.toHaveBeenCalled()
+    expect(result.gate?.semantic_similarity).toBeNull()
+    expect(result.gate?.gates_available.semantic_similarity).toBe(false)
+    expect(chatCreate).toHaveBeenCalledTimes(3)
+  })
+
+  it('the single-candidate retry path caps max_tokens to the provider ceiling, even at a requested intensity that would otherwise exceed it', async () => {
+    // maxTokensForIntensity(3) requests 6144 tokens — OpenRouter's own
+    // conservative ceiling (4096, see providers/openrouter.ts) must win.
+    const { client, chatCreate } = mockClientFor('https://openrouter.ai/api/v1', [
+      { content: 'Revenue rose to 42 units.' },
+    ])
+
+    await humanizeChunk(client, 'llama3', 'fallback', 'Revenue rose to 42 units.', [], 3, 'balanced', 'general', 0)
+
+    expect(chatCreate.mock.calls[0]![0].max_tokens).toBe(4096)
+  })
+
+  it('the candidate-selection path never attempts a batched embeddings call against a provider with no embeddings capability, and still selects via the judge alone', async () => {
+    const { client, chatCreate, embedCreate } = mockClientFor('https://api.groq.com/openai/v1', [
+      { content: 'Candidate A.' },
+      { content: 'Candidate B.' },
+      { content: '{"entailment_probability": 1.0, "tone_alignment": 0.9, "domain_alignment": 0.9, "coherence": 0.9, "naturalness": 0.9}' },
+      { content: '{"entailment_probability": 1.0, "tone_alignment": 0.9, "domain_alignment": 0.9, "coherence": 0.9, "naturalness": 0.9}' },
+      { content: '{"claims": []}' },
+    ])
+
+    const result = await humanizeChunk(client, 'llama3', 'fallback', 'The company reported strong quarterly earnings.', [], 4, 'balanced', 'general', 2)
+
+    expect(embedCreate).not.toHaveBeenCalled()
+    expect(result.gate?.semantic_similarity).toBeNull()
+    expect(result.gate?.gates_available.semantic_similarity).toBe(false)
+    expect(result.gate?.passed).toBe(true)
+  })
+
+  it('never attempts the structured judge call against a provider with no jsonOutput capability, and reports gatesUnavailable', async () => {
+    const { client, chatCreate } = mockClientFor('https://api.anthropic.com/v1', [
+      { content: 'Candidate A.' },
+      { content: 'Candidate B.' },
+    ])
+
+    const result = await humanizeChunk(client, 'claude', 'fallback', 'The company reported strong quarterly earnings.', [], 4, 'balanced', 'general', 2)
+
+    // Only the 2 generation calls happened — no judge call was ever attempted.
+    expect(chatCreate).toHaveBeenCalledTimes(2)
+    expect(result.gatesUnavailable).toBe(true)
+    expect(result.gate).toBeNull()
+  })
+})
+
 describe('humanizeChunk — truncation detection', () => {
   it('retries after a cut-off completion, boosting the token budget, and ships the later complete attempt', async () => {
     const { client, chatCreate } = mockHumanizeClient([
