@@ -33,11 +33,14 @@ const NUMBER_RE =
   /\b\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*(?:%|°[CF]|km|m|cm|kg|g|mg|lb|ml|l|L|USD|EUR|GBP|mph|kph|Hz|MHz|GHz|TB|GB|MB|KB|ft|yd|mi|oz|qt|pt|rpm|bpm|kW|MW|kV|mA|mol|kcal|kPa|kJ|psi|dB|nm|min|hr))?\b/g
 
 // Citation patterns: [1], (Smith, 2024), et al. (2024)
-const CITATION_RE =
+// Exported for reuse by src/lib/fidelity/extractors/ (Phase 5's deterministic
+// fact ledger binds these to sentence-local context on top of the existing
+// global lock — "keeping the existing regex locks" rather than duplicating them).
+export const CITATION_RE =
   /(?:\[\d+(?:,\s*\d+)*\]|\(\w[\w\s,.]+,\s*\d{4}\)|et\s+al\.\s*(?:\(\d{4}\)|\[\d+\]))/g
 
 // ISO dates and common written-out date formats
-const DATE_RE =
+export const DATE_RE =
   /\b(?:\d{4}-\d{2}-\d{2}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4})\b/g
 
 // Straight- and curly-quoted passages. Double quotes only — single quotes
@@ -49,7 +52,7 @@ const URL_RE = /\bhttps?:\/\/[^\s<>"')\]]+|\bwww\.[^\s<>"')\]]+/g
 
 // LaTeX-delimited math only ($...$, \(...\), \[...\]) — unambiguous where
 // present, unlike trying to freeform-detect bare math expressions in prose.
-const EQUATION_RE = /\$[^$\n]{1,200}\$|\\\([^)\n]{1,200}\\\)|\\\[[^\]\n]{1,200}\\\]/g
+export const EQUATION_RE = /\$[^$\n]{1,200}\$|\\\([^)\n]{1,200}\\\)|\\\[[^\]\n]{1,200}\\\]/g
 
 // Formula-shaped tokens: runs of (uppercase letter + optional lowercase
 // letter + optional digits), e.g. H2O, NaCl, C6H12O6. This also matches
@@ -57,7 +60,7 @@ const EQUATION_RE = /\$[^$\n]{1,200}\$|\\\([^)\n]{1,200}\\\)|\\\[[^\]\n]{1,200}\
 // harmless (they wouldn't be rephrased anyway) even though the CHEM label
 // is technically wrong for them, so no acronym exclusion list is worth the
 // added complexity here.
-const CHEMICAL_RE = /\b(?:[A-Z][a-z]?\d*){2,}\b/g
+export const CHEMICAL_RE = /\b(?:[A-Z][a-z]?\d*){2,}\b/g
 
 // Two-to-five-word Title Case runs — full proper names ("New York City",
 // "World Health Organization") rather than single capitalized words, which

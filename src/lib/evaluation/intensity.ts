@@ -1,6 +1,7 @@
 import { diffWords } from 'diff'
 import { splitParagraphs, splitSentences, tokenizeWords } from '@/lib/detection/diagnostics/tokenize'
 import { mean, rate, round } from '@/lib/detection/diagnostics/util'
+import { alignSentences } from '@/lib/textAlign'
 
 export interface IntensityMetrics {
   tokenEditRatio: number
@@ -66,55 +67,14 @@ function paragraphBoundaryChangeRatio(source: string, output: string): number {
   return sourceCount === 0 ? 0 : round(Math.abs(outputCount - sourceCount) / sourceCount)
 }
 
-function jaccard(a: string[], b: string[]): number {
-  if (a.length === 0 && b.length === 0) return 1
-  const setA = new Set(a)
-  const setB = new Set(b)
-  let intersection = 0
-  for (const word of setA) if (setB.has(word)) intersection++
-  const unionSize = new Set([...setA, ...setB]).size
-  return unionSize === 0 ? 0 : intersection / unionSize
-}
-
-// Greedily matches each output sentence to its most word-similar,
-// not-yet-claimed source sentence — a lightweight stand-in for real
-// sentence alignment that needs no NLP dependency. A match below the
-// similarity floor is treated as "not the same sentence" (e.g. a genuinely
-// new sentence the rewrite introduced) rather than forced onto whatever
-// source sentence happens to be left over.
-const MIN_ALIGNMENT_SIMILARITY = 0.2
-
-function alignSentences(sourceSentences: string[], outputSentences: string[]): number[] {
-  const sourceWordSets = sourceSentences.map(s => tokenizeWords(s))
-  const claimed = new Set<number>()
-  const assignment: number[] = []
-
-  for (const outputSentence of outputSentences) {
-    const outputWords = tokenizeWords(outputSentence)
-    let bestIndex = -1
-    let bestScore = 0
-    for (let i = 0; i < sourceWordSets.length; i++) {
-      if (claimed.has(i)) continue
-      const score = jaccard(outputWords, sourceWordSets[i]!)
-      if (score > bestScore) {
-        bestScore = score
-        bestIndex = i
-      }
-    }
-    if (bestIndex !== -1 && bestScore >= MIN_ALIGNMENT_SIMILARITY) {
-      claimed.add(bestIndex)
-      assignment.push(bestIndex)
-    }
-  }
-  return assignment
-}
-
 // Fraction of aligned-sentence pairs that appear in a different relative
 // order in the output than in the source (a Kendall-tau-style inversion
 // count) — distinct from sentenceBoundaryChangeRatio, which only tracks
 // how many sentences there are, not what order they're in.
 function sentenceOrderChangeRatio(source: string, output: string): number {
-  const assignment = alignSentences(splitSentences(source), splitSentences(output))
+  // Already in output order — alignSentences iterates output sentences in
+  // order and appends one entry per match.
+  const assignment = alignSentences(splitSentences(source), splitSentences(output)).map(a => a.sourceIndex)
   if (assignment.length < 2) return 0
 
   let inversions = 0
