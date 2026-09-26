@@ -187,7 +187,7 @@ export async function POST(req: NextRequest) {
   // quota exists to protect this deployment's own paid OPENAI_API_KEY, not
   // to restrict usage of a key that isn't this deployment's to pay for.
   if (!userConfig?.apiKey) {
-    const usage = await checkAndRecordGenerationUsage(auth.claims.sub, auth.claims.tier, prep.word_count)
+    const usage = await checkAndRecordGenerationUsage(auth.claims.sub, auth.claims.tier, prep.word_count, auth.claims.email_hash)
     if (!usage.allowed) {
       return NextResponse.json(
         { error: { code: usage.code === 'UNAVAILABLE' ? 'USAGE_TRACKING_UNAVAILABLE' : 'USAGE_LIMIT_EXCEEDED', message: usage.reason } },

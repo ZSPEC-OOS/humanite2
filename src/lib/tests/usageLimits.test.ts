@@ -141,6 +141,27 @@ describe('checkAndRecordGenerationUsage', () => {
     expect(result.allowed).toBe(false)
     expect(result.code).toBe('UNAVAILABLE')
   })
+
+  it('bypasses the quota entirely for an allowlisted email hash, without touching Firestore', async () => {
+    process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_DAY = '1'
+    process.env.UNLIMITED_USAGE_EMAIL_HASHES = 'admin-hash-1,admin-hash-2'
+    const result = await checkAndRecordGenerationUsage('user-1', 'free', 999999, 'admin-hash-2')
+    expect(result.allowed).toBe(true)
+    expect(docStore.size).toBe(0)
+    // A second call for the same allowlisted account is unaffected by the
+    // (never-recorded) usage from the first.
+    expect((await checkAndRecordGenerationUsage('user-1', 'free', 999999, 'admin-hash-2')).allowed).toBe(true)
+  })
+
+  it('does not bypass the quota for a non-allowlisted email hash', async () => {
+    process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1000'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_DAY = '1'
+    process.env.UNLIMITED_USAGE_EMAIL_HASHES = 'admin-hash-1'
+    const result = await checkAndRecordGenerationUsage('user-1', 'free', 10, 'some-other-hash')
+    expect(result.allowed).toBe(false)
+    expect(result.code).toBe('LIMIT_EXCEEDED')
+  })
 })
 
 describe('checkAndRecordScanUsage', () => {

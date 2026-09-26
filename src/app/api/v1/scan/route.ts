@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
   // Skipped entirely for a caller using their own GPTZero key — see the
   // identical note in humanize/route.ts.
   if (!userGptzeroKey) {
-    const usage = await checkAndRecordScanUsage(auth.claims.sub, auth.claims.tier, wordCount)
+    const usage = await checkAndRecordScanUsage(auth.claims.sub, auth.claims.tier, wordCount, auth.claims.email_hash)
     if (!usage.allowed) {
       return NextResponse.json(
         { error: { code: usage.code === 'UNAVAILABLE' ? 'USAGE_TRACKING_UNAVAILABLE' : 'USAGE_LIMIT_EXCEEDED', message: usage.reason } },
