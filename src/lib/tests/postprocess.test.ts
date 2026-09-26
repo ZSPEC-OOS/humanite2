@@ -18,25 +18,51 @@ describe('postprocess — no longer performs synonym substitution', () => {
 })
 
 describe('postprocess — still removes AI-typical filler openers', () => {
-  it('removes a "Furthermore," sentence opener', () => {
+  it('removes a "Furthermore," sentence opener and capitalizes the new sentence start', () => {
     const { text, substitutions } = postprocess('Furthermore, the results were consistent.', [])
-    expect(text).toBe('the results were consistent.')
+    expect(text).toBe('The results were consistent.')
     expect(substitutions).toBe(1)
   })
 
-  it('removes "Moreover," and "Additionally," openers', () => {
-    expect(postprocess('Moreover, this held true.', []).text).toBe('this held true.')
-    expect(postprocess('Additionally, costs fell.', []).text).toBe('costs fell.')
+  it('removes "Moreover," and "Additionally," openers, capitalizing what follows', () => {
+    expect(postprocess('Moreover, this held true.', []).text).toBe('This held true.')
+    expect(postprocess('Additionally, costs fell.', []).text).toBe('Costs fell.')
   })
 
-  it('removes "In conclusion," and "It is important to note that"', () => {
-    expect(postprocess('In conclusion, the study succeeded.', []).text).toBe('the study succeeded.')
-    expect(postprocess('It is important to note that results vary.', []).text).toBe('results vary.')
+  it('removes "In conclusion," and "It is important to note that", capitalizing what follows', () => {
+    expect(postprocess('In conclusion, the study succeeded.', []).text).toBe('The study succeeded.')
+    expect(postprocess('It is important to note that results vary.', []).text).toBe('Results vary.')
   })
 
   it('does not remove "Furthermore" mid-sentence (opener pattern is anchored to line start)', () => {
     const text = 'The paper goes Furthermore into detail on this point.'
     expect(postprocess(text, []).text).toBe(text)
+  })
+})
+
+describe('postprocess — opener deletion no longer leaves lowercase starts or double spaces', () => {
+  it('capitalizes a mid-document sentence that starts a new paragraph after an opener is removed', () => {
+    const text = 'First paragraph stands.\n\nFurthermore, the second paragraph follows.'
+    expect(postprocess(text, []).text).toBe('First paragraph stands.\n\nThe second paragraph follows.')
+  })
+
+  it('collapses the double space left when a mid-sentence filler is removed', () => {
+    const text = 'Considering all factors it is important to note that results vary widely.'
+    const { text: result } = postprocess(text, [])
+    expect(result).not.toMatch(/ {2,}/)
+    expect(result).toBe('Considering all factors results vary widely.')
+  })
+
+  it('does not recapitalize a fact-locked span even when it sits at a sentence-initial position', () => {
+    // A case-sensitive identifier that happens to start the next sentence —
+    // recapitalizing it would break the verbatim-preservation guarantee
+    // fact locks exist to provide.
+    const text = 'She noted the finding. api_key must remain lowercase in every example.'
+    const lockStart = text.indexOf('api_key')
+    const locks: FactLock[] = [
+      { char_start: lockStart, char_end: lockStart + 'api_key'.length, text: 'api_key', lock_type: 'proper_noun', label: 'NAME' },
+    ]
+    expect(postprocess(text, locks).text).toBe(text)
   })
 })
 
@@ -49,7 +75,7 @@ describe('postprocess — respects fact locks', () => {
     ]
     const { text: result } = postprocess(text, locks)
     // The unlocked opener is removed; the one inside the locked quotation survives.
-    expect(result).toBe('the quote was: "In conclusion, we succeeded."')
+    expect(result).toBe('The quote was: "In conclusion, we succeeded."')
   })
 
   it('protects a locked quotation by content even when the model moved it to a new position', () => {

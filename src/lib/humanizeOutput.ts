@@ -5,6 +5,13 @@ import { detectWithCache } from '@/lib/detection/dedupe'
 import { DetectionResult } from '@/lib/detection/contracts'
 import { recordScanTelemetry } from '@/lib/observability/scanTelemetry'
 
+// quality_scores schema v2 — replaces a single flat `passed` (which read as
+// a bare humanness verdict) with three distinct concerns: whether facts
+// survived (fidelity, measured today), whether style/tone/intensity moved
+// as requested (style, unmeasured until Phase 6's evaluators exist — every
+// field stays null rather than fabricating a score), and a combined verdict
+// (overall) that a caller can check without knowing the two are currently
+// the same thing. See the Humanite Improvement Plan, Phase 1.
 export function buildOutput(
   postText: string,
   results: ChunkResult[],
@@ -15,17 +22,36 @@ export function buildOutput(
   return {
     text: postText,
     quality_scores: {
-      semantic_similarity: agg.semantic_similarity,
-      nli_entailment: agg.nli_entailment,
-      entity_overlap: agg.entity_overlap,
-      passed: agg.passed,
-      failed_gate: agg.failed_gate,
-      degraded: agg.degraded,
-      gates_available: agg.gates_available,
-      retry_count: agg.retry_count,
-      missing_facts: agg.missing_facts,
-      entailment_issues: agg.entailment_issues,
-      preservation_by_type: agg.preservation_by_type,
+      schema_version: 2 as const,
+      fidelity: {
+        entity_preservation: agg.entity_preservation,
+        semantic_similarity: agg.semantic_similarity,
+        entailment: agg.entailment,
+        passed: agg.passed,
+        failed_gate: agg.failed_gate,
+        truncated: agg.truncated,
+        gates_available: agg.gates_available,
+        retry_count: agg.retry_count,
+        missing_facts: agg.missing_facts,
+        entailment_issues: agg.entailment_issues,
+        preservation_by_type: agg.preservation_by_type,
+      },
+      // Every field stays null until Phase 6 ships real style/tone/domain/
+      // intensity evaluators — exposing a fabricated number here would
+      // violate "expose only what can be measured."
+      style: {
+        naturalness: null,
+        tone_alignment: null,
+        domain_alignment: null,
+        intensity_alignment: null,
+        passed: null,
+      },
+      overall: {
+        // Style is unmeasured, so the combined verdict is fidelity's alone
+        // for now — never stricter than what was actually checked.
+        validated: agg.passed,
+        degraded: agg.degraded,
+      },
     },
     detection,
     // Distinguishes "not analyzed" (detection is null, this is set) from a

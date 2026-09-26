@@ -151,6 +151,18 @@ describe('preprocess — proper_noun locks', () => {
     const locks = locksOfType('Germany exported goods.', 'proper_noun')
     expect(locks).toHaveLength(0)
   })
+
+  it('does not lock a Title Case heading or sentence fragment as a proper noun', () => {
+    const locks = locksOfType('Overall Results Were Mixed across the three cohorts.', 'proper_noun')
+    expect(locks.map(l => l.text)).not.toContain('Overall Results Were Mixed')
+  })
+
+  it('still locks a genuine multi-word proper noun that happens to sit near heading-like text', () => {
+    const text = 'Summary And Discussion: the World Health Organization issued new guidance.'
+    const locks = locksOfType(text, 'proper_noun')
+    expect(locks.map(l => l.text)).toContain('World Health Organization')
+    expect(locks.map(l => l.text)).not.toContain('Summary And Discussion')
+  })
 })
 
 describe('preprocess — overlap resolution across categories', () => {

@@ -76,17 +76,44 @@ export function maxTokensForIntensity(intensity: number): number {
   return 12288
 }
 
+// Hard ceiling on the per-attempt bump below — keeps a chunk that keeps
+// truncating from requesting an ever-growing completion size across retries.
+const MAX_TOKENS_CEILING = 16384
+
+function boostedMaxTokens(current: number): number {
+  return Math.min(MAX_TOKENS_CEILING, Math.round(current * 1.5))
+}
+
 function buildRetryAddendum(gate: QualityScores): string {
   switch (gate.failed_gate) {
-    case 'entity_overlap':
+    case 'entity_preservation':
       return `## PREVIOUS ATTEMPT FAILED VALIDATION — FIX THIS\nYour previous rewrite dropped or altered these required exact-match strings. Include every one of them verbatim this time: ${gate.missing_facts.map(f => `"${f}"`).join(', ')}`
     case 'entailment':
       return `## PREVIOUS ATTEMPT FAILED VALIDATION — FIX THIS\nYour previous rewrite changed the meaning of the source. Specific issues found: ${gate.entailment_issues.join('; ') || 'unspecified meaning drift'}. Do not add, remove, or alter any factual claim — rewrite style only.`
     case 'semantic_similarity':
       return `## PREVIOUS ATTEMPT FAILED VALIDATION — FIX THIS\nYour previous rewrite deviated too far from the source content. Keep the same content, structure, and claims — vary only the prose style.`
+    case 'truncated':
+      return `## PREVIOUS ATTEMPT WAS CUT OFF — FIX THIS\nYour previous rewrite exceeded the output length limit and was truncated mid-sentence. Keep the same content and detail level, but express it more concisely so the full rewrite fits.`
     default:
       return ''
   }
+}
+
+// Ranks two gate results so the retry loop can keep the best-scoring attempt
+// made so far instead of whichever attempt happened to run last — a later
+// retry, prompted to fix one gate, can regress another and score worse
+// overall than an earlier failing attempt.
+function isBetterAttempt(candidate: QualityScores, current: QualityScores): boolean {
+  if (candidate.passed !== current.passed) return candidate.passed
+  if (candidate.entity_preservation !== current.entity_preservation) {
+    return candidate.entity_preservation > current.entity_preservation
+  }
+  const candidateEntailment = candidate.entailment ?? -1
+  const currentEntailment = current.entailment ?? -1
+  if (candidateEntailment !== currentEntailment) return candidateEntailment > currentEntailment
+  const candidateSimilarity = candidate.semantic_similarity ?? -1
+  const currentSimilarity = current.semantic_similarity ?? -1
+  return candidateSimilarity > currentSimilarity
 }
 
 export interface ChunkResult {
@@ -95,6 +122,11 @@ export interface ChunkResult {
   modelUsed: string
   gate: QualityScores | null
   gatesUnavailable: boolean
+  // True when the shipped attempt's completion was cut off by the token
+  // budget (finish_reason 'length') rather than ending naturally — the gate
+  // on that attempt is forced to passed:false regardless of what it scored,
+  // since a truncated rewrite is missing content the gates never saw.
+  truncated: boolean
   retryCount: number
 }
 
@@ -114,13 +146,27 @@ export async function humanizeChunk(
   maxRetries: number,
 ): Promise<ChunkResult> {
   const basePrompt = buildUserPrompt(sanitizedText, factLocks, intensity, tone, domain)
+  // The judge (entailment/fidelity check) runs on a separately configured
+  // model when available, falling back to the generator itself only when no
+  // JUDGE_MODEL is set — a model judging its own output is a documented
+  // self-preference bias (ref. 7 in the improvement plan).
+  const judgeModel = process.env.JUDGE_MODEL || model
   let userPrompt = basePrompt
-  let postText = fallbackText
-  let substitutions = 0
-  let modelUsed = model
-  let gateResult: QualityScores | null = null
-  let gatesUnavailable = false
   let retryCount = 0
+  let gatesUnavailable = false
+  let currentMaxTokens = maxTokensForIntensity(intensity)
+
+  // Tracks the best-scoring attempt seen so far, not just the most recent
+  // one — a later retry can regress relative to an earlier failing attempt
+  // (see isBetterAttempt), and shipping "whatever came last" would silently
+  // prefer that regression.
+  let best: { text: string; substitutions: number; modelUsed: string; gate: QualityScores; truncated: boolean } | null = null
+  let lastAttempt: { text: string; substitutions: number; modelUsed: string; truncated: boolean } = {
+    text: fallbackText,
+    substitutions: 0,
+    modelUsed: model,
+    truncated: false,
+  }
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const completion = await client.chat.completions.create({
@@ -129,20 +175,24 @@ export async function humanizeChunk(
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userPrompt },
       ],
-      max_tokens: maxTokensForIntensity(intensity),
+      max_tokens: currentMaxTokens,
       temperature: 0.7,
     })
 
-    const rewritten = completion.choices[0]?.message?.content?.trim() ?? fallbackText
-    modelUsed = completion.model
-
+    const choice = completion.choices[0]
+    const rewritten = choice?.message?.content?.trim() ?? fallbackText
+    const modelUsed = completion.model
+    // A completion cut off mid-rewrite is silently missing trailing content
+    // — detected here via finish_reason rather than shipped as if it were a
+    // complete, validated rewrite (see the forced passed:false below).
+    const truncated = choice?.finish_reason === 'length'
     const post = intensity >= 4 ? postprocess(rewritten, factLocks) : { text: rewritten, substitutions: 0 }
-    postText = post.text
-    substitutions = post.substitutions
     retryCount = attempt
+    lastAttempt = { text: post.text, substitutions: post.substitutions, modelUsed, truncated }
 
+    let gateResult: QualityScores
     try {
-      gateResult = await runQualityGates(client, model, sanitizedText, postText, factLocks)
+      gateResult = await runQualityGates(client, judgeModel, sanitizedText, post.text, factLocks)
     } catch (gateErr) {
       console.warn('Quality gates unavailable, shipping unscored output', {
         type: gateErr instanceof Error ? gateErr.constructor.name : typeof gateErr,
@@ -151,11 +201,43 @@ export async function humanizeChunk(
       break
     }
 
+    if (truncated) {
+      // Never let a truncated attempt read as validated, whatever the gates
+      // happened to score on the partial text — preserves whatever more
+      // specific failure reason the deterministic gates already found.
+      gateResult = { ...gateResult, passed: false, failed_gate: gateResult.failed_gate ?? 'truncated' }
+    }
+
+    if (!best || isBetterAttempt(gateResult, best.gate)) {
+      best = { text: post.text, substitutions: post.substitutions, modelUsed, gate: gateResult, truncated }
+    }
+
     if (gateResult.passed || attempt === maxRetries) break
     userPrompt = `${basePrompt}\n\n${buildRetryAddendum(gateResult)}`
+    if (truncated) currentMaxTokens = boostedMaxTokens(currentMaxTokens)
   }
 
-  return { text: postText, substitutions, modelUsed, gate: gateResult, gatesUnavailable, retryCount }
+  if (gatesUnavailable) {
+    return {
+      text: lastAttempt.text,
+      substitutions: lastAttempt.substitutions,
+      modelUsed: lastAttempt.modelUsed,
+      gate: best?.gate ?? null,
+      gatesUnavailable: true,
+      truncated: lastAttempt.truncated,
+      retryCount,
+    }
+  }
+
+  return {
+    text: best?.text ?? lastAttempt.text,
+    substitutions: best?.substitutions ?? lastAttempt.substitutions,
+    modelUsed: best?.modelUsed ?? lastAttempt.modelUsed,
+    gate: best?.gate ?? null,
+    gatesUnavailable: false,
+    truncated: best?.truncated ?? lastAttempt.truncated,
+    retryCount,
+  }
 }
 
 // Reassembles chunk results using each chunk's own recorded separator
@@ -174,8 +256,8 @@ export function joinChunkResults(results: ChunkResult[], chunks: TextChunk[]): s
 
 export interface AggregatedQuality {
   semantic_similarity: number | null
-  nli_entailment: number | null
-  entity_overlap: number | null
+  entailment: number | null
+  entity_preservation: number | null
   passed: boolean | null
   failed_gate: string | null
   // True when at least one soft-quality gate (semantic similarity or
@@ -185,6 +267,10 @@ export interface AggregatedQuality {
   // `passed: true` alone as a green light for e.g. a "verified" claim is
   // exactly the gap this field closes.
   degraded: boolean
+  // True when at least one chunk's shipped attempt was cut off by the token
+  // budget — distinct from `degraded`: a truncated chunk already forces its
+  // own `passed: false` (a definite defect), not merely "unmeasured".
+  truncated: boolean
   gates_available: GateAvailability
   retry_count: number
   missing_facts: string[]
@@ -221,16 +307,18 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
   const missingFacts = results.flatMap(r => r.gate?.missing_facts ?? [])
   const entailmentIssues = results.flatMap(r => r.gate?.entailment_issues ?? [])
   const preservationByType = mergePreservationByType(results)
+  const anyTruncated = results.some(r => r.truncated)
   const scored = results.filter((r): r is ChunkResult & { gate: QualityScores } => !r.gatesUnavailable && r.gate != null)
 
   if (scored.length === 0) {
     return {
       semantic_similarity: null,
-      nli_entailment: null,
-      entity_overlap: null,
+      entailment: null,
+      entity_preservation: null,
       passed: null,
       failed_gate: null,
       degraded: true,
+      truncated: anyTruncated,
       gates_available: { semantic_similarity: false, entailment: false },
       retry_count: totalRetries,
       missing_facts: missingFacts,
@@ -258,11 +346,14 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
 
   return {
     semantic_similarity: average(g => g.semantic_similarity),
-    nli_entailment: average(g => g.nli_entailment),
-    entity_overlap: average(g => g.entity_overlap),
+    entailment: average(g => g.entailment),
+    entity_preservation: average(g => g.entity_preservation),
+    // Already correctly reflects truncation: humanizeChunk forces a
+    // truncated chunk's own gate.passed to false before it ever reaches here.
     passed: scored.every(r => r.gate.passed),
     failed_gate: firstFailure?.gate.failed_gate ?? null,
     degraded: !gatesAvailable.semantic_similarity || !gatesAvailable.entailment,
+    truncated: anyTruncated,
     gates_available: gatesAvailable,
     retry_count: totalRetries,
     missing_facts: missingFacts,

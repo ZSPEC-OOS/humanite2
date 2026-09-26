@@ -79,8 +79,11 @@ function buildProvider(apiKeyOverride?: string): DetectionProvider {
   }
 
   // Default: mock. Local dev and CI never spend a real GPTZero request.
-  const fixture = process.env.MOCK_DETECTION_FIXTURE ?? 'human'
-  return new MockDetectionProvider(isMockFixtureName(fixture) ? fixture : 'human')
+  // Defaults to 'mixed' rather than 'human' — an unconfigured dev
+  // environment must never make an unscanned or misconfigured detection
+  // read as a clean "human" result by default.
+  const fixture = process.env.MOCK_DETECTION_FIXTURE ?? 'mixed'
+  return new MockDetectionProvider(isMockFixtureName(fixture) ? fixture : 'mixed')
 }
 
 let gateway: DetectionGateway | null = null

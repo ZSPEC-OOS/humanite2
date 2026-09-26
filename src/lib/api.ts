@@ -146,24 +146,46 @@ export interface HumanizeSettings {
 export interface HumanizeOutput {
   text: string
   quality_scores: {
-    // semantic_similarity/nli_entailment are null only when that specific
-    // gate couldn't run (e.g. a custom model endpoint without embedding
-    // support) — entity_overlap has no external dependency and is never
-    // null. See `warning` for the unscored-entirely case.
-    semantic_similarity: number | null
-    nli_entailment: number | null
-    entity_overlap: number | null
-    passed: boolean | null
-    failed_gate: string | null
-    // True when semantic_similarity and/or nli_entailment never ran for at
-    // least part of the document — `passed: true` under degradation means
-    // "nothing that ran failed", not "everything was checked".
-    degraded: boolean
-    gates_available: { semantic_similarity: boolean; entailment: boolean }
-    retry_count: number
-    missing_facts: string[]
-    entailment_issues: string[]
-    preservation_by_type: PreservationByType
+    schema_version: 2
+    fidelity: {
+      // semantic_similarity/entailment are null only when that specific
+      // gate couldn't run (e.g. a custom model endpoint without embedding
+      // support) — entity_preservation has no external dependency and is
+      // never null. See `overall.degraded` for the partially-unscored case.
+      entity_preservation: number | null
+      semantic_similarity: number | null
+      entailment: number | null
+      passed: boolean | null
+      failed_gate: string | null
+      // True when the shipped text was cut off by the token budget — a
+      // hard fidelity defect, distinct from `overall.degraded` below.
+      truncated: boolean
+      gates_available: { semantic_similarity: boolean; entailment: boolean }
+      retry_count: number
+      missing_facts: string[]
+      entailment_issues: string[]
+      preservation_by_type: PreservationByType
+    }
+    // Naturalness/tone/domain/intensity alignment — all null until Phase 6
+    // ships real evaluators for them. Never fabricated in their place.
+    style: {
+      naturalness: number | null
+      tone_alignment: number | null
+      domain_alignment: number | null
+      intensity_alignment: number | null
+      passed: boolean | null
+    }
+    overall: {
+      // Fidelity-only for now (style is unmeasured) — true only when
+      // everything that COULD be checked passed, never a bare humanness
+      // verdict. See fidelity.passed and style.passed for what's behind it.
+      validated: boolean | null
+      // True when at least one soft-quality gate (semantic similarity or
+      // entailment) never ran for at least part of the document —
+      // `validated: true` under degradation means "nothing that ran
+      // failed", not "everything was checked".
+      degraded: boolean
+    }
   }
   // Automatic AI-detection scan run against this output text once humanize
   // completes — null only if the scan itself failed (never blocks the
@@ -192,7 +214,6 @@ export interface HumanizeAPIResponse {
     word_count: number
     char_count: number
     fact_lock_count: number
-    ai_signal_strength: number
   } | null
   processing_metadata: {
     model_used: string

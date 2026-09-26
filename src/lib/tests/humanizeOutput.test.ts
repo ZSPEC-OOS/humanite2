@@ -19,8 +19,9 @@ function chunk(overrides: Partial<ChunkResult> = {}): ChunkResult {
     text: 'Rewritten chunk text.',
     substitutions: 0,
     modelUsed: 'gpt-4o-mini',
-    gate: { semantic_similarity: 0.94, nli_entailment: 0.97, entity_overlap: 1, passed: true, failed_gate: null, gates_available: { semantic_similarity: true, entailment: true }, missing_facts: [], entailment_issues: [], preservation_by_type: {} },
+    gate: { semantic_similarity: 0.94, entailment: 0.97, entity_preservation: 1, passed: true, failed_gate: null, gates_available: { semantic_similarity: true, entailment: true }, missing_facts: [], entailment_issues: [], preservation_by_type: {} },
     gatesUnavailable: false,
+    truncated: false,
     retryCount: 0,
     ...overrides,
   }
@@ -42,7 +43,10 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
     expect(output.detection_warning).toBe('AI detection unavailable')
     // The rest of the output is unaffected — quality scores and watermark
     // are fully populated regardless of what happened to detection.
-    expect(output.quality_scores.passed).toBe(true)
+    expect(output.quality_scores.schema_version).toBe(2)
+    expect(output.quality_scores.fidelity.passed).toBe(true)
+    expect(output.quality_scores.overall.validated).toBe(true)
+    expect(output.quality_scores.style.passed).toBeNull()
     expect(output.watermark.job_id).toBe('job-1')
   })
 
@@ -80,7 +84,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
     const chunks = [
       chunk({ text: 'Chunk one.', substitutions: 2, retryCount: 1 }),
       chunk({ text: 'Chunk two.', substitutions: 0, retryCount: 0 }),
-      chunk({ text: 'Chunk three.', substitutions: 3, retryCount: 1, gate: { semantic_similarity: 0.7, nli_entailment: 0.8, entity_overlap: 0.9, passed: false, failed_gate: 'semantic_similarity', gates_available: { semantic_similarity: true, entailment: true }, missing_facts: [], entailment_issues: ['drift'], preservation_by_type: {} } }),
+      chunk({ text: 'Chunk three.', substitutions: 3, retryCount: 1, gate: { semantic_similarity: 0.7, entailment: 0.8, entity_preservation: 0.9, passed: false, failed_gate: 'semantic_similarity', gates_available: { semantic_similarity: true, entailment: true }, missing_facts: [], entailment_issues: ['drift'], preservation_by_type: {} } }),
     ]
     const postText = chunks.map(c => c.text).join('\n\n')
     const output = buildOutput(postText, chunks, generateWatermark('job-5', 'gpt-4o-mini'), detection)
@@ -89,8 +93,9 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
     expect(output.detection?.classification).toBe('human-written')
     // Chunk-level results still aggregate correctly across the whole document.
     expect(output.postprocessor_substitutions).toBe(5)
-    expect(output.quality_scores.retry_count).toBe(2)
-    expect(output.quality_scores.passed).toBe(false)
-    expect(output.quality_scores.failed_gate).toBe('semantic_similarity')
+    expect(output.quality_scores.fidelity.retry_count).toBe(2)
+    expect(output.quality_scores.fidelity.passed).toBe(false)
+    expect(output.quality_scores.fidelity.failed_gate).toBe('semantic_similarity')
+    expect(output.quality_scores.overall.validated).toBe(false)
   })
 })

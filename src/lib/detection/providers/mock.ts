@@ -105,7 +105,9 @@ export class MockDetectionProvider implements DetectionProvider {
       confidence_category,
       estimated_ai_like_fraction,
       segments: splitIntoSegments(text, pattern),
-      warnings,
+      // Always first and always present — a mock result must never be
+      // mistaken for a real detection, in any fixture.
+      warnings: ['Mock — not a real detection', ...warnings],
       explanation: { summary: `Mock fixture "${this.fixture}" — classified as ${classification}.` },
     }
   }

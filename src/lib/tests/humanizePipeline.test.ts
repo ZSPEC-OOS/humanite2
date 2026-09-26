@@ -1,7 +1,9 @@
-import { describe, it, expect } from 'vitest'
-import { aggregateChunkResults, buildUserPrompt, joinChunkResults, ChunkResult } from '../humanizePipeline'
+import { describe, it, expect, vi } from 'vitest'
+import type OpenAI from 'openai'
+import { aggregateChunkResults, buildUserPrompt, joinChunkResults, humanizeChunk, ChunkResult } from '../humanizePipeline'
 import type { QualityScores } from '../qualityGates'
 import type { TextChunk } from '../chunk'
+import type { FactLock } from '../preprocess'
 
 describe('buildUserPrompt — vocabulary guidance', () => {
   const prompt = buildUserPrompt('some text', [], 5, 'balanced', 'general')
@@ -26,8 +28,8 @@ describe('buildUserPrompt — vocabulary guidance', () => {
 function gate(overrides: Partial<QualityScores> = {}): QualityScores {
   return {
     semantic_similarity: 0.9,
-    nli_entailment: 0.95,
-    entity_overlap: 1,
+    entailment: 0.95,
+    entity_preservation: 1,
     passed: true,
     failed_gate: null,
     gates_available: { semantic_similarity: true, entailment: true },
@@ -45,6 +47,7 @@ function chunk(overrides: Partial<ChunkResult> = {}): ChunkResult {
     modelUsed: 'gpt-4o-mini',
     gate: gate(),
     gatesUnavailable: false,
+    truncated: false,
     retryCount: 0,
     ...overrides,
   }
@@ -55,7 +58,7 @@ describe('aggregateChunkResults — averaging with a per-chunk unavailable gate'
     const results = [
       chunk({ gate: gate({ semantic_similarity: 0.8 }) }),
       // This chunk's embedding call failed — semantic_similarity is null, but the
-      // chunk itself was still scored (entity_overlap ran fine).
+      // chunk itself was still scored (entity_preservation ran fine).
       chunk({ gate: gate({ semantic_similarity: null }) }),
     ]
     const agg = aggregateChunkResults(results)
@@ -64,13 +67,13 @@ describe('aggregateChunkResults — averaging with a per-chunk unavailable gate'
     expect(agg.semantic_similarity).toBe(0.8)
   })
 
-  it('still averages entity_overlap normally since it is never null per chunk', () => {
+  it('still averages entity_preservation normally since it is never null per chunk', () => {
     const results = [
-      chunk({ gate: gate({ entity_overlap: 1 }) }),
-      chunk({ gate: gate({ entity_overlap: 0.5 }) }),
+      chunk({ gate: gate({ entity_preservation: 1 }) }),
+      chunk({ gate: gate({ entity_preservation: 0.5 }) }),
     ]
     const agg = aggregateChunkResults(results)
-    expect(agg.entity_overlap).toBe(0.75)
+    expect(agg.entity_preservation).toBe(0.75)
   })
 
   it('reports null for a score when no chunk was able to compute it', () => {
@@ -82,22 +85,22 @@ describe('aggregateChunkResults — averaging with a per-chunk unavailable gate'
     expect(agg.semantic_similarity).toBeNull()
   })
 
-  it('a failing entity_overlap chunk still marks the whole document as not passed, independent of other gates', () => {
+  it('a failing entity_preservation chunk still marks the whole document as not passed, independent of other gates', () => {
     const results = [
       chunk({
         gate: gate({
           semantic_similarity: null,
-          nli_entailment: null,
-          entity_overlap: 0,
+          entailment: null,
+          entity_preservation: 0,
           passed: false,
-          failed_gate: 'entity_overlap',
+          failed_gate: 'entity_preservation',
           missing_facts: ['42'],
         }),
       }),
     ]
     const agg = aggregateChunkResults(results)
     expect(agg.passed).toBe(false)
-    expect(agg.failed_gate).toBe('entity_overlap')
+    expect(agg.failed_gate).toBe('entity_preservation')
     expect(agg.missing_facts).toEqual(['42'])
   })
 })
@@ -110,14 +113,14 @@ describe('aggregateChunkResults — degraded/gates_available (partial gate outag
     expect(agg.gates_available).toEqual({ semantic_similarity: true, entailment: true })
   })
 
-  it('is degraded, but still passed, when entity_overlap cleared and both soft gates never ran', () => {
-    // This is the exact bug this fix closes: entity_overlap passing on its
-    // own must not read identically to "everything was checked".
+  it('is degraded, but still passed, when entity_preservation cleared and both soft gates never ran', () => {
+    // This is the exact bug this fix closes: entity_preservation passing on
+    // its own must not read identically to "everything was checked".
     const results = [
       chunk({
         gate: gate({
           semantic_similarity: null,
-          nli_entailment: null,
+          entailment: null,
           gates_available: { semantic_similarity: false, entailment: false },
         }),
       }),
@@ -131,7 +134,7 @@ describe('aggregateChunkResults — degraded/gates_available (partial gate outag
   it('is degraded when only one of several chunks was missing a gate, even though the rest were fully scored', () => {
     const results = [
       chunk({ gate: gate() }),
-      chunk({ gate: gate({ nli_entailment: null, gates_available: { semantic_similarity: true, entailment: false } }) }),
+      chunk({ gate: gate({ entailment: null, gates_available: { semantic_similarity: true, entailment: false } }) }),
     ]
     const agg = aggregateChunkResults(results)
     expect(agg.passed).toBe(true)
@@ -145,6 +148,23 @@ describe('aggregateChunkResults — degraded/gates_available (partial gate outag
     expect(agg.passed).toBeNull()
     expect(agg.degraded).toBe(true)
     expect(agg.gates_available).toEqual({ semantic_similarity: false, entailment: false })
+  })
+})
+
+describe('aggregateChunkResults — truncation', () => {
+  it('is not truncated when no chunk was cut off', () => {
+    const agg = aggregateChunkResults([chunk(), chunk()])
+    expect(agg.truncated).toBe(false)
+  })
+
+  it('reports truncated when any single chunk was cut off, even if the rest were clean', () => {
+    const results = [chunk(), chunk({ truncated: true, gate: gate({ passed: false, failed_gate: 'truncated' }) })]
+    const agg = aggregateChunkResults(results)
+    expect(agg.truncated).toBe(true)
+    // A truncated chunk's own gate is already forced to passed:false upstream
+    // (see humanizeChunk) — the aggregate reflects that without any special
+    // casing here.
+    expect(agg.passed).toBe(false)
   })
 })
 
@@ -176,5 +196,92 @@ describe('joinChunkResults — reassembly using each chunk\'s real separator', (
       textChunk({ separatorAfter: '' }),
     ]
     expect(joinChunkResults(results, chunks)).toBe('First.\n\nSecond.')
+  })
+})
+
+// ── humanizeChunk — end-to-end retry/truncation behavior ────────────────────
+
+function mockHumanizeClient(
+  chatResponses: Array<{ content: string; model?: string; finish_reason?: string }>,
+  embedding: [number[], number[]] = [[1, 0], [1, 0]],
+) {
+  const chatCreate = vi.fn()
+  for (const r of chatResponses) {
+    chatCreate.mockResolvedValueOnce({
+      model: r.model ?? 'gpt-4o-mini',
+      choices: [{ message: { content: r.content }, finish_reason: r.finish_reason ?? 'stop' }],
+    })
+  }
+  const embedCreate = vi.fn().mockResolvedValue({ data: [{ embedding: embedding[0] }, { embedding: embedding[1] }] })
+  return {
+    client: { chat: { completions: { create: chatCreate } }, embeddings: { create: embedCreate } } as unknown as OpenAI,
+    chatCreate,
+  }
+}
+
+const FACT_42: FactLock = { char_start: 0, char_end: 2, text: '42', lock_type: 'number', label: 'NUM' }
+
+describe('humanizeChunk — retry loop ships the best-scoring attempt, not just the last one', () => {
+  it('keeps an earlier attempt that preserved a required fact over a later attempt that dropped it', async () => {
+    const { client } = mockHumanizeClient([
+      { content: 'Revenue rose to 42 units, though the phrasing drifted oddly.' }, // attempt 0 generation — keeps "42"
+      { content: '{"entailment_probability": 0.2, "issues": ["odd phrasing drift"]}' }, // attempt 0 judge — fails entailment
+      { content: 'Revenue rose sharply, a notable turnaround for the quarter.' }, // attempt 1 generation — drops "42"
+      { content: '{"entailment_probability": 1.0, "issues": []}' }, // attempt 1 judge — entailment now fine
+    ])
+
+    const result = await humanizeChunk(
+      client, 'gpt-4o-mini', 'fallback', 'Revenue rose to 42 units.', [FACT_42],
+      3, 'balanced', 'general', 1, // maxRetries=1 → two attempts total; intensity<=3 skips postprocess
+    )
+
+    // The last attempt "fixed" entailment but at the cost of the one thing
+    // that must never regress — a locked fact. The earlier attempt, which
+    // only failed on style, is the better ship.
+    expect(result.text).toContain('42')
+    expect(result.gate?.failed_gate).toBe('entailment')
+    expect(result.retryCount).toBe(1)
+  })
+})
+
+describe('humanizeChunk — truncation detection', () => {
+  it('retries after a cut-off completion, boosting the token budget, and ships the later complete attempt', async () => {
+    const { client, chatCreate } = mockHumanizeClient([
+      { content: 'Revenue rose to 42 units before the completion cut off', finish_reason: 'length' },
+      { content: '{"entailment_probability": 1.0, "issues": []}' },
+      { content: 'Revenue rose to 42 units, a clean and complete rewrite.', finish_reason: 'stop' },
+      { content: '{"entailment_probability": 1.0, "issues": []}' },
+    ])
+
+    const result = await humanizeChunk(
+      client, 'gpt-4o-mini', 'fallback', 'Revenue rose to 42 units.', [FACT_42],
+      3, 'balanced', 'general', 1,
+    )
+
+    expect(result.truncated).toBe(false)
+    expect(result.gate?.passed).toBe(true)
+    expect(result.retryCount).toBe(1)
+    // The retry after a truncation raises max_tokens above the first attempt's.
+    const firstGenerationTokens = chatCreate.mock.calls[0]![0].max_tokens
+    const secondGenerationTokens = chatCreate.mock.calls[2]![0].max_tokens
+    expect(secondGenerationTokens).toBeGreaterThan(firstGenerationTokens)
+  })
+
+  it('never ships a truncated attempt as validated, even when it is the only attempt available', async () => {
+    const { client } = mockHumanizeClient([
+      { content: 'Revenue rose to 42 units before the completion cut off', finish_reason: 'length' },
+      { content: '{"entailment_probability": 1.0, "issues": []}' },
+      { content: 'Revenue rose to 42 units before the completion cut off again', finish_reason: 'length' },
+      { content: '{"entailment_probability": 1.0, "issues": []}' },
+    ])
+
+    const result = await humanizeChunk(
+      client, 'gpt-4o-mini', 'fallback', 'Revenue rose to 42 units.', [FACT_42],
+      3, 'balanced', 'general', 1,
+    )
+
+    expect(result.truncated).toBe(true)
+    expect(result.gate?.passed).toBe(false)
+    expect(result.gate?.failed_gate).toBe('truncated')
   })
 })
