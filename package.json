@@ -10,7 +10,8 @@
     "lint": "next lint",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
-    "benchmark": "vitest run tests/benchmark/tests/liveBenchmark.test.ts"
+    "benchmark": "vitest run tests/benchmark/tests/liveBenchmark.test.ts",
+    "benchmark:scaleup": "vitest run tests/benchmark/tests/scaleUpSweepAcceptance.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1137.0",

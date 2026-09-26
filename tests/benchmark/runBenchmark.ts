@@ -2,6 +2,7 @@ import type OpenAI from 'openai'
 import { preprocess } from '@/lib/preprocess'
 import { chunkFactLockedText } from '@/lib/chunk'
 import { humanizeChunk, aggregateChunkResults, joinChunkResults, type ChunkResult } from '@/lib/humanizePipeline'
+import { TONES } from '@/lib/style'
 import { GPTZeroProvider } from '@/lib/detection/providers/gptzero'
 import { SaplingProvider } from '@/lib/detection/providers/sapling'
 import type { DetectionProvider } from '@/lib/detection/providers/provider'
@@ -73,7 +74,8 @@ export function instrumentClient(client: OpenAI): { client: OpenAI; usage: Usage
 export interface RunBenchmarkOptions {
   client: OpenAI
   model: string
-  // Defaults to the full 60-item CORPUS — pass a slice for a smoke test.
+  // Defaults to the full 300-item CORPUS (50 per domain, per the Phase 11
+  // scale-up) — pass a slice for a smoke test.
   items?: CorpusItem[]
   // Defaults to [GPTZeroProvider(), SaplingProvider()] (each reads its own
   // API key from env) — satisfies "at least two detectors" without the
@@ -83,6 +85,12 @@ export interface RunBenchmarkOptions {
   // Target false-positive rate for detector calibration (see
   // calibrateDetector below). Defaults to 5%.
   targetFalsePositiveRate?: number
+  // Phase 11 scale-up: a single tone/intensity point to run the whole item
+  // set at, defaulting to Phase 2's original single-point behavior
+  // (balanced/5) so every existing caller is unaffected. runScaleUpSweep
+  // below is what actually varies these across a grid.
+  tone?: string
+  intensity?: number
 }
 
 async function runOneItem(
@@ -90,6 +98,8 @@ async function runOneItem(
   rawClient: OpenAI,
   model: string,
   detectors: DetectionProvider[],
+  tone: string = DEFAULT_TONE,
+  intensity: number = DEFAULT_INTENSITY,
 ): Promise<BenchmarkItemResult> {
   const started = performance.now()
   try {
@@ -101,7 +111,7 @@ async function runOneItem(
     for (const chunk of chunks) {
       chunkResults.push(await humanizeChunk(
         client, model, chunk.text, chunk.text, chunk.factLocks,
-        DEFAULT_INTENSITY, DEFAULT_TONE, item.domain, MAX_GATE_RETRIES,
+        intensity, tone, item.domain, MAX_GATE_RETRIES,
       ))
     }
     const outputText = joinChunkResults(chunkResults, chunks)
@@ -202,10 +212,12 @@ export async function runBenchmark(options: RunBenchmarkOptions): Promise<Benchm
   const items = options.items ?? CORPUS
   const detectors = options.detectorProviders ?? [new GPTZeroProvider(), new SaplingProvider()]
   const targetFpr = options.targetFalsePositiveRate ?? 0.05
+  const tone = options.tone ?? DEFAULT_TONE
+  const intensity = options.intensity ?? DEFAULT_INTENSITY
 
   const results: BenchmarkItemResult[] = []
   for (const item of items) {
-    results.push(await runOneItem(item, options.client, options.model, detectors))
+    results.push(await runOneItem(item, options.client, options.model, detectors, tone, intensity))
   }
 
   const domains = items.map(i => i.domain)
@@ -256,5 +268,63 @@ function buildReport(
       detectorAiRateAtFixedFpr,
       prohibitedChangeViolations: results.reduce((sum, r) => sum + r.prohibitedChangesFound.length, 0),
     },
+  }
+}
+
+// ── Phase 11: scale-up sweep across tone × intensity ─────────────────────────
+// "Grow to 50 documents x 6 domains = 300, run across 5 tones at
+// intensities 2, 5 and 8" — a full sweep is 5 x 3 = 15 cells, each a
+// complete runBenchmark pass over however many items are given. At the
+// full 300-item corpus and up to 9 calls per chunk (intensity 8), the full
+// grid is a genuinely expensive, occasional operation, never something run
+// as part of routine testing — see runScaleUpSweepAcceptance.test.ts's own
+// RUN_LIVE_BENCHMARK gate and its use of a small item slice rather than the
+// full corpus for its own smoke coverage.
+export const SCALE_UP_INTENSITIES: readonly number[] = [2, 5, 8]
+
+export interface ScaleUpCell {
+  tone: string
+  intensity: number
+  report: BenchmarkReport
+}
+
+export interface ScaleUpReport {
+  generatedAt: string
+  model: string
+  tones: readonly string[]
+  intensities: readonly number[]
+  itemCount: number
+  cells: ScaleUpCell[]
+}
+
+export interface RunScaleUpSweepOptions extends Omit<RunBenchmarkOptions, 'tone' | 'intensity'> {
+  // Defaults to the product's own 5 tones (src/lib/style/types.ts's
+  // TONES) — matching the plan's "5 tones" exactly rather than inventing a
+  // separate list.
+  tones?: readonly string[]
+  // Defaults to the plan's own 3 sample points (SCALE_UP_INTENSITIES).
+  intensities?: readonly number[]
+}
+
+export async function runScaleUpSweep(options: RunScaleUpSweepOptions): Promise<ScaleUpReport> {
+  const tones = options.tones ?? TONES
+  const intensities = options.intensities ?? SCALE_UP_INTENSITIES
+  const items = options.items ?? CORPUS
+
+  const cells: ScaleUpCell[] = []
+  for (const tone of tones) {
+    for (const intensity of intensities) {
+      const report = await runBenchmark({ ...options, items, tone, intensity })
+      cells.push({ tone, intensity, report })
+    }
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    model: options.model,
+    tones,
+    intensities,
+    itemCount: items.length,
+    cells,
   }
 }

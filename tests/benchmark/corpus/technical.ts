@@ -1,4 +1,5 @@
 import type { CorpusItem } from '../types'
+import { item } from './helpers'
 
 export const TECHNICAL_CORPUS: CorpusItem[] = [
   {
@@ -81,4 +82,247 @@ export const TECHNICAL_CORPUS: CorpusItem[] = [
     prohibitedChanges: ['flagged 24 findings', 'of which 81 were classified as high severity', 'remediated within the 20-week window'],
     expectedProperties: { minWordCount: 60, maxWordCount: 160 },
   },
+
+  // Phase 11 scale-up: technical-11 through technical-50, bringing this
+  // domain from 10 to 50 items.
+  item(
+    'technical-11', 'technical',
+    'The message queue guarantees at-least-once delivery with a default visibility timeout of 30 seconds, meaning a consumer that fails to acknowledge a message within that window will see it redelivered to another consumer. Increasing the timeout above 43200 seconds (12 hours) is not supported, and messages older than the queue\'s retention period of 4 days are automatically deleted. Dead-letter routing kicks in after 5 failed delivery attempts, moving the message to a separate queue for manual inspection.',
+    ['at-least-once delivery', '30 seconds', '43200 seconds (12 hours)', '4 days', '5 failed delivery attempts'],
+    ['guarantees exactly-once delivery', 'default visibility timeout of 300 seconds', 'retention period of 40 days'],
+  ),
+  item(
+    'technical-12', 'technical',
+    'The API rate limit allows 1,000 requests per minute per API key on the standard tier, and 10,000 requests per minute on the enterprise tier, enforced via a token-bucket algorithm that refills at a constant rate rather than a hard reset each minute. Exceeding the limit returns a 429 status with a `Retry-After` header specifying the wait time in seconds, typically under 6 seconds under normal burst conditions. Sustained overages beyond 3 consecutive minutes may trigger a temporary key suspension of 15 minutes.',
+    ['1,000 requests per minute', '10,000 requests per minute', '429', 'Retry-After', 'under 6 seconds', '3 consecutive minutes', '15 minutes'],
+    ['allows 100 requests per minute', 'a temporary key suspension of 150 minutes', 'returns a 200 status'],
+  ),
+  item(
+    'technical-13', 'technical',
+    'The recommended Kubernetes pod resource request is 250 millicores of CPU and 512 MiB of memory for a standard web service replica, with a limit set at 2x the request, 500 millicores and 1024 MiB, to allow burst headroom without permitting unbounded consumption. Horizontal pod autoscaling is configured to trigger at 70 percent average CPU utilization across replicas, scaling between a minimum of 3 and a maximum of 20 pods, with a 5-minute cooldown between scale-up events to avoid thrashing.',
+    ['250 millicores', '512 MiB', '500 millicores', '1024 MiB', '70 percent', 'minimum of 3', 'maximum of 20 pods', '5-minute cooldown'],
+    ['pod resource request is 2500 millicores', 'trigger at 7 percent average CPU utilization', 'minimum of 30 and a maximum of 200 pods'],
+  ),
+  item(
+    'technical-14', 'technical',
+    'The recommended index rebuild schedule runs a full `REINDEX` weekly during the Sunday 2 a.m. maintenance window, since fragmentation above 30 percent has been observed to add 40 to 60 milliseconds of latency per query on the largest table. Incremental index maintenance runs nightly and typically completes in under 8 minutes, but the full weekly rebuild can take up to 45 minutes on the production dataset, requiring a brief read-only mode during the final 5 minutes of the operation.',
+    ['Sunday 2 a.m.', 'above 30 percent', '40 to 60 milliseconds', 'under 8 minutes', 'up to 45 minutes', 'final 5 minutes'],
+    ['runs a full `REINDEX` weekly during the Sunday 2 p.m. maintenance window', 'fragmentation above 3 percent', 'can take up to 450 minutes'],
+  ),
+  item(
+    'technical-15', 'technical',
+    'The recommended log retention policy keeps application logs for 30 days in hot storage and archives them to cold storage for an additional 1 year before final deletion, in line with the 13-month audit requirement the compliance team has specified. Log volume currently averages 2.4 TB per day across all services, of which approximately 18 percent is classified as debug-level and excluded from the cold-storage archive to reduce long-term storage cost.',
+    ['30 days', '1 year', '13-month', '2.4 TB per day', '18 percent'],
+    ['keeps application logs for 300 days in hot storage', 'the 130-month audit requirement', 'averages 24 TB per day'],
+  ),
+  item(
+    'technical-16', 'technical',
+    'The recommended CI runner configuration provisions 4 vCPUs and 16 GB of RAM per job, sized to keep the median build under 6 minutes; jobs exceeding a 45-minute hard timeout are automatically killed and marked as failed. Parallel test sharding splits the suite across 8 runners, reducing wall-clock test time from approximately 32 minutes serial to under 5 minutes when all shards run concurrently, though shared database fixtures currently limit sharding to a maximum of 12 runners before contention outweighs the benefit.',
+    ['4 vCPUs', '16 GB', 'under 6 minutes', '45-minute', '8 runners', 'approximately 32 minutes', 'under 5 minutes', 'maximum of 12 runners'],
+    ['provisions 40 vCPUs', 'keep the median build under 60 minutes', 'a 4.5-minute hard timeout'],
+  ),
+  item(
+    'technical-17', 'technical',
+    'The recommended retry policy for the payment gateway client uses exponential backoff starting at 200 milliseconds, doubling on each attempt up to a maximum of 5 attempts and an 8-second cap per individual wait, with a full request budget of 30 seconds before the operation is abandoned. Retries are only attempted for idempotent request types and for HTTP status codes 429, 502, 503, and 504; a 4xx client error outside those codes is never retried automatically.',
+    ['200 milliseconds', 'maximum of 5 attempts', '8-second cap', '30 seconds', '429, 502, 503, and 504'],
+    ['starting at 2000 milliseconds', 'a maximum of 50 attempts', 'an 80-second cap per individual wait'],
+  ),
+  item(
+    'technical-18', 'technical',
+    'The image processing pipeline resizes uploads to a maximum dimension of 2048 pixels on the longest edge, compressing to a target file size under 500 KB using quality level 82 for JPEG output, a setting chosen after testing showed levels below 75 introduced visible artifacts on roughly 12 percent of sampled images. Processing a single image averages 340 milliseconds on the current worker fleet of 24 instances, comfortably within the 1-second SLA the mobile team requires for upload confirmation.',
+    ['2048 pixels', 'under 500 KB', 'quality level 82', 'below 75', '12 percent', '340 milliseconds', '24 instances', '1-second SLA'],
+    ['resizes uploads to a maximum dimension of 20480 pixels', 'compressing to a target file size under 5000 KB', 'quality level 8.2'],
+  ),
+  item(
+    'technical-19', 'technical',
+    'The recommended TLS handshake timeout is set to 10 seconds, and connection pooling maintains a minimum of 8 warm connections per upstream host to avoid repeated handshake overhead under normal traffic. Under the current configuration, cold-start handshake latency averages 180 milliseconds versus 4 milliseconds for a pooled connection reuse, a 45x difference that motivated raising the minimum pool size from 2 to 8 connections per host last quarter.',
+    ['10 seconds', 'minimum of 8 warm connections', '180 milliseconds', '4 milliseconds', '45x', 'from 2 to 8 connections'],
+    ['TLS handshake timeout is set to 100 seconds', 'cold-start handshake latency averages 18 milliseconds', 'a 4.5x difference'],
+  ),
+  item(
+    'technical-20', 'technical',
+    'The recommended database backup verification process performs a full restore-and-checksum test monthly against a randomly selected snapshot, with the most recent 6 tests all completing successfully within the 90-minute target window for the current 1.2 TB production dataset. A failed verification triggers an immediate page to the on-call database engineer rather than waiting for the next scheduled test, and the team maintains a rolling history of the last 12 verification results for audit purposes.',
+    ['monthly', 'most recent 6 tests', '90-minute', '1.2 TB', 'last 12 verification results'],
+    ['performs a full restore-and-checksum test daily', 'within the 900-minute target window', 'a rolling history of the last 120 verification results'],
+  ),
+  item(
+    'technical-21', 'technical',
+    'The feature flag rollout for the new checkout flow follows a staged plan: 1 percent of traffic for the first 24 hours, 10 percent for the following 48 hours if error rates stay under 0.5 percent above baseline, then 50 percent for 72 hours before reaching 100 percent, a schedule expected to take 6 days end to end absent any rollback. A rollback at any stage reverts all traffic to the previous flow within approximately 2 minutes via a single configuration change, without requiring a new deployment.',
+    ['1 percent', 'first 24 hours', '10 percent', 'following 48 hours', 'under 0.5 percent', '50 percent', '72 hours', '100 percent', '6 days', 'approximately 2 minutes'],
+    ['staged plan: 1 percent of traffic for the first 240 hours', 'error rates stay under 5 percent above baseline', 'a schedule expected to take 60 days'],
+  ),
+  item(
+    'technical-22', 'technical',
+    'The recommended memory limit for the JVM-based service is set to 4 GB heap with a 512 MB off-heap buffer, and garbage collection pauses under the current G1GC configuration average 18 milliseconds, with p99 pauses reaching 95 milliseconds during peak load. Increasing heap size beyond 6 GB has been observed to increase p99 pause time rather than reduce it, since larger heaps take longer to scan during a full garbage collection cycle on the current hardware.',
+    ['4 GB heap', '512 MB', '18 milliseconds', '95 milliseconds', 'beyond 6 GB'],
+    ['set to 40 GB heap', 'garbage collection pauses... average 180 milliseconds', 'p99 pauses reaching 9.5 milliseconds'],
+  ),
+  item(
+    'technical-23', 'technical',
+    'The recommended CDN cache configuration sets a default time-to-live of 3600 seconds for static assets and 60 seconds for API responses marked cacheable, achieving a cache hit ratio of 96 percent for static content and 71 percent for cacheable API responses across the last 30 days of traffic. Purging the entire cache, an operation used only for emergency rollbacks, takes approximately 90 seconds to propagate fully across all 18 edge regions.',
+    ['3600 seconds', '60 seconds', '96 percent', '71 percent', 'last 30 days', 'approximately 90 seconds', '18 edge regions'],
+    ['sets a default time-to-live of 36000 seconds', 'achieving a cache hit ratio of 9.6 percent', 'takes approximately 900 seconds to propagate'],
+  ),
+  item(
+    'technical-24', 'technical',
+    'The recommended password hashing configuration uses bcrypt with a cost factor of 12, chosen to keep hashing time around 250 milliseconds per attempt on current production hardware, balancing brute-force resistance against acceptable login latency. Increasing the cost factor to 14 roughly quadruples hashing time to approximately 1 second, which the security team rejected as adding unacceptable login latency for the marginal security gain given the service\'s existing rate limiting of 5 login attempts per minute per account.',
+    ['cost factor of 12', '250 milliseconds', 'cost factor to 14', 'approximately 1 second', '5 login attempts per minute'],
+    ['a cost factor of 2', 'keep hashing time around 2500 milliseconds', 'roughly quadruples hashing time to approximately 10 seconds'],
+  ),
+  item(
+    'technical-25', 'technical',
+    'The recommended monitoring alert threshold fires a warning at 75 percent disk utilization and a critical page at 90 percent, giving the on-call team an estimated 6 hours of runway between warning and critical under typical growth rates of approximately 2.5 percent per day on the affected volume. Auto-remediation, which extends the volume by 20 percent, triggers automatically at the critical threshold if no engineer acknowledges the page within 10 minutes.',
+    ['75 percent', '90 percent', '6 hours', 'approximately 2.5 percent per day', '20 percent', '10 minutes'],
+    ['fires a warning at 7.5 percent disk utilization', 'a critical page at 9 percent', 'an estimated 60 hours of runway'],
+  ),
+  item(
+    'technical-26', 'technical',
+    'The recommended API versioning policy supports the 2 most recent major versions concurrently, with each version receiving a minimum 18-month deprecation notice before removal and security patches continuing for an additional 6 months past the announced end-of-life date. Version 3, the current stable release, has been in production for 14 months, meaning version 1 support is scheduled to end in 4 months per the policy\'s rolling window.',
+    ['2 most recent major versions', '18-month', '6 months', 'Version 3', '14 months', '4 months'],
+    ['supports the 20 most recent major versions', 'each version receiving a minimum 180-month deprecation notice', 'security patches continuing for an additional 60 months'],
+  ),
+  item(
+    'technical-27', 'technical',
+    'The recommended WebSocket connection limit is 10,000 concurrent connections per server instance, backed by a connection pool sized for 12,000 to leave headroom for reconnection storms, and heartbeat pings are sent every 25 seconds with a 3-missed-heartbeat (75-second) disconnect threshold. Under load testing, the current instance type sustained 9,800 concurrent connections with median message latency of 40 milliseconds before CPU saturation began degrading performance beyond the 10,000 target.',
+    ['10,000 concurrent connections', '12,000', 'every 25 seconds', '3-missed-heartbeat (75-second)', '9,800 concurrent connections', '40 milliseconds'],
+    ['a WebSocket connection limit is 100,000 concurrent connections', 'heartbeat pings are sent every 250 seconds', 'sustained 98,000 concurrent connections'],
+  ),
+  item(
+    'technical-28', 'technical',
+    'The recommended container image size budget is 250 MB compressed for a standard service image, and the current base image after a multi-stage build optimization measures 180 MB, down from 620 MB before optimization, a 71 percent reduction achieved primarily by excluding build-time dependencies from the final runtime layer. Image pull time on a cold node improved from approximately 14 seconds to 4 seconds as a direct result, reducing pod startup latency during cluster autoscaling events.',
+    ['250 MB', '180 MB', '620 MB', '71 percent', 'approximately 14 seconds', '4 seconds'],
+    ['image size budget is 2500 MB compressed', 'down from 6200 MB before optimization', 'a 7.1 percent reduction'],
+  ),
+  item(
+    'technical-29', 'technical',
+    'The recommended feature-branch lifetime policy auto-deletes a branch 30 days after its last commit if the associated pull request has been merged, or after 90 days if the pull request remains open, with a warning comment posted 7 days before automatic deletion in either case. Of the 1,400 branches deleted under this policy last quarter, only 3 were later requested to be restored from the retained 14-day deletion grace period, all successfully recovered.',
+    ['30 days', '90 days', '7 days', '1,400 branches', 'only 3', '14-day deletion grace period'],
+    ['auto-deletes a branch 300 days after its last commit', 'after 900 days if the pull request remains open', 'a warning comment posted 70 days before'],
+  ),
+  item(
+    'technical-30', 'technical',
+    'The recommended synthetic monitoring configuration runs the critical user-journey check every 60 seconds from 6 global regions, alerting if 3 or more consecutive checks fail from the same region or if any 2 regions report failure simultaneously. Over the last 90 days, the checks recorded 99.94 percent availability, with the 4 recorded incidents totaling 31 minutes of detected downtime, all resolved within the team\'s 15-minute response-time target measured from first alert to acknowledgment.',
+    ['every 60 seconds', '6 global regions', '3 or more consecutive checks', 'any 2 regions', 'last 90 days', '99.94 percent', '4 recorded incidents', '31 minutes', '15-minute'],
+    ['runs the critical user-journey check every 600 seconds', 'recorded 9.994 percent availability', 'totaling 310 minutes of detected downtime'],
+  ),
+  item(
+    'technical-31', 'technical',
+    'The recommended schema migration process requires backward compatibility for at least 2 deployed application versions, since rolling deployments across the current 40-node cluster can leave old and new code running simultaneously for up to 20 minutes. Destructive migrations, such as dropping a column, must therefore be split into 3 separate deployments spaced at least 1 week apart: deprecate, stop writing, and finally drop, a process the team estimates takes a minimum of 3 weeks end to end for any single destructive change.',
+    ['at least 2 deployed application versions', '40-node cluster', 'up to 20 minutes', '3 separate deployments', 'at least 1 week apart', 'minimum of 3 weeks'],
+    ['backward compatibility for at least 20 deployed application versions', 'leave old and new code running simultaneously for up to 200 minutes', 'split into 30 separate deployments'],
+  ),
+  item(
+    'technical-32', 'technical',
+    'The recommended search index refresh interval is 1 second for near-real-time consistency, though the team increased it to 5 seconds on the highest-write-volume cluster after observing that indexing overhead was consuming 22 percent of available CPU at the 1-second setting. The change reduced indexing CPU consumption to approximately 9 percent while increasing worst-case search-result staleness from 1 second to 5 seconds, a tradeoff the search team judged acceptable given the product\'s tolerance for up to 10 seconds of staleness.',
+    ['1 second', '5 seconds', '22 percent', 'approximately 9 percent', 'up to 10 seconds'],
+    ['search index refresh interval is 10 seconds', 'indexing overhead was consuming 2.2 percent', 'reduced indexing CPU consumption to approximately 90 percent'],
+  ),
+  item(
+    'technical-33', 'technical',
+    'The recommended rate for rotating service-account credentials is every 90 days, automated via a pipeline that generates a new credential, propagates it to all 6 dependent services, and revokes the old credential only after confirming successful propagation, a process that currently takes approximately 12 minutes end to end. Manual rotation, used only as a fallback when the automated pipeline fails, takes an estimated 2 hours and has been required only 3 times in the past 18 months.',
+    ['every 90 days', '6 dependent services', 'approximately 12 minutes', '2 hours', 'only 3 times', '18 months'],
+    ['rotating service-account credentials is every 900 days', 'propagates it to all 60 dependent services', 'currently takes approximately 120 minutes'],
+  ),
+  item(
+    'technical-34', 'technical',
+    'The recommended alert-fatigue reduction initiative reduced total paging alerts from an average of 42 per week to 11 per week over a 3-month period by consolidating 8 redundant monitoring rules into 2 composite alerts and raising 6 thresholds that were found to fire on normal, non-actionable variance. On-call engineer survey scores for "alert quality" rose from 2.4 to 4.1 out of 5 over the same period, and the mean time to acknowledge a page fell from 14 minutes to 6 minutes.',
+    ['42 per week', '11 per week', '3-month', '8 redundant monitoring rules', '2 composite alerts', '6 thresholds', '2.4 to 4.1', '14 minutes', '6 minutes'],
+    ['reduced total paging alerts from an average of 420 per week to 110 per week', 'consolidating 80 redundant monitoring rules', 'rose from 2.4 to 1.4 out of 5'],
+  ),
+  item(
+    'technical-35', 'technical',
+    'The recommended object storage lifecycle policy transitions objects to infrequent-access storage after 30 days of no access and to archival cold storage after 180 days, a policy that reduced monthly storage cost from $14,000 to $8,200 across the affected 900 TB of data, a 41 percent reduction with no measurable change in retrieval latency for the 97 percent of objects that are genuinely rarely accessed after 30 days.',
+    ['30 days', '180 days', '$14,000', '$8,200', '900 TB', '41 percent', '97 percent'],
+    ['transitions objects to infrequent-access storage after 300 days', 'reduced monthly storage cost from $140,000 to $82,000', 'a 4.1 percent reduction'],
+  ),
+  item(
+    'technical-36', 'technical',
+    'The recommended chaos-engineering schedule injects a random single-node failure into the staging environment every 2 weeks and a full availability-zone failure every quarter, a practice that has surfaced 9 previously undetected failure modes over the past 18 months, 7 of which were fixed before ever affecting production. The most recent quarterly zone-failure test completed with 94 percent of traffic successfully rerouted within 45 seconds, just short of the team\'s 30-second target.',
+    ['every 2 weeks', 'every quarter', '9 previously undetected failure modes', '18 months', '7 of which', '94 percent', '45 seconds', '30-second'],
+    ['injects a random single-node failure into the staging environment every 20 weeks', 'surfaced 90 previously undetected failure modes', '94 percent of traffic successfully rerouted within 450 seconds'],
+  ),
+  item(
+    'technical-37', 'technical',
+    'The recommended API deprecation communication plan sends notices at 12 months, 6 months, 1 month, and 1 week before removal, and current telemetry shows that 68 percent of affected integration partners had migrated off the deprecated endpoint by the 1-month mark, rising to 91 percent by the actual removal date. The remaining 9 percent of traffic at removal was routed to a compatibility shim maintained for an additional 60 days rather than being cut off immediately.',
+    ['12 months', '6 months', '1 month', '1 week', '68 percent', '1-month mark', '91 percent', '9 percent', '60 days'],
+    ['sends notices at 120 months', '68 percent of affected integration partners had migrated... rising to 19 percent', 'compatibility shim maintained for an additional 600 days'],
+  ),
+  item(
+    'technical-38', 'technical',
+    'The recommended database read-replica lag threshold triggers a warning at 2 seconds and removes the replica from the load-balancing pool automatically at 10 seconds of lag, thresholds set after analysis showed that 95 percent of application queries tolerate up to 3 seconds of staleness without user-visible impact. Under normal load, the 4 read replicas maintain average lag under 400 milliseconds, with lag spikes above the 2-second warning threshold occurring on average only 2 times per month.',
+    ['2 seconds', '10 seconds', '95 percent', 'up to 3 seconds', '4 read replicas', 'under 400 milliseconds', '2 times per month'],
+    ['triggers a warning at 20 seconds', 'removes the replica from the load-balancing pool automatically at 100 seconds', '95 percent of application queries tolerate up to 30 seconds'],
+  ),
+  item(
+    'technical-39', 'technical',
+    'The recommended encryption-key rotation schedule rotates data-encryption keys every 12 months and the master key every 3 years, with re-encryption of existing data under a rotated data-encryption key completed lazily on next write rather than all at once, a strategy that spread the most recent rotation\'s compute cost across 6 months instead of a single intensive batch job. Approximately 34 percent of stored records had been re-encrypted under the current key by the 6-month mark, with full coverage projected within 18 months.',
+    ['every 12 months', 'master key every 3 years', 'across 6 months', 'Approximately 34 percent', 'within 18 months'],
+    ['rotates data-encryption keys every 120 months', 'the master key every 30 years', 'spread the most recent rotation\'s compute cost across 60 months'],
+  ),
+  item(
+    'technical-40', 'technical',
+    'The recommended load balancer health check polls each backend every 5 seconds, marking an instance unhealthy after 3 consecutive failures (15 seconds) and healthy again after 2 consecutive successes, a configuration that reduced false-positive instance removal from 8 incidents per month to 1 incident per month compared to the previous single-failure-triggers-removal configuration. Average detection time for a genuinely failed instance remains under 20 seconds, which the platform team judged an acceptable tradeoff for the reduced false-positive rate.',
+    ['every 5 seconds', '3 consecutive failures (15 seconds)', '2 consecutive successes', '8 incidents per month', '1 incident per month', 'under 20 seconds'],
+    ['polls each backend every 50 seconds', 'marking an instance unhealthy after 30 consecutive failures', 'reduced false-positive instance removal from 80 incidents per month to 10 incidents per month'],
+  ),
+  item(
+    'technical-41', 'technical',
+    'The recommended GraphQL query complexity limit caps a single query at 1,000 complexity points, computed as the sum of each field\'s configured weight times its selection depth, rejecting any query above that threshold with a 400 error before execution begins. Analysis of production traffic over 30 days found that 99.2 percent of queries fall under 200 points, and the 3 legitimate use cases exceeding 1,000 points have been migrated to a dedicated batch endpoint with a higher limit of 5,000 points.',
+    ['1,000 complexity points', '400 error', '30 days', '99.2 percent', 'under 200 points', '3 legitimate use cases', '5,000 points'],
+    ['caps a single query at 10,000 complexity points', '99.2 percent of queries fall under 2,000 points', 'a higher limit of 50,000 points'],
+  ),
+  item(
+    'technical-42', 'technical',
+    'The recommended blue-green deployment process keeps the previous version, "blue," running alongside the new version, "green," for a minimum 30-minute observation window before fully cutting over traffic, during which error-rate and latency metrics are compared automatically between the two environments. Of the last 120 deployments using this process, 6 were automatically rolled back during the observation window due to elevated error rates, and the median time to complete a full cutover, once approved, is 4 minutes.',
+    ['30-minute', 'last 120 deployments', '6 were automatically rolled back', '4 minutes'],
+    ['keeps the previous version... for a minimum 300-minute observation window', 'of the last 12 deployments', 'the median time to complete a full cutover... is 40 minutes'],
+  ),
+  item(
+    'technical-43', 'technical',
+    'The recommended mobile app cold-start time budget is under 2 seconds on a mid-tier reference device, and the current release measures 1.7 seconds on average, down from 3.1 seconds two releases ago after removing 4 blocking network calls from the startup path. Cold starts account for approximately 18 percent of all app launches, with the remaining 82 percent being warm starts that complete in under 400 milliseconds regardless of the cold-start optimization work.',
+    ['under 2 seconds', '1.7 seconds', '3.1 seconds', '4 blocking network calls', 'approximately 18 percent', '82 percent', 'under 400 milliseconds'],
+    ['cold-start time budget is under 20 seconds', 'the current release measures 17 seconds on average', 'down from 31 seconds two releases ago'],
+  ),
+  item(
+    'technical-44', 'technical',
+    'The recommended dependency-vulnerability scanning cadence runs a full scan on every merge to the main branch and a scheduled scan nightly regardless of merge activity, flagging 34 vulnerabilities across the current dependency tree, of which 4 are rated critical and require remediation within 72 hours per policy. The remaining 30, rated medium or low, are batched into the next scheduled dependency-update cycle, which runs every 2 weeks and has cleared an average of 92 percent of its backlog within each cycle over the past 6 months.',
+    ['34 vulnerabilities', '4 are rated critical', '72 hours', '30', 'every 2 weeks', '92 percent', '6 months'],
+    ['flagging 340 vulnerabilities across the current dependency tree', '4 are rated critical and require remediation within 720 hours', 'cleared an average of 9.2 percent of its backlog'],
+  ),
+  item(
+    'technical-45', 'technical',
+    'The recommended session-token lifetime is 15 minutes for the access token and 30 days for the refresh token, with refresh-token rotation issuing a new refresh token on every use and immediately invalidating the previous one, a defense against replay of a stolen but unused refresh token. Access-token refresh currently adds approximately 80 milliseconds of latency to the first request after expiry, affecting an estimated 6 percent of requests at current session-length distributions.',
+    ['15 minutes', '30 days', 'approximately 80 milliseconds', '6 percent'],
+    ['session-token lifetime is 150 minutes for the access token', '300 days for the refresh token', 'adds approximately 800 milliseconds of latency'],
+  ),
+  item(
+    'technical-46', 'technical',
+    'The recommended read-through cache configuration for the product catalog service sets a 120-second TTL and achieves a 93 percent hit rate under normal traffic, reducing average catalog-lookup latency from 45 milliseconds (uncached) to 3 milliseconds (cached). Cache invalidation on a product update propagates within 2 seconds via a pub-sub notification rather than waiting for the full TTL to expire, keeping staleness after an intentional update well under the nominal 120-second TTL window.',
+    ['120-second TTL', '93 percent', '45 milliseconds', '3 milliseconds', 'within 2 seconds'],
+    ['sets a 1,200-second TTL', 'achieves a 9.3 percent hit rate', 'reducing average catalog-lookup latency from 450 milliseconds'],
+  ),
+  item(
+    'technical-47', 'technical',
+    'The recommended data-pipeline SLA guarantees the nightly ETL job completes within 4 hours of its 1 a.m. start time, and over the past 90 days the job has met that SLA in 88 of 90 runs, with the 2 misses both traced to an upstream vendor feed arriving more than 2 hours late. Downstream dashboards depending on the pipeline are configured to display a staleness warning if the data is more than 6 hours old, giving a 2-hour buffer beyond the nominal 4-hour completion target.',
+    ['within 4 hours', '1 a.m.', '88 of 90 runs', 'more than 2 hours late', 'more than 6 hours old', '2-hour buffer'],
+    ['guarantees the nightly ETL job completes within 40 hours', 'met that SLA in 8 of 90 runs', 'more than 60 hours old'],
+  ),
+  item(
+    'technical-48', 'technical',
+    'The recommended browser support policy covers the current version plus 2 prior major versions of each supported browser, together accounting for approximately 96 percent of measured traffic, with the remaining 4 percent on older versions served a reduced-functionality fallback page rather than the full application. Dropping support for a browser version requires it to fall below 0.5 percent of traffic for 3 consecutive months, a threshold last triggered 8 months ago.',
+    ['current version plus 2 prior major versions', 'approximately 96 percent', 'remaining 4 percent', 'below 0.5 percent', '3 consecutive months', '8 months ago'],
+    ['covers the current version plus 20 prior major versions', 'accounting for approximately 9.6 percent of measured traffic', 'fall below 5 percent of traffic'],
+  ),
+  item(
+    'technical-49', 'technical',
+    'The recommended search relevance evaluation runs a weekly offline test against a labeled set of 5,000 query-result pairs, currently scoring 0.81 on normalized discounted cumulative gain (nDCG@10), up from 0.74 six months ago after tuning the ranking model\'s recency-boost parameter. A/B testing of the updated model against the previous production model on 8 percent of live traffic showed a 3.1 percent increase in click-through rate on the top 3 results, with no significant change in overall query latency.',
+    ['5,000 query-result pairs', '0.81', 'nDCG@10', '0.74 six months ago', '8 percent of live traffic', '3.1 percent'],
+    ['a labeled set of 50,000 query-result pairs', 'currently scoring 8.1 on normalized discounted cumulative gain', 'up from 7.4 six months ago'],
+  ),
+  item(
+    'technical-50', 'technical',
+    'The recommended incident severity classification defines a Sev1 as full service outage requiring response within 5 minutes, Sev2 as significant degradation requiring response within 30 minutes, and Sev3 as minor issues requiring response within 4 hours, with the past 12 months recording 6 Sev1 incidents, 22 Sev2 incidents, and 140 Sev3 incidents. Mean time to resolution for Sev1 incidents improved from 68 minutes to 41 minutes over that period following the introduction of an automated rollback tool triggered at the moment a Sev1 is declared.',
+    ['Sev1', '5 minutes', 'Sev2', '30 minutes', 'Sev3', '4 hours', 'past 12 months', '6 Sev1 incidents', '22 Sev2 incidents', '140 Sev3 incidents', '68 minutes', '41 minutes'],
+    ['a Sev1 as full service outage requiring response within 50 minutes', 'recording 60 Sev1 incidents', 'improved from 680 minutes to 410 minutes'],
+  ),
 ]

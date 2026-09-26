@@ -1,16 +1,19 @@
-# Benchmark v0 (Phase 2)
+# Benchmark v0 (Phase 2), scaled up in Phase 11
 
 The minimum measurement needed to evaluate Phases 3–8 of the Humanite
 Improvement Plan. See the plan's Phase 2 section for the full spec this
-implements.
+implements. Phase 11 grows the corpus and adds a tone/intensity sweep and
+human-rating infrastructure — see `PHASE_11_DECISION.md` for the
+resulting go/no-go call on fine-tuning.
 
 ## Layout
 
 - `types.ts` — shared types: `CorpusItem`, `AdversarialFixture`,
   `BenchmarkReport`.
-- `corpus/` — 60 source documents (10 per domain × 6 domains: general,
+- `corpus/` — 300 source documents (50 per domain × 6 domains: general,
   academic, business, technical, medical, legal — matching the product's
-  own domain list in `ControlPanel.tsx`), each with `mandatoryFacts`
+  own domain list in `ControlPanel.tsx`; grown from 60 in the Phase 11
+  scale-up, see `corpus/helpers.ts`), each with `mandatoryFacts`
   (exact substrings that must survive a correct rewrite) and
   `prohibitedChanges` (exact substrings a correct rewrite must never
   introduce).
@@ -44,9 +47,21 @@ implements.
   independently-identified stub detectors. Spends no real API credits and
   needs no credentials — this is what satisfies "harness runs end-to-end"
   in ordinary CI.
-- `tests/liveBenchmark.test.ts` — the real run, against the full 60-item
+- `tests/liveBenchmark.test.ts` — the real run, against the full 300-item
   corpus and whichever detectors are configured. Gated behind
   `RUN_LIVE_BENCHMARK=true` (skipped otherwise) since it spends real money.
+- `tests/scaleUpSweep.test.ts` — always-on smoke test proving the sweep's
+  grid construction (one `runBenchmark` pass per tone x intensity cell)
+  with a stubbed client, the same pattern as `runBenchmark.test.ts`.
+- `tests/scaleUpSweepAcceptance.test.ts` — the real Phase 11 scale-up sweep
+  across 5 tones at intensities 2, 5 and 8 (see `runScaleUpSweep` in
+  `runBenchmark.ts`), against a small cross-domain sample. Also gated
+  behind `RUN_LIVE_BENCHMARK=true`.
+- `humanRatings/` — stratified-sampling and pairwise-comparison
+  infrastructure for the blind human ratings Phase 11 calls for. **Not yet
+  populated with real ratings** — see the doc comment in
+  `humanRatings/index.ts` for why, the same reason `reference/index.ts`
+  below stays empty.
 
 ## Running a real report
 
