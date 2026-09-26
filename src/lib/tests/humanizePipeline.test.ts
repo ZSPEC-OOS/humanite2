@@ -513,6 +513,115 @@ describe('humanizeChunk — Phase 7 model-based claim verification', () => {
   })
 })
 
+describe('humanizeChunk — Phase 8 candidate generation and selection', () => {
+  function mockCandidateClient(chatResponses: Array<{ content: string; finish_reason?: string }>, embeddings: number[][]) {
+    const chatCreate = vi.fn()
+    for (const r of chatResponses) {
+      chatCreate.mockResolvedValueOnce({ model: 'gpt-4o-mini', choices: [{ message: { content: r.content }, finish_reason: r.finish_reason ?? 'stop' }] })
+    }
+    const embedCreate = vi.fn().mockResolvedValue({ data: embeddings.map(e => ({ embedding: e })) })
+    const client = { chat: { completions: { create: chatCreate } }, embeddings: { create: embedCreate } } as unknown as OpenAI
+    return { client, chatCreate, embedCreate }
+  }
+
+  function judgeJson(overrides: Partial<{ entailment_probability: number; tone_alignment: number; domain_alignment: number; coherence: number; naturalness: number }> = {}) {
+    return JSON.stringify({ entailment_probability: 1.0, tone_alignment: 0.5, domain_alignment: 0.5, coherence: 0.5, naturalness: 0.5, ...overrides })
+  }
+
+  it('generates 2 candidates at intensity 4 (no planning call) and ships the higher-scoring one', async () => {
+    const source = 'The company reported strong quarterly earnings.'
+    const { client, chatCreate, embedCreate } = mockCandidateClient([
+      { content: 'Candidate A: a plain rewrite.' }, // generation 0
+      { content: 'Candidate B: a rewrite with noticeably better style.' }, // generation 1
+      { content: judgeJson({ tone_alignment: 0.2, domain_alignment: 0.2, coherence: 0.2, naturalness: 0.2 }) }, // judge candidate 0 — weak
+      { content: judgeJson({ tone_alignment: 0.9, domain_alignment: 0.9, coherence: 0.9, naturalness: 0.9 }) }, // judge candidate 1 — strong
+      { content: '{"claims": []}' }, // claim verification on the winner
+    ], [[1, 0], [1, 0], [1, 0]]) // source + 2 candidates, all "similar" enough to clear stage 2
+
+    const result = await humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [], 4, 'balanced', 'general', 2)
+
+    expect(result.text).toBe('Candidate B: a rewrite with noticeably better style.')
+    expect(result.gate?.passed).toBe(true)
+    expect(result.gate?.tone_alignment).toBe(0.9)
+    expect(result.retryCount).toBe(0)
+    // 2 generations + 2 judges + 1 claim verification — no retry-loop calls
+    // were spent, and the embedding call is separate (batched, one call).
+    expect(chatCreate).toHaveBeenCalledTimes(5)
+    expect(embedCreate).toHaveBeenCalledTimes(1)
+    // The batched call embeds the source plus every stage-1 survivor together.
+    expect(embedCreate.mock.calls[0]![0].input).toHaveLength(3)
+  })
+
+  it('spends one planning call at intensity 7 and shares its plan across every candidate prompt', async () => {
+    const source = 'The company reported strong quarterly earnings this quarter.'
+    const { client, chatCreate } = mockCandidateClient([
+      { content: '{"operations": ["merge the two clauses about the quarter"]}' }, // planning call
+      { content: 'Candidate 1.' },
+      { content: 'Candidate 2.' },
+      { content: 'Candidate 3.' },
+      { content: judgeJson() },
+      { content: judgeJson() },
+      { content: judgeJson() },
+      { content: '{"claims": []}' },
+    ], [[1, 0], [1, 0], [1, 0], [1, 0]])
+
+    await humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [], 7, 'balanced', 'general', 2)
+
+    // Call 0 is the planning call; calls 1-3 are the three candidate
+    // generations, each carrying the same shared plan section.
+    for (const callIndex of [1, 2, 3]) {
+      const prompt = chatCreate.mock.calls[callIndex]![0].messages[1].content as string
+      expect(prompt).toContain('merge the two clauses about the quarter')
+    }
+  })
+
+  it('falls back to the least-bad candidate, scored for real, when every candidate drops a required fact', async () => {
+    const source = 'The dose is 5 mg per day.'
+    const fact = { char_start: 0, char_end: 4, text: '5 mg', lock_type: 'number' as const, label: 'NUM' }
+    const { client, chatCreate } = mockCandidateClient([
+      // Deliberately near-zero word overlap with the source sentence, so
+      // the post-selection fact-repair step (which the shared tail always
+      // runs on whatever this fallback ships) finds no aligned sentence to
+      // target and makes no API call of its own — see
+      // fidelity/validator.ts's alignment fallback and
+      // evaluation/repair.ts's classifyFailure.
+      { content: 'Administer as directed by your physician.' }, // generation 0 — drops the fact
+      { content: 'Follow the prescribing instructions exactly.' }, // generation 1 — also drops the fact
+      // fallback: runQualityGates on the least-bad candidate (judge + embed)
+      { content: judgeJson() },
+      { content: '{"claims": []}' },
+    ], [[1, 0], [1, 0]])
+
+    const result = await humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [fact], 4, 'balanced', 'medical', 2)
+
+    expect(result.gate?.failed_gate).toBe('entity_preservation')
+    expect(result.gate?.passed).toBe(false)
+    expect(result.gate?.missing_facts).toEqual(['5 mg'])
+    expect(result.repair.attempted).toBe(false)
+    // 2 generations (no stage-1 survivor, so no batched similarity call) +
+    // 1 fallback judge + 1 claim verification.
+    expect(chatCreate).toHaveBeenCalledTimes(4)
+  })
+
+  it('never falls back to the single-candidate retry loop\'s corrective addendum at intensity >= 4', async () => {
+    const source = 'A short sentence.'
+    const { client, chatCreate } = mockCandidateClient([
+      { content: 'A short rewrite.' },
+      { content: 'Another short rewrite.' },
+      { content: judgeJson() },
+      { content: judgeJson() },
+      { content: '{"claims": []}' },
+    ], [[1, 0], [1, 0], [1, 0]])
+
+    const result = await humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [], 4, 'balanced', 'general', 2)
+
+    // retryCount stays 0 — the candidate search replaces retrying, it
+    // doesn't run alongside it.
+    expect(result.retryCount).toBe(0)
+    expect(chatCreate).toHaveBeenCalledTimes(5)
+  })
+})
+
 describe('humanizeChunk — truncation detection', () => {
   it('retries after a cut-off completion, boosting the token budget, and ships the later complete attempt', async () => {
     const { client, chatCreate } = mockHumanizeClient([
