@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeGPTZero } from '../normalize'
+import { normalizeGPTZero, normalizeSapling } from '../normalize'
 
 const TEXT = 'The first sentence is here. The second sentence follows it.'
 
@@ -132,5 +132,105 @@ describe('normalizeGPTZero', () => {
   it('rejects a non-object response as an invalid provider response', () => {
     expect(() => normalizeGPTZero(null, TEXT)).toThrow('GPTZero returned a non-object response.')
     expect(() => normalizeGPTZero('not json', TEXT)).toThrow('GPTZero returned a non-object response.')
+  })
+})
+
+describe('normalizeSapling', () => {
+  it('classifies from the single scalar score using the 0.6/0.4 bands', () => {
+    expect(normalizeSapling({ score: 0.9 }, TEXT).classification).toBe('ai-generated')
+    expect(normalizeSapling({ score: 0.1 }, TEXT).classification).toBe('human-written')
+    expect(normalizeSapling({ score: 0.5 }, TEXT).classification).toBe('uncertain')
+  })
+
+  it('derives human/ai probabilities as complements of the single score, with mixed always null', () => {
+    const result = normalizeSapling({ score: 0.9 }, TEXT)
+    expect(result.probabilities).toEqual({ human: 0.1, ai: 0.9, mixed: null })
+  })
+
+  it('derives mixed only from a genuine per-sentence split, not from the overall score alone', () => {
+    const splitResult = normalizeSapling({
+      score: 0.5,
+      sentence_scores: [
+        { sentence: 'The first sentence is here.', score: 0.05 },
+        { sentence: 'The second sentence follows it.', score: 0.95 },
+      ],
+    }, TEXT)
+    expect(splitResult.classification).toBe('mixed')
+
+    // Same overall score, but no sentence-level data to justify "mixed" — an
+    // ambiguous score alone means the model is unsure, not that the text is
+    // a genuine blend.
+    const uncertainResult = normalizeSapling({ score: 0.5 }, TEXT)
+    expect(uncertainResult.classification).toBe('uncertain')
+  })
+
+  it('reports predicted_class_probability and confidence_category "low" (not "unknown") for a genuinely uncertain result', () => {
+    const result = normalizeSapling({ score: 0.5 }, TEXT)
+    expect(result.classification).toBe('uncertain')
+    expect(result.predicted_class_probability).toBe(0.5)
+    expect(result.confidence_category).toBe('low')
+  })
+
+  it('reports high confidence for a decisive score', () => {
+    const result = normalizeSapling({ score: 0.03 }, TEXT)
+    expect(result.predicted_class_probability).toBe(0.97)
+    expect(result.confidence_category).toBe('high')
+  })
+
+  it('reports no single winning-class probability for a mixed result', () => {
+    const result = normalizeSapling({
+      score: 0.5,
+      sentence_scores: [
+        { sentence: 'The first sentence is here.', score: 0.02 },
+        { sentence: 'The second sentence follows it.', score: 0.98 },
+      ],
+    }, TEXT)
+    expect(result.classification).toBe('mixed')
+    expect(result.predicted_class_probability).toBeNull()
+  })
+
+  it('locates sentence segments by their real char offsets in the original text', () => {
+    const result = normalizeSapling({
+      score: 0.5,
+      sentence_scores: [
+        { sentence: 'The first sentence is here.', score: 0.9 },
+        { sentence: 'The second sentence follows it.', score: 0.1 },
+      ],
+    }, TEXT)
+
+    expect(result.segments).toHaveLength(2)
+    expect(result.segments[0]).toMatchObject({ start_char: 0, end_char: 27, classification: 'ai-generated' })
+    expect(result.segments[1]).toMatchObject({ start_char: 28, end_char: 59, classification: 'human-written' })
+    for (const seg of result.segments) {
+      expect(TEXT.slice(seg.start_char, seg.end_char)).toBe(seg.text)
+    }
+  })
+
+  it('falls back to uncertain with a warning when no score field is present', () => {
+    const result = normalizeSapling({}, TEXT)
+    expect(result.classification).toBe('uncertain')
+    expect(result.warnings.length).toBeGreaterThan(0)
+    expect(result.segments).toEqual([])
+  })
+
+  it('derives estimated_ai_like_fraction from sentence-level scores, weighted by sentence length', () => {
+    const result = normalizeSapling({
+      score: 0.5,
+      sentence_scores: [
+        { sentence: 'The first sentence is here.', score: 0.8 },
+        { sentence: 'The second sentence follows it.', score: 0.2 },
+      ],
+    }, TEXT)
+    expect(result.estimated_ai_like_fraction).toBe(0.5)
+  })
+
+  it('never manufactures estimated_ai_like_fraction when there are no sentence scores', () => {
+    const result = normalizeSapling({ score: 0.9 }, TEXT)
+    expect(result.estimated_ai_like_fraction).toBeNull()
+  })
+
+  it('rejects a non-object response as an invalid provider response', () => {
+    expect(() => normalizeSapling(null, TEXT)).toThrow('Sapling returned a non-object response.')
+    expect(() => normalizeSapling('not json', TEXT)).toThrow('Sapling returned a non-object response.')
   })
 })

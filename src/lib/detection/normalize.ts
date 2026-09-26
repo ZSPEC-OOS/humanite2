@@ -166,6 +166,126 @@ function estimateAiLikeFraction(segments: DetectionSegment[]): number | null {
   return round(weightedSum / totalWeight)
 }
 
+// Sapling's documented response is a single scalar score (0 = confidently
+// human, 1 = confidently AI) plus an optional sentence_scores array — no
+// independent classification enum and no "mixed" signal the way GPTZero's
+// three-way class_probabilities gives us. AI_SCORE_THRESHOLD/HUMAN_SCORE_THRESHOLD
+// mirror the 0.6/0.4 bands GPTZero's own per-segment classification already
+// uses elsewhere in this file, so a "confidently ai" or "confidently human"
+// sentence means the same thing regardless of which provider produced it.
+const AI_SCORE_THRESHOLD = 0.6
+const HUMAN_SCORE_THRESHOLD = 0.4
+
+interface SaplingSentenceScore {
+  sentence?: string
+  score?: number
+}
+
+interface SaplingRawResponse {
+  score?: number
+  sentence_scores?: SaplingSentenceScore[]
+}
+
+function classifyFromScore(score: number): 'ai-generated' | 'human-written' | 'uncertain' {
+  if (score >= AI_SCORE_THRESHOLD) return 'ai-generated'
+  if (score <= HUMAN_SCORE_THRESHOLD) return 'human-written'
+  return 'uncertain'
+}
+
+// Mirrors GPTZero's buildSegments: locates each sentence's char offsets in
+// the original text so the UI can highlight it directly. Sapling's
+// sentence_scores entries don't carry offsets themselves either.
+function buildSaplingSegments(sentenceScores: SaplingSentenceScore[] | undefined, originalText: string): DetectionSegment[] {
+  if (!sentenceScores?.length) return []
+  let cursor = 0
+
+  return sentenceScores.map((s, i) => {
+    const text = s.sentence ?? ''
+    const start = text ? originalText.indexOf(text, cursor) : -1
+    const end = start === -1 ? undefined : start + text.length
+    if (start !== -1) cursor = end!
+
+    const ai_score = typeof s.score === 'number' ? s.score : null
+
+    return {
+      id: `sapling-seg-${i}`,
+      text,
+      start_char: start === -1 ? undefined : start,
+      end_char: end,
+      classification: ai_score == null ? undefined : classifyFromScore(ai_score),
+      ai_score,
+      highlighted_for_ai: ai_score != null && ai_score >= AI_SCORE_THRESHOLD,
+      source: 'sapling',
+    }
+  })
+}
+
+// Sapling never reports "mixed" itself — it's derived here, and only when
+// the per-sentence data actually shows a genuine split (at least one
+// confidently-human sentence and one confidently-ai sentence), rather than
+// inferred from the single overall score landing in the middle band (that
+// case is 'uncertain': the model is unsure, not evidence of blended content).
+function documentClassificationFromScore(score: number, segments: DetectionSegment[]): DetectionClassification {
+  const hasHuman = segments.some(s => s.classification === 'human-written')
+  const hasAi = segments.some(s => s.classification === 'ai-generated')
+  if (hasHuman && hasAi) return 'mixed'
+  return classifyFromScore(score)
+}
+
+// Deliberately not the shared predictedClassProbability() below: that
+// function treats 'uncertain' as a broken-response fallback (GPTZero only
+// ever produces it when a classification field is missing/unrecognized) and
+// returns null for it. For Sapling, 'uncertain' is a routine, legitimate
+// outcome of a genuine near-0.5 score — collapsing it to null would report
+// "unknown" confidence for what is actually a confidently low-confidence
+// result. Confidence here is "how far the score leans from 0.5", regardless
+// of which side of the classification threshold it fell on.
+function saplingPredictedClassProbability(score: number, classification: DetectionClassification): number | null {
+  switch (classification) {
+    case 'human-written': return round(1 - score)
+    case 'ai-generated': return round(score)
+    case 'uncertain': return round(Math.max(score, 1 - score))
+    default: return null // 'mixed' — no single winning class to report a probability for
+  }
+}
+
+export function normalizeSapling(raw: unknown, originalText: string): DetectionProviderResult {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new DetectionProviderError('INVALID_PROVIDER_RESPONSE', 'Sapling returned a non-object response.')
+  }
+
+  const body = raw as SaplingRawResponse
+  const warnings: string[] = []
+
+  const score = typeof body.score === 'number' && !Number.isNaN(body.score) ? body.score : null
+  if (score == null) warnings.push('Sapling response did not include a numeric score.')
+
+  const segments = buildSaplingSegments(body.sentence_scores, originalText)
+  const classification: DetectionClassification = score == null ? 'uncertain' : documentClassificationFromScore(score, segments)
+  const probabilities: ProbabilitySet = score == null
+    ? { human: null, ai: null, mixed: null }
+    : { human: round(1 - score), ai: round(score), mixed: null }
+  const predicted_class_probability = score == null ? null : saplingPredictedClassProbability(score, classification)
+  const confidence_category = deriveConfidenceCategory(undefined, predicted_class_probability)
+  const estimated_ai_like_fraction = estimateAiLikeFraction(segments)
+
+  return {
+    schema_version: '3.0',
+    provider: { id: 'sapling' },
+    classification,
+    probabilities,
+    predicted_class_probability,
+    confidence_category,
+    estimated_ai_like_fraction,
+    segments,
+    warnings,
+    explanation: {
+      summary: `Sapling classified this text as ${classification}` +
+        (predicted_class_probability != null ? ` (${Math.round(predicted_class_probability * 100)}% confidence).` : '.'),
+    },
+  }
+}
+
 export function normalizeGPTZero(raw: unknown, originalText: string): DetectionProviderResult {
   if (typeof raw !== 'object' || raw === null) {
     throw new DetectionProviderError('INVALID_PROVIDER_RESPONSE', 'GPTZero returned a non-object response.')

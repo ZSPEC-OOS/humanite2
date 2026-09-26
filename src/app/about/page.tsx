@@ -44,6 +44,19 @@ export default function AboutPage() {
             </p>
           </div>
 
+          {/* AI detection */}
+          <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-gray-200 bg-white p-8 dark:border-gray-800 dark:bg-gray-900">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Independent AI detection</h2>
+            <p className="mt-3 text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+              Every scan runs through Sapling, a dedicated AI-detection model — not the language
+              model that helped write the draft. Detection never receives your generation settings,
+              API key, or model choice, so it can’t grade text more favorably just because it
+              recognizes how it was produced. Results come back sentence by sentence, so you can see
+              exactly which passages are driving the score instead of a single number for the whole
+              document.
+            </p>
+          </div>
+
           {/* Contact */}
           <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-gray-200 bg-white p-8 text-center dark:border-gray-800 dark:bg-gray-900">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Get in touch</h2>

@@ -45,6 +45,16 @@ describe('DetectionGateway', () => {
     })
   })
 
+  it('selects SaplingProvider when DETECTION_PROVIDER=sapling', async () => {
+    process.env.DETECTION_PROVIDER = 'sapling'
+    delete process.env.SAPLING_API_KEY
+    // Same shape as the gptzero case above — no key configured should fail
+    // as PROVIDER_UNAUTHORIZED rather than silently falling back to mock.
+    await expect(getDetectionGateway().detect('some text')).rejects.toMatchObject({
+      code: 'PROVIDER_UNAUTHORIZED',
+    })
+  })
+
   it('attaches processing_duration_ms and local diagnostics by default', async () => {
     delete process.env.DETECTION_PROVIDER
     delete process.env.LOCAL_DIAGNOSTICS_ENABLED
@@ -142,6 +152,12 @@ describe('DetectionGateway — production fails closed on a misconfigured mock f
     vi.stubEnv('NODE_ENV', 'production')
     process.env.DETECTION_PROVIDER = 'gptzero'
     expect(getDetectionGateway().providerId).toBe('gptzero')
+  })
+
+  it('still selects the real provider in production when DETECTION_PROVIDER=sapling', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    process.env.DETECTION_PROVIDER = 'sapling'
+    expect(getDetectionGateway().providerId).toBe('sapling')
   })
 
   it('a caller-supplied apiKeyOverride bypasses the production guard entirely', () => {

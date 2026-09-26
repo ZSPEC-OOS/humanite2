@@ -144,7 +144,13 @@ describe('checkAndRecordGenerationUsage', () => {
 })
 
 describe('checkAndRecordScanUsage', () => {
-  it('is gated out entirely on a plan with zero scan quota (the free tier default)', async () => {
+  it('is gated out entirely on a plan with zero scan quota', async () => {
+    // Every tier now ships a real (non-zero) scan quota by default — this
+    // test exercises the zero-quota gate itself, not any particular tier's
+    // current numbers, so it forces zero explicitly via env override rather
+    // than relying on a tier that happens to default to it.
+    process.env.FREE_TIER_SCAN_REQUESTS_PER_DAY = '0'
+    process.env.FREE_TIER_SCAN_WORDS_PER_DAY = '0'
     const result = await checkAndRecordScanUsage('user-1', 'free', 10)
     expect(result.allowed).toBe(false)
     expect(result.code).toBe('LIMIT_EXCEEDED')

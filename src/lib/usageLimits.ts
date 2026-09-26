@@ -20,30 +20,39 @@ export interface TierLimits {
   scan: UsagePoolLimits
 }
 
-// Numbers below track the $5 / $10 / $15 plan design (free/pro/enterprise
-// are the existing internal tier keys — see auth-utils.ts/userRegistration.ts
-// — not yet renamed to match; that's a separate step once the pricing page
-// itself is updated). "Enterprise" generation is a large invisible fair-use
-// ceiling behind a plan marketed as unlimited generation, not a literal
-// unbounded quota — DeepSeek's marginal cost isn't zero.
+// Numbers below track the locked $5 / $10 / $15 plan design (free/pro/
+// enterprise are the existing internal tier keys — see
+// auth-utils.ts/userRegistration.ts — not renamed to match, since real
+// accounts already carry these values in their stored `tier` field; only the
+// pricing page's display name/price changed). Each tier advertises equal
+// generated and scanned word quotas per month — 50,000 / 100,000 / 150,000
+// — at a ~70% cost margin against DeepSeek generation + Sapling scanning
+// rates. wordsPerDay is that monthly figure divided by 30 (Sapling costs far
+// more per word than generation, hence the two pools staying independent).
 const FALLBACK_LIMITS: Record<'free' | 'pro' | 'enterprise', TierLimits> = {
   free: {
-    generation: { requestsPerDay: 100, wordsPerDay: 16_667 },   // ~500,000 words/month
-    scan:       { requestsPerDay: 0,   wordsPerDay: 0 },        // no scanning on this plan
+    generation: { requestsPerDay: 100, wordsPerDay: 1_667 },   // 50,000 words/month
+    scan:       { requestsPerDay: 20,  wordsPerDay: 1_667 },   // 50,000 words/month
   },
   pro: {
-    generation: { requestsPerDay: 150, wordsPerDay: 40_000 },   // ~1,200,000 words/month
-    scan:       { requestsPerDay: 10,  wordsPerDay: 400 },      // ~12,000 words/month
+    generation: { requestsPerDay: 150, wordsPerDay: 3_333 },   // 100,000 words/month
+    scan:       { requestsPerDay: 40,  wordsPerDay: 3_333 },   // 100,000 words/month
   },
   enterprise: {
-    generation: { requestsPerDay: 300, wordsPerDay: 50_000 },   // ~1,500,000 words/month soft cap ("unlimited")
-    scan:       { requestsPerDay: 20,  wordsPerDay: 1_667 },    // ~50,000 words/month
+    generation: { requestsPerDay: 300, wordsPerDay: 5_000 },   // 150,000 words/month
+    scan:       { requestsPerDay: 60,  wordsPerDay: 5_000 },   // 150,000 words/month
   },
 }
 
 function envOverride(name: string): number | null {
-  const raw = Number(process.env[name])
-  return Number.isFinite(raw) && raw > 0 ? raw : null
+  const raw = process.env[name]
+  if (raw === undefined) return null
+  const parsed = Number(raw)
+  // 0 is a legitimate, documented override (a plan with a pool's
+  // requests/words explicitly set to 0 doesn't include that feature at all —
+  // see the gating check below) — not the same as "unset". Only a negative
+  // or non-numeric value is treated as no override.
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
 }
 
 // Reads any env override fresh on every call rather than once at module
