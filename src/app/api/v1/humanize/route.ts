@@ -8,6 +8,8 @@ import { preprocess, FactLock } from '@/lib/preprocess'
 import { generateWatermark, hashContent } from '@/lib/watermark'
 import { chunkFactLockedText } from '@/lib/chunk'
 import { humanizeChunk, ChunkResult, joinChunkResults } from '@/lib/humanizePipeline'
+import { toValidDomain } from '@/lib/style'
+import { effectiveIntensity } from '@/lib/intensity'
 import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
 import { buildOutput, tryClassifyOutput } from '@/lib/humanizeOutput'
 import { checkAndRecordGenerationUsage } from '@/lib/usageLimits'
@@ -145,10 +147,15 @@ export async function POST(req: NextRequest) {
 
   const text = (body.text ?? '').trim()
   const settingsIn = body.settings ?? {}
-  const intensity = Math.min(10, Math.max(1, settingsIn.intensity ?? 5))
+  const requestedIntensity = Math.min(10, Math.max(1, settingsIn.intensity ?? 5))
   const tone = settingsIn.tone ?? 'balanced'
   const domain = settingsIn.domain ?? 'general'
-  const settings: HumanizeSettings = { intensity, tone, domain }
+  // "Effective intensity = min(requested, domain cap)" — the pipeline is
+  // always driven by `.applied`, never the raw requested value, so a
+  // domain like legal or medical never receives a rewrite instruction
+  // stronger than its preservation rules can tolerate.
+  const intensity = effectiveIntensity(requestedIntensity, toValidDomain(domain))
+  const settings: HumanizeSettings = { intensity: intensity.applied, tone, domain }
 
   if (text.length < 20) {
     return NextResponse.json(
@@ -232,6 +239,7 @@ export async function POST(req: NextRequest) {
         char_count: prep.char_count,
         fact_lock_count: prep.fact_locks.length,
       },
+      intensity,
       processing_metadata: null,
       result_url: `/v1/jobs/${jobId}`,
       warning: 'Text queued for background processing — poll result_url for completion.',
@@ -246,7 +254,7 @@ export async function POST(req: NextRequest) {
 
     const result = await humanizeChunk(
       client, model, text, prep.sanitized_text, prep.fact_locks,
-      intensity, tone, domain, MAX_GATE_RETRIES,
+      intensity.applied, tone, domain, MAX_GATE_RETRIES,
     )
     const durationMs = Date.now() - start
 
@@ -274,6 +282,7 @@ export async function POST(req: NextRequest) {
         char_count: prep.char_count,
         fact_lock_count: prep.fact_locks.length,
       },
+      intensity,
       processing_metadata: {
         model_used: result.modelUsed,
         provider_used: 'openai',

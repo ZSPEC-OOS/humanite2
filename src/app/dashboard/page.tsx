@@ -471,6 +471,29 @@ export default function Dashboard() {
                   </button>
                 )}
 
+                {response?.intensity?.capped && (
+                  <>
+                    <div className="w-px h-12 bg-gray-200 dark:bg-gray-800" />
+                    <div
+                      className="flex items-center gap-3"
+                      title={`This domain caps effective intensity to keep meaning-preservation rules intact.`}
+                    >
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center border bg-gray-50 border-gray-200 dark:bg-gray-800 dark:border-gray-700">
+                        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden className="text-gray-700 dark:text-gray-300">
+                          <path d="M10 3v7l4.5 4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                          <circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="1.4" />
+                        </svg>
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Intensity capped</p>
+                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                          requested {response.intensity.requested}, applied {response.intensity.applied} ({response.intensity.domain})
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                )}
+
               </div>
             </div>
           )}
@@ -688,6 +711,16 @@ export default function Dashboard() {
                                    bg-gray-100 border-gray-300 text-gray-900
                                    dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100">
                     {aiDetLabel}
+                  </span>
+                )}
+                {response?.intensity?.capped && (
+                  <span
+                    className="text-xs px-2.5 py-1 rounded-full font-medium border
+                               bg-gray-50 border-gray-200 text-gray-600
+                               dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400"
+                    title="This domain caps effective intensity to keep meaning-preservation rules intact."
+                  >
+                    requested {response.intensity.requested}, applied {response.intensity.applied} ({response.intensity.domain})
                   </span>
                 )}
               </div>

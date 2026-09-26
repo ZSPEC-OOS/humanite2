@@ -50,6 +50,19 @@ describe('buildUserPrompt — style compiler integration', () => {
   })
 })
 
+describe('buildUserPrompt — intensity guide integration', () => {
+  it('embeds a distinct, level-specific intensity guide with no leftover duplicate label', () => {
+    const low = buildUserPrompt('some text', [], 2, 'balanced', 'general')
+    const high = buildUserPrompt('some text', [], 9, 'balanced', 'general')
+    expect(low).toContain('Intensity 2/10')
+    expect(high).toContain('Intensity 9/10')
+    expect(low).not.toBe(high)
+    // Exactly one "Intensity" line — no leftover flat "Intensity: X/10" label
+    // duplicating what the compiled guide already states.
+    expect(low.match(/Intensity/g)).toHaveLength(1)
+  })
+})
+
 function gate(overrides: Partial<QualityScores> = {}): QualityScores {
   return {
     semantic_similarity: 0.9,

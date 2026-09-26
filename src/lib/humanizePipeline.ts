@@ -4,6 +4,7 @@ import type { TextChunk } from './chunk'
 import { postprocess } from './postprocess'
 import { runQualityGates, QualityScores, PreservationByType, GateAvailability } from './qualityGates'
 import { compileStyle, buildStyleSection, toValidTone, toValidDomain } from './style'
+import { buildIntensityGuide } from './intensity'
 
 export const SYSTEM_PROMPT = `You are a professional editor. Your only job is to rewrite the provided text \
 so it reads as natural, fluent human prose. You must:
@@ -24,17 +25,7 @@ export function buildUserPrompt(
     ? factLocks.map(l => `- "${l.text}" [${l.lock_type}/${l.label}]`).join('\n')
     : '- (no explicit locks — still preserve all numbers, names, and dates exactly)'
 
-  let intensityGuide: string
-  if (intensity <= 3) {
-    intensityGuide =
-      'Apply minimal changes — fix only the most obvious AI patterns (flatten transition word overuse, reduce passive voice). Keep structure identical.'
-  } else if (intensity <= 6) {
-    intensityGuide =
-      'Apply moderate rewriting — vary sentence rhythm, replace AI-typical vocabulary, restructure for flow. Preserve all paragraph breaks.'
-  } else {
-    intensityGuide =
-      'Apply thorough rewriting — diversify sentence lengths aggressively (mix 6-word fragments with 28-word sentences), add natural register markers (parentheticals, em-dashes, rhetorical questions where appropriate), replace all AI-typical openers and vocabulary. Preserve paragraph structure.'
-  }
+  const intensityGuide = buildIntensityGuide(intensity)
 
   const compiledStyle = compileStyle(toValidTone(tone), toValidDomain(domain))
   const styleSection = buildStyleSection(compiledStyle)
@@ -46,7 +37,6 @@ ${lockLines}
 ## STYLE PARAMETERS
 ${styleSection}
 
-Intensity: ${intensity}/10
 ${intensityGuide}
 
 ## STYLE GUIDANCE
