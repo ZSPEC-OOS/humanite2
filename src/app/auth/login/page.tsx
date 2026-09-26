@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { authLogin, APIError } from '@/lib/api'
 import { Spinner } from '@/components/ui/Spinner'
 import { inputCls } from '@/components/ui/styles'
+import { Logo } from '@/components/ui/Logo'
 
 export default function LoginPage() {
   const [email, setEmail]       = useState('')
@@ -32,8 +33,8 @@ export default function LoginPage() {
     <div className="bg-rock min-h-screen flex items-center justify-center bg-white dark:bg-gray-950">
       <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-10 w-full max-w-sm dark:bg-gray-900 dark:border-gray-800">
         <div className="flex items-center justify-center mb-8">
-          <Link href="/" className="font-display text-xl text-gray-900 dark:text-gray-100">
-            Humanite
+          <Link href="/" className="flex items-center">
+            <Logo className="h-6" />
           </Link>
         </div>
 

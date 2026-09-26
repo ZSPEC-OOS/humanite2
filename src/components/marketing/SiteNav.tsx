@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
+import { Logo } from '@/components/ui/Logo'
 
 const NAV_LINKS = [
   { label: 'Product', href: '/product' },
@@ -11,8 +12,8 @@ const NAV_LINKS = [
 export function SiteNav() {
   return (
     <header className="relative z-10 flex items-center justify-between px-6 py-6 md:px-14 md:py-7">
-      <Link href="/" className="font-display text-xl text-gray-900 dark:text-gray-100">
-        Humanite
+      <Link href="/" className="flex items-center">
+        <Logo className="h-6" />
       </Link>
 
       <nav className="hidden items-center gap-8 md:flex">

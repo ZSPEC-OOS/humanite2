@@ -20,6 +20,7 @@ import { useTheme }         from '@/components/theme/ThemeProvider'
 import { restoreSession }   from '@/lib/api'
 import { ASYNC_MAX_CHARS, SYNC_MAX_CHARS } from '@/lib/limits'
 import { TierBadge } from '@/components/ui/TierBadge'
+import { Logo } from '@/components/ui/Logo'
 
 const MAX_CHARS = ASYNC_MAX_CHARS
 
@@ -276,8 +277,8 @@ export default function Dashboard() {
         {/* Desktop header */}
         <header className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 shrink-0 dark:border-gray-800">
           <div className="flex items-center gap-2.5">
-            <Link href="/" className="font-display text-lg text-gray-900 dark:text-gray-100">
-              Humanite
+            <Link href="/" className="flex items-center">
+              <Logo className="h-5" />
             </Link>
           </div>
           <div className="flex items-center gap-3">
@@ -614,8 +615,8 @@ export default function Dashboard() {
       <header className="shrink-0 flex items-center justify-between px-4 bg-white border-b border-gray-200 dark:bg-gray-900 dark:border-gray-800"
         style={{ height: '52px' }}>
         <div className="flex items-center gap-2">
-          <Link href="/" className="font-display text-base text-gray-900 dark:text-gray-100">
-            Humanite
+          <Link href="/" className="flex items-center">
+            <Logo className="h-4" />
           </Link>
         </div>
         <div className="flex items-center gap-1.5">
