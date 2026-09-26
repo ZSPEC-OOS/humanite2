@@ -10,6 +10,7 @@
 // environment rather than jsdom's.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { issueAccessToken, verifyAccessToken } from '../auth-utils'
+import { resolveEffectiveTier } from '../accountTier'
 
 const ORIGINAL_JWT_SECRET = process.env.JWT_SECRET
 
@@ -26,6 +27,18 @@ describe('issueAccessToken / verifyAccessToken — tier and scope claims', () =>
     const token = await issueAccessToken('user-1', 'jdzelazny@gmail.com', 'gold', 'us-east1')
     const payload = await verifyAccessToken(token)
     expect(payload.tier).toBe('gold')
+  })
+
+  it('end-to-end: jdzelazny@gmail.com resolves to Gold even with a stale "free" record on the account, the same way login/register/refresh now issue tokens', async () => {
+    // Mirrors exactly what the auth routes do: resolveEffectiveTier(email,
+    // storedTier) feeding straight into issueAccessToken — so this account
+    // shows Gold on its very next login/refresh without any database
+    // write, per resolveEffectiveTier's own hardcoded-email override.
+    const storedTier = 'free' // what a never-updated Firestore record still says
+    const token = await issueAccessToken('user-jd', 'jdzelazny@gmail.com', resolveEffectiveTier('jdzelazny@gmail.com', storedTier), 'us-east1')
+    const payload = await verifyAccessToken(token)
+    expect(payload.tier).toBe('gold')
+    expect(payload.scopes).toContain('user:read')
   })
 
   it('grants a gold account the same elevated scope pro/enterprise accounts get', async () => {

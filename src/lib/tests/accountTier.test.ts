@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { GOLD_TIER, ACCOUNT_TIERS, isGoldTier } from '../accountTier'
+import { GOLD_TIER, ACCOUNT_TIERS, isGoldTier, resolveEffectiveTier } from '../accountTier'
 import { PRICING_TIERS } from '../pricing'
 
 describe('accountTier', () => {
@@ -32,6 +32,24 @@ describe('accountTier', () => {
       // must not silently match.
       expect(isGoldTier('Gold')).toBe(false)
       expect(isGoldTier('GOLD')).toBe(false)
+    })
+  })
+
+  describe('resolveEffectiveTier', () => {
+    it('overrides a hardcoded Gold account to gold regardless of its stored tier', () => {
+      expect(resolveEffectiveTier('jdzelazny@gmail.com', 'free')).toBe('gold')
+      expect(resolveEffectiveTier('jdzelazny@gmail.com', 'pro')).toBe('gold')
+      expect(resolveEffectiveTier('jdzelazny@gmail.com', 'enterprise')).toBe('gold')
+    })
+
+    it('is case-insensitive and trims whitespace on the email match', () => {
+      expect(resolveEffectiveTier('  JDZelazny@Gmail.com  ', 'free')).toBe('gold')
+    })
+
+    it('leaves every other account\'s stored tier untouched', () => {
+      expect(resolveEffectiveTier('someone-else@example.com', 'free')).toBe('free')
+      expect(resolveEffectiveTier('someone-else@example.com', 'pro')).toBe('pro')
+      expect(resolveEffectiveTier('someone-else@example.com', 'enterprise')).toBe('enterprise')
     })
   })
 })

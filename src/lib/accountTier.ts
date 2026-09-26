@@ -12,11 +12,26 @@ import { PRICING_TIERS } from './pricing'
 // to recognize it rather than a parallel "isGold" flag being threaded
 // through separately.
 //
-// Granting Gold to an account is a data change, not a code change: set
-// this account's Firestore `users/{id}.tier` field to GOLD_TIER (see
-// scripts/setAccountTier.ts) and every layer below picks it up the next
-// time that account logs in or refreshes its access token.
+// Granting Gold to an account works either of two ways:
+//  1. A data change: set that account's Firestore `users/{id}.tier` field
+//     to GOLD_TIER (see scripts/setAccountTier.ts) — needs write access to
+//     the production database.
+//  2. A code change: add the account's email to GOLD_EMAILS below and
+//     deploy — needs no database access at all, since resolveEffectiveTier
+//     overrides whatever `tier` is stored the moment a token is issued.
+// Either way, every layer downstream (usage limits, scopes, UI) reads the
+// resulting tier the same way and doesn't need to know which path was used.
 export const GOLD_TIER = 'gold' as const
+
+// Accounts that are always Gold regardless of their stored `tier` — see
+// resolveEffectiveTier below. Exists specifically so granting Gold never
+// requires database credentials: shipping a change to this list is an
+// ordinary code change + deploy, the same as any other product change.
+// Keep this list short and add a code comment naming who requested each
+// entry and when — it's an allowlist of real accounts, not a feature flag.
+const GOLD_EMAILS = new Set<string>([
+  'jdzelazny@gmail.com',
+])
 
 // Every tier value this account can legitimately carry — the purchasable
 // plans from pricing.ts, plus the administratively-assigned Gold tier.
@@ -33,4 +48,17 @@ export const ACCOUNT_TIERS: readonly string[] = [
 // means setting their stored `tier` to GOLD_TIER — nothing here changes.
 export function isGoldTier(tier: string | null | undefined): boolean {
   return tier === GOLD_TIER
+}
+
+// The tier to actually sign into an access token for this account — call
+// this at every token-issuance site (login, register, refresh), passing
+// the account's own stored `tier`. Both arguments must come from a
+// trusted, server-side source (the verified Firestore user record, or a
+// registration this request itself just created) — never from a
+// client-supplied value. A GOLD_EMAILS match always wins over whatever
+// tier is stored, so hardcoding an email here is sufficient on its own;
+// it does not also require updating that account's database record.
+export function resolveEffectiveTier(email: string, storedTier: string): string {
+  if (GOLD_EMAILS.has(email.trim().toLowerCase())) return GOLD_TIER
+  return storedTier
 }

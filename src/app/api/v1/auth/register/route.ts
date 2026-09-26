@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/firestore'
 import { issueAccessToken, generateRefreshToken } from '@/lib/auth-utils'
+import { resolveEffectiveTier } from '@/lib/accountTier'
 import { registerUser } from '@/lib/userRegistration'
 import { randomUUID } from 'crypto'
 
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
   }
   const userId = registration.userId!
 
-  const accessToken = await issueAccessToken(userId, email, 'free', 'us-east1')
+  const accessToken = await issueAccessToken(userId, email, resolveEffectiveTier(email, 'free'), 'us-east1')
   const { raw, hash } = generateRefreshToken()
   const familyId = randomUUID()
 

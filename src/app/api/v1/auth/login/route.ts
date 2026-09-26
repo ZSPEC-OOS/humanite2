@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/firestore'
 import { issueAccessToken, generateRefreshToken } from '@/lib/auth-utils'
+import { resolveEffectiveTier } from '@/lib/accountTier'
 import bcrypt from 'bcryptjs'
 import { randomUUID } from 'crypto'
 
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: { code: 'AUTHENTICATION_FAILED', message: 'Invalid email or password.' } }, { status: 401 })
   }
 
-  const accessToken = await issueAccessToken(userDoc.id, user.email, user.tier, user.region)
+  const accessToken = await issueAccessToken(userDoc.id, user.email, resolveEffectiveTier(user.email, user.tier), user.region)
   const { raw, hash } = generateRefreshToken()
   const familyId = randomUUID()
 
