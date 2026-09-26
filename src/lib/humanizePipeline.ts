@@ -5,6 +5,10 @@ import { postprocess } from './postprocess'
 import { runQualityGates, QualityScores, PreservationByType, GateAvailability } from './qualityGates'
 import { compileStyle, buildStyleSection, toValidTone, toValidDomain } from './style'
 import { buildIntensityGuide } from './intensity'
+import { validateFactLedger } from './fidelity'
+import { measureIntensity } from './evaluation/intensity'
+import { evaluateIntensityAlignment } from './evaluation/styleEvaluators'
+import { repairChunk, type RepairStrategy } from './evaluation/repair'
 
 export const SYSTEM_PROMPT = `You are a professional editor. Your only job is to rewrite the provided text \
 so it reads as natural, fluent human prose. You must:
@@ -110,6 +114,18 @@ function isBetterAttempt(candidate: QualityScores, current: QualityScores): bool
   return candidateSimilarity > currentSimilarity
 }
 
+// Whether, and how, the post-retry-loop targeted repair step (see
+// evaluation/repair.ts) ran on this chunk. `attempted: false` covers both
+// "no fact-level problem was found" and "a problem was found but had no
+// aligned sentence to target" — repair.ts's RepairResult.strategy
+// disambiguates which, when it matters.
+export interface RepairSummary {
+  attempted: boolean
+  strategy: RepairStrategy
+  succeeded: boolean
+  sentencesRepaired: number
+}
+
 export interface ChunkResult {
   text: string
   substitutions: number
@@ -122,6 +138,12 @@ export interface ChunkResult {
   // since a truncated rewrite is missing content the gates never saw.
   truncated: boolean
   retryCount: number
+  // How close the shipped text's measured transformation magnitude (Phase
+  // 4's measureIntensity) came to this level's design target — see
+  // evaluateIntensityAlignment. Deterministic (no external dependency), so
+  // this is always computed, even when gatesUnavailable.
+  intensityAlignment: number | null
+  repair: RepairSummary
 }
 
 // Runs the generate → postprocess → gate-check → (retry on failure) loop for
@@ -186,7 +208,7 @@ export async function humanizeChunk(
 
     let gateResult: QualityScores
     try {
-      gateResult = await runQualityGates(client, judgeModel, sanitizedText, post.text, factLocks)
+      gateResult = await runQualityGates(client, judgeModel, sanitizedText, post.text, factLocks, undefined, { tone, domain })
     } catch (gateErr) {
       console.warn('Quality gates unavailable, shipping unscored output', {
         type: gateErr instanceof Error ? gateErr.constructor.name : typeof gateErr,
@@ -212,6 +234,7 @@ export async function humanizeChunk(
   }
 
   if (gatesUnavailable) {
+    const intensityAlignment = intensityAlignmentScore(sanitizedText, lastAttempt.text, factLocks, intensity)
     return {
       text: lastAttempt.text,
       substitutions: lastAttempt.substitutions,
@@ -220,18 +243,69 @@ export async function humanizeChunk(
       gatesUnavailable: true,
       truncated: lastAttempt.truncated,
       retryCount,
+      intensityAlignment,
+      repair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
     }
   }
 
+  // Targeted, one-shot repair for fact/relation failures the whole-document
+  // entity_preservation gate can miss (see evaluation/repair.ts) — a
+  // deterministic, free diagnostic (validateFactLedger) runs regardless of
+  // whether `best.gate` already passed, and only escalates to an LLM call
+  // if it actually finds a sentence-localized problem. Never part of the
+  // retry budget above: this is a single extra attempt on the best chunk
+  // the loop already settled on, not another full-chunk regeneration.
+  let repair: RepairSummary = { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 }
+  if (best) {
+    const fidelityCheck = validateFactLedger(sanitizedText, best.text)
+    if (!fidelityCheck.passed) {
+      const repairAttempt = await repairChunk(client, model, sanitizedText, best.text, tone, domain)
+      repair = {
+        attempted: repairAttempt.attempted,
+        strategy: repairAttempt.strategy,
+        succeeded: repairAttempt.succeeded,
+        sentencesRepaired: repairAttempt.sentencesRepaired,
+      }
+      if (repairAttempt.succeeded) {
+        try {
+          const repairedGate = await runQualityGates(client, judgeModel, sanitizedText, repairAttempt.text, factLocks, undefined, { tone, domain })
+          // Adopt unless the re-scored repair is a strict regression on the
+          // gate's own (fidelity-ledger-blind) terms — repairChunk already
+          // verified internally that the repair fixes the sentence-bound
+          // fact failure that triggered it, a dimension isBetterAttempt
+          // cannot see at all, so a mere tie on entity/entailment/
+          // similarity must still count as an improvement, not a wash.
+          if (!isBetterAttempt(best.gate, repairedGate)) {
+            best = { ...best, text: repairAttempt.text, gate: repairedGate }
+          }
+        } catch (gateErr) {
+          console.warn('Could not re-score a repaired chunk, shipping the pre-repair best instead', {
+            type: gateErr instanceof Error ? gateErr.constructor.name : typeof gateErr,
+          })
+        }
+      }
+    }
+  }
+
+  const shippedText = best?.text ?? lastAttempt.text
+  const intensityAlignment = intensityAlignmentScore(sanitizedText, shippedText, factLocks, intensity)
+
   return {
-    text: best?.text ?? lastAttempt.text,
+    text: shippedText,
     substitutions: best?.substitutions ?? lastAttempt.substitutions,
     modelUsed: best?.modelUsed ?? lastAttempt.modelUsed,
     gate: best?.gate ?? null,
     gatesUnavailable: false,
     truncated: best?.truncated ?? lastAttempt.truncated,
     retryCount,
+    intensityAlignment,
+    repair,
   }
+}
+
+function intensityAlignmentScore(sourceText: string, outputText: string, factLocks: FactLock[], level: number): number {
+  const metrics = measureIntensity(sourceText, outputText, factLocks.map(l => l.text))
+  return evaluateIntensityAlignment(metrics.transformationMagnitude, level).score!
 }
 
 // Reassembles chunk results using each chunk's own recorded separator
@@ -270,6 +344,26 @@ export interface AggregatedQuality {
   missing_facts: string[]
   entailment_issues: string[]
   preservation_by_type: PreservationByType
+  // Style dimensions — see qualityGates.ts's QualityScores and
+  // evaluation/styleEvaluators.ts. Averaged the same null-safe way as
+  // entailment/semantic_similarity above; never fed into `passed`/
+  // `failed_gate`, which stay fidelity-only.
+  tone_alignment: number | null
+  domain_alignment: number | null
+  naturalness: number | null
+  style_issues: string[]
+  // How close the document's actual transformation magnitude came to the
+  // requested level's design target, averaged across chunks — deterministic,
+  // so unlike the fields above this is never null just because a chunk's
+  // gates were unavailable.
+  intensity_alignment: number | null
+  repair: {
+    attempted: boolean
+    // True only when every chunk that attempted a repair succeeded — a
+    // document is not "cleanly repaired" if even one chunk's attempt failed.
+    succeeded: boolean
+    sentences_repaired: number
+  }
 }
 
 // Sums each category's total/preserved counts and concatenates its missing
@@ -300,9 +394,24 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
   const totalRetries = results.reduce((sum, r) => sum + r.retryCount, 0)
   const missingFacts = results.flatMap(r => r.gate?.missing_facts ?? [])
   const entailmentIssues = results.flatMap(r => r.gate?.entailment_issues ?? [])
+  const styleIssues = results.flatMap(r => r.gate?.style_issues ?? [])
   const preservationByType = mergePreservationByType(results)
   const anyTruncated = results.some(r => r.truncated)
   const scored = results.filter((r): r is ChunkResult & { gate: QualityScores } => !r.gatesUnavailable && r.gate != null)
+
+  // Deterministic and independent of whether any chunk's gates ran, unlike
+  // every other field aggregated below — averaged over ALL chunks, never
+  // gated on `scored`.
+  const intensityAlignmentValues = results.map(r => r.intensityAlignment).filter((v): v is number => v != null)
+  const intensityAlignment = intensityAlignmentValues.length === 0
+    ? null
+    : round(intensityAlignmentValues.reduce((sum, v) => sum + v, 0) / intensityAlignmentValues.length)
+  const repairAttempted = results.filter(r => r.repair.attempted)
+  const repair = {
+    attempted: repairAttempted.length > 0,
+    succeeded: repairAttempted.length > 0 && repairAttempted.every(r => r.repair.succeeded),
+    sentences_repaired: results.reduce((sum, r) => sum + r.repair.sentencesRepaired, 0),
+  }
 
   if (scored.length === 0) {
     return {
@@ -318,6 +427,12 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
       missing_facts: missingFacts,
       entailment_issues: entailmentIssues,
       preservation_by_type: preservationByType,
+      tone_alignment: null,
+      domain_alignment: null,
+      naturalness: null,
+      style_issues: styleIssues,
+      intensity_alignment: intensityAlignment,
+      repair,
     }
   }
 
@@ -353,6 +468,12 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
     missing_facts: missingFacts,
     entailment_issues: entailmentIssues,
     preservation_by_type: preservationByType,
+    tone_alignment: average(g => g.tone_alignment),
+    domain_alignment: average(g => g.domain_alignment),
+    naturalness: average(g => g.naturalness),
+    style_issues: styleIssues,
+    intensity_alignment: intensityAlignment,
+    repair,
   }
 }
 

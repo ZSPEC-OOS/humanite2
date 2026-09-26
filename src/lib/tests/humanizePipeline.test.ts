@@ -74,6 +74,11 @@ function gate(overrides: Partial<QualityScores> = {}): QualityScores {
     missing_facts: [],
     entailment_issues: [],
     preservation_by_type: {},
+    tone_alignment: 0.9,
+    domain_alignment: 0.9,
+    coherence: 0.9,
+    naturalness: 0.9,
+    style_issues: [],
     ...overrides,
   }
 }
@@ -87,6 +92,8 @@ function chunk(overrides: Partial<ChunkResult> = {}): ChunkResult {
     gatesUnavailable: false,
     truncated: false,
     retryCount: 0,
+    intensityAlignment: 0.9,
+    repair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
     ...overrides,
   }
 }
@@ -189,6 +196,43 @@ describe('aggregateChunkResults — degraded/gates_available (partial gate outag
   })
 })
 
+describe('aggregateChunkResults — style scores and repair summary', () => {
+  it('averages style scores across chunks the same null-safe way as entailment/similarity', () => {
+    const results = [
+      chunk({ gate: gate({ tone_alignment: 0.8, domain_alignment: 0.6 }) }),
+      chunk({ gate: gate({ tone_alignment: null, domain_alignment: 0.4 }) }),
+    ]
+    const agg = aggregateChunkResults(results)
+    expect(agg.tone_alignment).toBe(0.8)
+    expect(agg.domain_alignment).toBe(0.5)
+  })
+
+  it('averages intensity_alignment across ALL chunks, independent of whether gates ran', () => {
+    const results = [
+      chunk({ intensityAlignment: 0.8, gatesUnavailable: true, gate: null }),
+      chunk({ intensityAlignment: 0.4 }),
+    ]
+    const agg = aggregateChunkResults(results)
+    expect(agg.intensity_alignment).toBe(0.6)
+  })
+
+  it('reports repair.attempted only when at least one chunk actually attempted a repair', () => {
+    const results = [chunk(), chunk()]
+    expect(aggregateChunkResults(results).repair.attempted).toBe(false)
+  })
+
+  it('reports repair.succeeded false if any chunk that attempted a repair failed to fix it', () => {
+    const results = [
+      chunk({ repair: { attempted: true, strategy: 'sentence_repair', succeeded: true, sentencesRepaired: 1 } }),
+      chunk({ repair: { attempted: true, strategy: 'sentence_repair', succeeded: false, sentencesRepaired: 0 } }),
+    ]
+    const agg = aggregateChunkResults(results)
+    expect(agg.repair.attempted).toBe(true)
+    expect(agg.repair.succeeded).toBe(false)
+    expect(agg.repair.sentences_repaired).toBe(1)
+  })
+})
+
 describe('aggregateChunkResults — truncation', () => {
   it('is not truncated when no chunk was cut off', () => {
     const agg = aggregateChunkResults([chunk(), chunk()])
@@ -279,6 +323,61 @@ describe('humanizeChunk — retry loop ships the best-scoring attempt, not just 
     expect(result.text).toContain('42')
     expect(result.gate?.failed_gate).toBe('entailment')
     expect(result.retryCount).toBe(1)
+  })
+})
+
+describe('humanizeChunk — targeted post-loop repair for position-blind fact failures', () => {
+  it('repairs a fact swap that the ordinary gates missed entirely, using one extra generation call plus one re-score', async () => {
+    const source = 'Server Alpha runs firmware 2.1; Server Beta runs firmware 3.4.'
+    const swapped = 'Server Alpha runs firmware 3.4; Server Beta runs firmware 2.1.'
+    const passingJudge = JSON.stringify({ entailment_probability: 1.0, tone_alignment: 1, domain_alignment: 1, coherence: 1, naturalness: 1 })
+
+    const { client, chatCreate } = mockHumanizeClient([
+      { content: swapped }, // attempt 0 generation — the model swaps the two versions
+      { content: passingJudge }, // attempt 0 judge — entity/entailment/similarity all pass; blind to the swap
+      { content: source }, // repair: the sentence-level fix, correctly unswapped
+      { content: passingJudge }, // re-score of the repaired text
+    ])
+
+    const result = await humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [], 3, 'balanced', 'technical', 0)
+
+    expect(result.text).toBe(source)
+    expect(result.repair.attempted).toBe(true)
+    expect(result.repair.succeeded).toBe(true)
+    expect(result.repair.sentencesRepaired).toBe(1)
+    // Exactly 4 chat calls: no extra full-chunk retry was spent on this —
+    // the repair is a single targeted addition, not another regeneration.
+    expect(chatCreate).toHaveBeenCalledTimes(4)
+  })
+
+  it('leaves gate.passed alone (already true) but reports no repair attempted when the output is already fidelity-correct', async () => {
+    const source = 'Revenue rose to 42 units.'
+    const passingJudge = JSON.stringify({ entailment_probability: 1.0, tone_alignment: 1, domain_alignment: 1, coherence: 1, naturalness: 1 })
+
+    const { client, chatCreate } = mockHumanizeClient([
+      { content: source },
+      { content: passingJudge },
+    ])
+
+    const result = await humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [], 3, 'balanced', 'general', 0)
+
+    expect(result.repair.attempted).toBe(false)
+    expect(chatCreate).toHaveBeenCalledTimes(2)
+  })
+
+  it('computes an intensity_alignment score for the shipped text', async () => {
+    const source = 'Revenue rose to 42 units.'
+    const passingJudge = JSON.stringify({ entailment_probability: 1.0, tone_alignment: 1, domain_alignment: 1, coherence: 1, naturalness: 1 })
+    const { client } = mockHumanizeClient([
+      { content: 'Revenue climbed to 42 units in total, a notable shift from the prior period.' },
+      { content: passingJudge },
+    ])
+
+    const result = await humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [], 3, 'balanced', 'general', 0)
+
+    expect(result.intensityAlignment).not.toBeNull()
+    expect(result.intensityAlignment).toBeGreaterThanOrEqual(0)
+    expect(result.intensityAlignment).toBeLessThanOrEqual(1)
   })
 })
 

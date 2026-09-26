@@ -166,25 +166,41 @@ export interface HumanizeOutput {
       entailment_issues: string[]
       preservation_by_type: PreservationByType
     }
-    // Naturalness/tone/domain/intensity alignment — all null until Phase 6
-    // ships real evaluators for them. Never fabricated in their place.
+    // Naturalness/tone/domain/intensity alignment, from Phase 6's combined
+    // structured judge (tone/domain/naturalness) and Phase 4's
+    // measureIntensity (intensity_alignment) — null only when style
+    // couldn't be evaluated at all (e.g. gates unavailable for every
+    // chunk), same "didn't run" convention as fidelity's fields.
     style: {
       naturalness: number | null
       tone_alignment: number | null
       domain_alignment: number | null
       intensity_alignment: number | null
+      // naturalness is excluded — reported but never gates this, since it
+      // "carries low weight until calibrated against blind human ratings".
       passed: boolean | null
+      issues: string[]
     }
     overall: {
-      // Fidelity-only for now (style is unmeasured) — true only when
-      // everything that COULD be checked passed, never a bare humanness
-      // verdict. See fidelity.passed and style.passed for what's behind it.
+      // Fidelity AND style combined once both are measured; falls back to
+      // fidelity alone only when style itself couldn't be evaluated — never
+      // stricter than what was actually checked. See fidelity.passed and
+      // style.passed for what's behind it.
       validated: boolean | null
       // True when at least one soft-quality gate (semantic similarity or
       // entailment) never ran for at least part of the document —
       // `validated: true` under degradation means "nothing that ran
       // failed", not "everything was checked".
       degraded: boolean
+    }
+    // Phase 5's deterministic fact ledger, applied as a targeted, sentence-
+    // level repair rather than a whole-document verdict — see
+    // src/lib/evaluation/repair.ts. `attempted: false` is the common case:
+    // no sentence-localized fact failure was found in the first place.
+    repair: {
+      attempted: boolean
+      succeeded: boolean
+      sentences_repaired: number
     }
   }
   // Automatic AI-detection scan run against this output text once humanize

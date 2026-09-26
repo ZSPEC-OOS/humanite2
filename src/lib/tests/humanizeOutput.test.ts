@@ -29,10 +29,16 @@ function chunk(overrides: Partial<ChunkResult> = {}): ChunkResult {
     text: 'Rewritten chunk text.',
     substitutions: 0,
     modelUsed: 'gpt-4o-mini',
-    gate: { semantic_similarity: 0.94, entailment: 0.97, entity_preservation: 1, passed: true, failed_gate: null, gates_available: { semantic_similarity: true, entailment: true }, missing_facts: [], entailment_issues: [], preservation_by_type: {} },
+    gate: {
+      semantic_similarity: 0.94, entailment: 0.97, entity_preservation: 1, passed: true, failed_gate: null,
+      gates_available: { semantic_similarity: true, entailment: true }, missing_facts: [], entailment_issues: [], preservation_by_type: {},
+      tone_alignment: null, domain_alignment: null, coherence: null, naturalness: null, style_issues: [],
+    },
     gatesUnavailable: false,
     truncated: false,
     retryCount: 0,
+    intensityAlignment: null,
+    repair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
     ...overrides,
   }
 }
@@ -98,7 +104,14 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
     const chunks = [
       chunk({ text: 'Chunk one.', substitutions: 2, retryCount: 1 }),
       chunk({ text: 'Chunk two.', substitutions: 0, retryCount: 0 }),
-      chunk({ text: 'Chunk three.', substitutions: 3, retryCount: 1, gate: { semantic_similarity: 0.7, entailment: 0.8, entity_preservation: 0.9, passed: false, failed_gate: 'semantic_similarity', gates_available: { semantic_similarity: true, entailment: true }, missing_facts: [], entailment_issues: ['drift'], preservation_by_type: {} } }),
+      chunk({
+        text: 'Chunk three.', substitutions: 3, retryCount: 1,
+        gate: {
+          semantic_similarity: 0.7, entailment: 0.8, entity_preservation: 0.9, passed: false, failed_gate: 'semantic_similarity',
+          gates_available: { semantic_similarity: true, entailment: true }, missing_facts: [], entailment_issues: ['drift'], preservation_by_type: {},
+          tone_alignment: null, domain_alignment: null, coherence: null, naturalness: null, style_issues: [],
+        },
+      }),
     ]
     const postText = chunks.map(c => c.text).join('\n\n')
     const output = buildOutput(postText, chunks, generateWatermark('job-5', 'gpt-4o-mini'), detection)
@@ -111,5 +124,55 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
     expect(output.quality_scores.fidelity.passed).toBe(false)
     expect(output.quality_scores.fidelity.failed_gate).toBe('semantic_similarity')
     expect(output.quality_scores.overall.validated).toBe(false)
+  })
+
+  it('populates real style scores and folds them into overall.validated once every chunk\'s gate reports them', async () => {
+    process.env.MOCK_DETECTION_FIXTURE = 'human'
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const styledChunk = chunk({
+      intensityAlignment: 0.9,
+      gate: {
+        semantic_similarity: 0.94, entailment: 0.97, entity_preservation: 1, passed: true, failed_gate: null,
+        gates_available: { semantic_similarity: true, entailment: true }, missing_facts: [], entailment_issues: [], preservation_by_type: {},
+        tone_alignment: 0.8, domain_alignment: 0.75, coherence: 0.9, naturalness: 0.6, style_issues: ['slightly stiff'],
+      },
+    })
+    const output = buildOutput('Some humanized output text.', [styledChunk], generateWatermark('job-6', 'gpt-4o-mini'), detection)
+
+    expect(output.quality_scores.style.tone_alignment).toBe(0.8)
+    expect(output.quality_scores.style.domain_alignment).toBe(0.75)
+    expect(output.quality_scores.style.naturalness).toBe(0.6)
+    expect(output.quality_scores.style.intensity_alignment).toBe(0.9)
+    expect(output.quality_scores.style.issues).toEqual(['slightly stiff'])
+    expect(output.quality_scores.style.passed).toBe(true)
+    // Fidelity AND style both passed — the combined verdict now reflects both.
+    expect(output.quality_scores.overall.validated).toBe(true)
+  })
+
+  it('a failing style dimension pulls overall.validated down even when fidelity alone passed', async () => {
+    process.env.MOCK_DETECTION_FIXTURE = 'human'
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const offToneChunk = chunk({
+      intensityAlignment: 0.9,
+      gate: {
+        semantic_similarity: 0.94, entailment: 0.97, entity_preservation: 1, passed: true, failed_gate: null,
+        gates_available: { semantic_similarity: true, entailment: true }, missing_facts: [], entailment_issues: [], preservation_by_type: {},
+        tone_alignment: 0.1, domain_alignment: 0.9, coherence: 0.9, naturalness: 0.9, style_issues: ['wrong register entirely'],
+      },
+    })
+    const output = buildOutput('Some humanized output text.', [offToneChunk], generateWatermark('job-7', 'gpt-4o-mini'), detection)
+
+    expect(output.quality_scores.fidelity.passed).toBe(true)
+    expect(output.quality_scores.style.passed).toBe(false)
+    expect(output.quality_scores.overall.validated).toBe(false)
+  })
+
+  it('surfaces the repair summary when a chunk needed a targeted fact repair', async () => {
+    process.env.MOCK_DETECTION_FIXTURE = 'human'
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const repairedChunk = chunk({ repair: { attempted: true, strategy: 'sentence_repair', succeeded: true, sentencesRepaired: 2 } })
+    const output = buildOutput('Some humanized output text.', [repairedChunk], generateWatermark('job-8', 'gpt-4o-mini'), detection)
+
+    expect(output.quality_scores.repair).toEqual({ attempted: true, succeeded: true, sentences_repaired: 2 })
   })
 })
