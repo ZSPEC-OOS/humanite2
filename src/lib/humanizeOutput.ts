@@ -43,6 +43,17 @@ export function buildOutput(
         missing_facts: agg.missing_facts,
         entailment_issues: agg.entailment_issues,
         preservation_by_type: agg.preservation_by_type,
+        // Phase 7's model-based claim verification — covers relation and
+        // attribution errors the deterministic checks above cannot see.
+        // Not folded into `passed`/`failed_gate` above, the same way
+        // Phase 5's deterministic fact ledger isn't either: both are
+        // reported here and drive their own targeted repair (see `repair`
+        // and `relation_repair`), not the primary fidelity verdict.
+        claim_verification: {
+          checked: agg.claims_checked,
+          failed: agg.claims_failed,
+          issues: agg.claim_issues,
+        },
       },
       style: {
         naturalness: style.naturalness,
@@ -64,6 +75,15 @@ export function buildOutput(
         attempted: agg.repair.attempted,
         succeeded: agg.repair.succeeded,
         sentences_repaired: agg.repair.sentences_repaired,
+      },
+      // The "restore-relations" strategy (Phase 7), triggered by a claim
+      // verification failure rather than a fact-ledger one — see
+      // claims/repair.ts. Same shape and the same `attempted: false` "no
+      // localized failure was ever found" convention as `repair` above.
+      relation_repair: {
+        attempted: agg.relation_repair.attempted,
+        succeeded: agg.relation_repair.succeeded,
+        sentences_repaired: agg.relation_repair.sentences_repaired,
       },
     },
     detection,

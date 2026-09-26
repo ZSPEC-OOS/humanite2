@@ -165,6 +165,18 @@ export interface HumanizeOutput {
       missing_facts: string[]
       entailment_issues: string[]
       preservation_by_type: PreservationByType
+      // Phase 7's model-based claim verification — covers relation and
+      // attribution errors (a reversed causal direction, a statement
+      // reattributed to a different speaker, a dropped scope qualifier)
+      // the deterministic checks above cannot see. Reported, not folded
+      // into `passed`/`failed_gate`, the same way the deterministic fact
+      // ledger isn't either — see `repair`/`relation_repair` for how each
+      // one instead drives its own targeted repair.
+      claim_verification: {
+        checked: number
+        failed: number
+        issues: string[]
+      }
     }
     // Naturalness/tone/domain/intensity alignment, from Phase 6's combined
     // structured judge (tone/domain/naturalness) and Phase 4's
@@ -198,6 +210,15 @@ export interface HumanizeOutput {
     // src/lib/evaluation/repair.ts. `attempted: false` is the common case:
     // no sentence-localized fact failure was found in the first place.
     repair: {
+      attempted: boolean
+      succeeded: boolean
+      sentences_repaired: number
+    }
+    // The "restore-relations" strategy (Phase 7), triggered by a claim
+    // verification failure rather than a fact-ledger one — see
+    // src/lib/claims/repair.ts. Same shape and `attempted: false`
+    // convention as `repair` above.
+    relation_repair: {
       attempted: boolean
       succeeded: boolean
       sentences_repaired: number

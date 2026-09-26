@@ -94,6 +94,8 @@ function chunk(overrides: Partial<ChunkResult> = {}): ChunkResult {
     retryCount: 0,
     intensityAlignment: 0.9,
     repair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
+    claimVerification: { checked: 0, failed: 0, issues: [] },
+    relationRepair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
     ...overrides,
   }
 }
@@ -233,6 +235,42 @@ describe('aggregateChunkResults — style scores and repair summary', () => {
   })
 })
 
+describe('aggregateChunkResults — Phase 7 claim verification and relation repair', () => {
+  it('sums claims_checked and claims_failed, and concatenates issues, across chunks', () => {
+    const results = [
+      chunk({ claimVerification: { checked: 3, failed: 1, issues: ['causal direction reversed'] } }),
+      chunk({ claimVerification: { checked: 2, failed: 0, issues: [] } }),
+    ]
+    const agg = aggregateChunkResults(results)
+    expect(agg.claims_checked).toBe(5)
+    expect(agg.claims_failed).toBe(1)
+    expect(agg.claim_issues).toEqual(['causal direction reversed'])
+  })
+
+  it('treats a null claimVerification (the check itself did not run) as contributing zero, not throwing', () => {
+    const results = [chunk({ claimVerification: null }), chunk({ claimVerification: { checked: 4, failed: 2, issues: ['a', 'b'] } })]
+    const agg = aggregateChunkResults(results)
+    expect(agg.claims_checked).toBe(4)
+    expect(agg.claims_failed).toBe(2)
+  })
+
+  it('reports relation_repair.attempted only when at least one chunk actually attempted it', () => {
+    const results = [chunk(), chunk()]
+    expect(aggregateChunkResults(results).relation_repair.attempted).toBe(false)
+  })
+
+  it('reports relation_repair.succeeded false if any chunk that attempted it failed to fix it', () => {
+    const results = [
+      chunk({ relationRepair: { attempted: true, strategy: 'restore_relations', succeeded: true, sentencesRepaired: 1 } }),
+      chunk({ relationRepair: { attempted: true, strategy: 'restore_relations', succeeded: false, sentencesRepaired: 0 } }),
+    ]
+    const agg = aggregateChunkResults(results)
+    expect(agg.relation_repair.attempted).toBe(true)
+    expect(agg.relation_repair.succeeded).toBe(false)
+    expect(agg.relation_repair.sentences_repaired).toBe(1)
+  })
+})
+
 describe('aggregateChunkResults — truncation', () => {
   it('is not truncated when no chunk was cut off', () => {
     const agg = aggregateChunkResults([chunk(), chunk()])
@@ -337,6 +375,7 @@ describe('humanizeChunk — targeted post-loop repair for position-blind fact fa
       { content: passingJudge }, // attempt 0 judge — entity/entailment/similarity all pass; blind to the swap
       { content: source }, // repair: the sentence-level fix, correctly unswapped
       { content: passingJudge }, // re-score of the repaired text
+      { content: '{"claims": []}' }, // Phase 7 claim verification — nothing to flag
     ])
 
     const result = await humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [], 3, 'balanced', 'technical', 0)
@@ -345,9 +384,10 @@ describe('humanizeChunk — targeted post-loop repair for position-blind fact fa
     expect(result.repair.attempted).toBe(true)
     expect(result.repair.succeeded).toBe(true)
     expect(result.repair.sentencesRepaired).toBe(1)
-    // Exactly 4 chat calls: no extra full-chunk retry was spent on this —
-    // the repair is a single targeted addition, not another regeneration.
-    expect(chatCreate).toHaveBeenCalledTimes(4)
+    // Exactly 5 chat calls: no extra full-chunk retry was spent on the fact
+    // repair — it's a single targeted addition, not another regeneration —
+    // plus the one always-on claim verification call.
+    expect(chatCreate).toHaveBeenCalledTimes(5)
   })
 
   it('leaves gate.passed alone (already true) but reports no repair attempted when the output is already fidelity-correct', async () => {
@@ -357,12 +397,13 @@ describe('humanizeChunk — targeted post-loop repair for position-blind fact fa
     const { client, chatCreate } = mockHumanizeClient([
       { content: source },
       { content: passingJudge },
+      { content: '{"claims": []}' },
     ])
 
     const result = await humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [], 3, 'balanced', 'general', 0)
 
     expect(result.repair.attempted).toBe(false)
-    expect(chatCreate).toHaveBeenCalledTimes(2)
+    expect(chatCreate).toHaveBeenCalledTimes(3)
   })
 
   it('computes an intensity_alignment score for the shipped text', async () => {
@@ -378,6 +419,97 @@ describe('humanizeChunk — targeted post-loop repair for position-blind fact fa
     expect(result.intensityAlignment).not.toBeNull()
     expect(result.intensityAlignment).toBeGreaterThanOrEqual(0)
     expect(result.intensityAlignment).toBeLessThanOrEqual(1)
+  })
+})
+
+describe('humanizeChunk — Phase 7 model-based claim verification', () => {
+  const passingJudge = JSON.stringify({ entailment_probability: 1.0, tone_alignment: 1, domain_alignment: 1, coherence: 1, naturalness: 1 })
+
+  it('reports a passing claim verification and makes no relation-repair call when nothing fails', async () => {
+    const source = 'Because sales grew sharply, the company increased hiring.'
+    const { client, chatCreate } = mockHumanizeClient([
+      { content: source },
+      { content: passingJudge },
+      { content: '{"claims": [{"subject": "sales", "predicate": "grew", "object": "sharply", "qualifiers": [], "polarity": "affirmative", "modality": null, "entailed": true, "reason": "", "output_sentence_index": null}]}' },
+    ])
+
+    const result = await humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [], 3, 'balanced', 'business', 0)
+
+    expect(result.claimVerification).toEqual({ checked: 1, failed: 0, issues: [] })
+    expect(result.relationRepair.attempted).toBe(false)
+    expect(chatCreate).toHaveBeenCalledTimes(3)
+  })
+
+  it('repairs a localized relation failure and adopts it once re-verification confirms the fix', async () => {
+    const source = 'Because sales grew sharply, the company increased hiring across every region.'
+    const swapped = 'Because the company increased hiring across every region, sales grew sharply.'
+    const failingClaims = JSON.stringify({
+      claims: [{
+        subject: 'the company', predicate: 'increased', object: 'hiring', qualifiers: ['across every region'],
+        polarity: 'affirmative', modality: null, entailed: false, reason: 'causal direction reversed', output_sentence_index: 0,
+      }],
+    })
+    const passingClaims = '{"claims": []}'
+
+    const { client, chatCreate } = mockHumanizeClient([
+      { content: swapped }, // generation — reverses the causal direction
+      { content: passingJudge }, // ordinary gates: blind to the reversal
+      { content: failingClaims }, // claim verification: catches it
+      { content: source }, // restore-relations: the sentence-level fix
+      { content: passingClaims }, // re-verification of the repaired text
+    ])
+
+    const result = await humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [], 3, 'balanced', 'business', 0)
+
+    expect(result.text).toBe(source)
+    expect(result.relationRepair.attempted).toBe(true)
+    expect(result.relationRepair.succeeded).toBe(true)
+    expect(result.relationRepair.sentencesRepaired).toBe(1)
+    expect(result.claimVerification).toEqual({ checked: 0, failed: 0, issues: [] })
+    expect(chatCreate).toHaveBeenCalledTimes(5)
+  })
+
+  it('does not adopt a relation repair that a free fact-ledger check shows dropped a locked fact', async () => {
+    const source = 'The dose is 5 mg, according to the lead investigator.'
+    const failingClaims = JSON.stringify({
+      claims: [{
+        subject: 'the lead investigator', predicate: 'stated', object: 'the dose', qualifiers: [],
+        polarity: 'affirmative', modality: null, entailed: false, reason: 'attribution changed', output_sentence_index: 0,
+      }],
+    })
+    const { client, chatCreate } = mockHumanizeClient([
+      { content: source },
+      { content: passingJudge },
+      { content: failingClaims },
+      // The "fix" drops the locked "5 mg" entirely — must never be adopted.
+      { content: 'The dose is unspecified, according to the lead investigator.' },
+    ])
+
+    const result = await humanizeChunk(
+      client, 'gpt-4o-mini', 'fallback', source, [{ char_start: 0, char_end: 4, text: '5 mg', lock_type: 'number', label: 'NUM' }],
+      3, 'balanced', 'medical', 0,
+    )
+
+    expect(result.text).toBe(source)
+    expect(result.relationRepair.succeeded).toBe(false)
+    // No re-verification call spent once the free fact check already rejected the fix.
+    expect(chatCreate).toHaveBeenCalledTimes(4)
+  })
+
+  it('never throws and leaves claimVerification null when the verification call itself fails', async () => {
+    const source = 'Revenue rose to 42 units.'
+    const chatCreate = vi.fn()
+      .mockResolvedValueOnce({ model: 'gpt-4o-mini', choices: [{ message: { content: source }, finish_reason: 'stop' }] })
+      .mockResolvedValueOnce({ model: 'gpt-4o-mini', choices: [{ message: { content: passingJudge }, finish_reason: 'stop' }] })
+      .mockRejectedValueOnce(new Error('judge model unreachable'))
+    const embedCreate = vi.fn().mockResolvedValue({ data: [{ embedding: [1, 0] }, { embedding: [1, 0] }] })
+    const client = { chat: { completions: { create: chatCreate } }, embeddings: { create: embedCreate } } as unknown as OpenAI
+
+    const result = await humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [], 3, 'balanced', 'general', 0)
+
+    expect(result.claimVerification).toBeNull()
+    expect(result.relationRepair.attempted).toBe(false)
+    expect(result.text).toBe(source)
   })
 })
 
