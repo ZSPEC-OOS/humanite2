@@ -16,11 +16,11 @@ export const DEFAULT_THRESHOLDS: GateThresholds = {
   entailment: 0.75,
 }
 
-export type FailedGate = 'entity_overlap' | 'entailment' | 'semantic_similarity' | null
+export type FailedGate = 'entity_preservation' | 'entailment' | 'semantic_similarity' | 'truncated' | null
 
 // Per-category breakdown backing the preservation report (spec §52) —
 // "Numbers 100%, Citations 100%, Quotes 100%" rather than one aggregate
-// entity_overlap score with no visibility into which category, if any,
+// entity_preservation score with no visibility into which category, if any,
 // actually failed.
 export interface CategoryPreservation {
   total: number
@@ -31,12 +31,13 @@ export interface CategoryPreservation {
 export type PreservationByType = Partial<Record<FactLockType, CategoryPreservation>>
 
 // Which of the two externally-dependent gates actually ran and contributed
-// to `passed` — entity_overlap has no equivalent flag since it always runs
-// (see below). `passed: true` only means "no gate that DID run failed"; a
-// caller that needs to know whether that covered the whole picture, or just
-// entity_overlap because both other gates were down, must check this
-// instead of inferring it from a null score (a per-chunk average can mask a
-// per-chunk null — see aggregateChunkResults in humanizePipeline.ts).
+// to `passed` — entity_preservation has no equivalent flag since it always
+// runs (see below). `passed: true` only means "no gate that DID run
+// failed"; a caller that needs to know whether that covered the whole
+// picture, or just entity_preservation because both other gates were down,
+// must check this instead of inferring it from a null score (a per-chunk
+// average can mask a per-chunk null — see aggregateChunkResults in
+// humanizePipeline.ts).
 export interface GateAvailability {
   semantic_similarity: boolean
   entailment: boolean
@@ -47,10 +48,10 @@ export interface QualityScores {
   // endpoint doesn't support the embedding call semantic similarity needs)
   // — never a fabricated score standing in for "didn't run".
   semantic_similarity: number | null
-  nli_entailment: number | null
+  entailment: number | null
   // Always present: deterministic string matching with no external
   // dependency, so nothing can prevent it from running.
-  entity_overlap: number
+  entity_preservation: number
   passed: boolean
   failed_gate: FailedGate
   gates_available: GateAvailability
@@ -199,7 +200,7 @@ export async function runQualityGates(
   factLocks: FactLock[],
   thresholds: GateThresholds = DEFAULT_THRESHOLDS,
 ): Promise<QualityScores> {
-  // entity_overlap has no external dependency and must never be lost just
+  // entity_preservation has no external dependency and must never be lost just
   // because an unrelated, network-dependent gate fails — computed first,
   // and the other two are caught independently (Promise.allSettled, not
   // Promise.all) instead of one rejection failing all three at once. A gate
@@ -227,14 +228,14 @@ export async function runQualityGates(
   const entailment = entailmentResult.status === 'fulfilled' ? entailmentResult.value : null
 
   let failedGate: FailedGate = null
-  if (entity.score < thresholds.entityOverlap) failedGate = 'entity_overlap'
+  if (entity.score < thresholds.entityOverlap) failedGate = 'entity_preservation'
   else if (entailment != null && entailment.score < thresholds.entailment) failedGate = 'entailment'
   else if (similarity != null && similarity < thresholds.semanticSimilarity) failedGate = 'semantic_similarity'
 
   return {
     semantic_similarity: similarity == null ? null : round(similarity),
-    nli_entailment: entailment == null ? null : round(entailment.score),
-    entity_overlap: round(entity.score),
+    entailment: entailment == null ? null : round(entailment.score),
+    entity_preservation: round(entity.score),
     passed: failedGate === null,
     failed_gate: failedGate,
     gates_available: {

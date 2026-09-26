@@ -114,24 +114,24 @@ export function SplitView({ mobileOutputOnly = false }: { mobileOutputOnly?: boo
 
         {output && (
           <div className="flex items-center gap-2">
-            {output.quality_scores.passed == null ? (
-              // Nothing ran at all, not even entity_overlap (every chunk's
-              // whole quality-gate call failed) — distinct from a known
-              // failure below.
+            {output.quality_scores.fidelity.passed == null ? (
+              // Nothing ran at all, not even entity_preservation (every
+              // chunk's whole quality-gate call failed) — distinct from a
+              // known failure below.
               <span className="flex items-center gap-1.5 text-xs text-gray-500
                                bg-gray-50 border border-gray-200 rounded-full px-2.5 py-0.5
                                dark:text-gray-400 dark:bg-gray-800 dark:border-gray-700">
                 <span className="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-600" />
                 Not scored
               </span>
-            ) : !output.quality_scores.passed ? (
+            ) : !output.quality_scores.fidelity.passed ? (
               <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-900
                                bg-gray-100 border border-gray-400 rounded-full px-2.5 py-0.5
                                dark:text-gray-100 dark:bg-gray-800 dark:border-gray-500">
                 <span className="w-1.5 h-1.5 rounded-full bg-gray-600 dark:bg-gray-400" />
                 Gate not met
               </span>
-            ) : output.quality_scores.degraded ? (
+            ) : output.quality_scores.overall.degraded ? (
               // passed only means "nothing that ran, failed" here — at least
               // one soft-quality gate (similarity/entailment) never ran, so
               // this is not the same claim as a clean pass below.
@@ -146,7 +146,7 @@ export function SplitView({ mobileOutputOnly = false }: { mobileOutputOnly?: boo
                                bg-gray-100 border border-gray-300 rounded-full px-2.5 py-0.5
                                dark:text-gray-100 dark:bg-gray-800 dark:border-gray-600">
                 <span className="w-1.5 h-1.5 rounded-full bg-gray-900 dark:bg-gray-100" />
-                Similarity {output.quality_scores.semantic_similarity!.toFixed(3)}
+                Similarity {output.quality_scores.fidelity.semantic_similarity!.toFixed(3)}
               </span>
             )}
           </div>

@@ -8,7 +8,7 @@ const playfair = Playfair_Display({ subsets: ['latin'], variable: '--font-playfa
 
 export const metadata: Metadata = {
   title: 'Humanite — AI to Human Text Converter',
-  description: 'Transform AI-generated text into natural, undetectable human prose.',
+  description: 'Transform AI-generated text into natural, fluent human prose.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

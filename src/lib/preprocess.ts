@@ -68,6 +68,26 @@ const CHEMICAL_RE = /\b(?:[A-Z][a-z]?\d*){2,}\b/g
 const PROPER_NOUN_RE =
   /\b(?!(?:The|A|An|This|That|These|Those|It|In|On|At|As|But|And|So|However|If|When|While|There|Here)\s)[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4}\b/g
 
+// Common verbs, auxiliaries, and analysis-prose words that never appear
+// inside a genuine proper noun — a Title Case run containing one of these
+// is a heading or emphasized sentence fragment ("Overall Results Were
+// Mixed"), not a name, and must not be locked as one (fact locks force the
+// humanizer to preserve the span verbatim, which is exactly wrong for a
+// heading it should be free to rephrase).
+const NON_PROPER_WORDS = new Set([
+  'was', 'were', 'is', 'are', 'be', 'been', 'being',
+  'has', 'have', 'had', 'does', 'did', 'do',
+  'will', 'would', 'should', 'could', 'can', 'may', 'might', 'must',
+  'shows', 'showed', 'indicates', 'indicated', 'suggests', 'suggested',
+  'found', 'results', 'result', 'overall', 'mixed', 'discusses', 'discussed',
+  'summary', 'conclusion', 'conclusions', 'introduction', 'background',
+  'increased', 'decreased', 'remained', 'reported', 'revealed',
+])
+
+function looksLikeProperNoun(phrase: string): boolean {
+  return phrase.split(/\s+/).every(word => !NON_PROPER_WORDS.has(word.toLowerCase()))
+}
+
 // Zero-width and invisible chars
 const ZERO_WIDTH_RE = /[​‌‍‎‏‪-‮⁠-⁤﻿­]/g
 const HTML_TAGS_RE = /<[^>]{0,500}>/g
@@ -129,6 +149,7 @@ export function preprocess(text: string): PreprocessResult {
     addLock(m.index!, m.index! + m[0].length, m[0], 'chemical', 'CHEM')
   }
   for (const m of clean.matchAll(PROPER_NOUN_RE)) {
+    if (!looksLikeProperNoun(m[0])) continue
     addLock(m.index!, m.index! + m[0].length, m[0], 'proper_noun', 'NAME')
   }
 

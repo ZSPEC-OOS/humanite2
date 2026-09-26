@@ -127,11 +127,11 @@ export default function Dashboard() {
   // semantic_similarity is null when that specific gate couldn't run (e.g. a
   // custom model endpoint without embedding support) — never fabricate a
   // score in its place.
-  const humanScore = output && output.quality_scores.semantic_similarity != null
-    ? Math.round(output.quality_scores.semantic_similarity * 100)
+  const fidelityScore = output && output.quality_scores.fidelity.semantic_similarity != null
+    ? Math.round(output.quality_scores.fidelity.semantic_similarity * 100)
     : null
-  const scoreLabel = humanScore == null ? 'Not yet scored'
-    : humanScore >= 90 ? 'Excellent' : humanScore >= 75 ? 'Good' : 'Fair'
+  const scoreLabel = fidelityScore == null ? 'Not yet scored'
+    : fidelityScore >= 90 ? 'Excellent' : fidelityScore >= 75 ? 'Good' : 'Fair'
   // Terminology contract: report inference, not proof — never
   // "Undetectable"/"Detected", which implies an evasion guarantee the
   // detector cannot back up.
@@ -139,7 +139,7 @@ export default function Dashboard() {
                    : scanResp?.classification === 'ai-generated'  ? 'AI-like'
                    : scanResp?.classification === 'mixed'         ? 'Mixed'
                    : null
-  const fidelityColor = output?.quality_scores.passed != null
+  const fidelityColor = output?.quality_scores.fidelity.passed != null
     ? 'text-gray-900 dark:text-gray-100'
     : 'text-gray-300 dark:text-gray-600'
 
@@ -185,7 +185,7 @@ export default function Dashboard() {
           </svg>
           <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">Humanized Text</span>
         </div>
-        {output?.quality_scores.passed && (
+        {output?.quality_scores.fidelity.passed && (
           <svg width="18" height="18" viewBox="0 0 20 20" fill="none" className="text-gray-900 dark:text-gray-100">
             <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.4" />
             <path d="M6.5 10l2.5 2.5 5-5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -239,7 +239,7 @@ export default function Dashboard() {
     <PreservationReport
       open={preservationOpen}
       onClose={() => setPreservationOpen(false)}
-      data={output?.quality_scores.preservation_by_type ?? {}}
+      data={output?.quality_scores.fidelity.preservation_by_type ?? {}}
     />
 
     {/* ══════════════════════════════════════════════════════════════
@@ -379,8 +379,8 @@ export default function Dashboard() {
                 {output && (
                   <>
                     <div className="flex items-center gap-3">
-                      {humanScore != null ? (
-                        <CircularScore pct={humanScore} isDark={isDark} />
+                      {fidelityScore != null ? (
+                        <CircularScore pct={fidelityScore} isDark={isDark} />
                       ) : (
                         <div className="w-[68px] h-[68px] rounded-full border border-gray-200
                                         flex items-center justify-center text-gray-400 text-xs
@@ -389,8 +389,8 @@ export default function Dashboard() {
                         </div>
                       )}
                       <div>
-                        <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Human Score</p>
-                        <p className={`text-sm font-bold ${humanScore != null ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}`}>
+                        <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Semantic Fidelity</p>
+                        <p className={`text-sm font-bold ${fidelityScore != null ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}`}>
                           {scoreLabel}
                         </p>
                       </div>
@@ -451,20 +451,20 @@ export default function Dashboard() {
                     <div>
                       <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Fidelity check</p>
                       <p className={`text-sm font-bold ${
-                        output.quality_scores.passed != null ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'
+                        output.quality_scores.fidelity.passed != null ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'
                       }`}
                         title={
-                          output.quality_scores.passed === false
-                            ? [...output.quality_scores.missing_facts.map(f => `Dropped: "${f}"`),
-                               ...output.quality_scores.entailment_issues].join('\n') || undefined
-                            : output.quality_scores.passed === true && output.quality_scores.degraded
+                          output.quality_scores.fidelity.passed === false
+                            ? [...output.quality_scores.fidelity.missing_facts.map(f => `Dropped: "${f}"`),
+                               ...output.quality_scores.fidelity.entailment_issues].join('\n') || undefined
+                            : output.quality_scores.fidelity.passed === true && output.quality_scores.overall.degraded
                             ? 'Some quality checks could not run against the configured model endpoint — this only reflects the checks that did.'
                             : undefined
                         }
                       >
-                        {output.quality_scores.passed === true && output.quality_scores.degraded ? 'Partially checked'
-                          : output.quality_scores.passed === true ? 'Natural'
-                          : output.quality_scores.passed === false ? `Review (${output.quality_scores.failed_gate})`
+                        {output.quality_scores.fidelity.passed === true && output.quality_scores.overall.degraded ? 'Partially checked'
+                          : output.quality_scores.fidelity.passed === true ? 'Fidelity checks passed'
+                          : output.quality_scores.fidelity.passed === false ? `Review (${output.quality_scores.fidelity.failed_gate})`
                           : 'Not yet scored'}
                       </p>
                     </div>
@@ -666,21 +666,21 @@ export default function Dashboard() {
             {output && (
               <div className="shrink-0 flex gap-2 px-4 pt-3 pb-2 flex-wrap border-b border-gray-200 dark:border-gray-800">
                 <span className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium border ${
-                  humanScore != null
+                  fidelityScore != null
                     ? 'bg-gray-100 border-gray-300 text-gray-900 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100'
                     : 'bg-gray-50 border-gray-200 text-gray-500 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400'
                 }`}>
-                  {humanScore != null && <span className="w-1.5 h-1.5 rounded-full bg-gray-900 dark:bg-gray-100" />}
-                  {humanScore != null ? `${humanScore}% Human · ${scoreLabel}` : scoreLabel}
+                  {fidelityScore != null && <span className="w-1.5 h-1.5 rounded-full bg-gray-900 dark:bg-gray-100" />}
+                  {fidelityScore != null ? `${fidelityScore}% Fidelity · ${scoreLabel}` : scoreLabel}
                 </span>
-                {output.quality_scores.passed && (
+                {output.quality_scores.fidelity.passed && (
                   <button
                     onClick={() => setPreservationOpen(true)}
                     className="text-xs px-2.5 py-1 rounded-full font-medium
                                    bg-gray-100 border border-gray-200 text-gray-700
                                    dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300"
                   >
-                    Natural
+                    Fidelity checks passed
                   </button>
                 )}
                 {aiDetLabel && (

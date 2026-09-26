@@ -28,11 +28,11 @@ describe('DetectionGateway', () => {
     expect(result.classification).toBe('ai-generated')
   })
 
-  it('falls back to the human fixture for an unrecognized MOCK_DETECTION_FIXTURE', async () => {
+  it('falls back to the mixed fixture (never human) for an unrecognized MOCK_DETECTION_FIXTURE', async () => {
     delete process.env.DETECTION_PROVIDER
     process.env.MOCK_DETECTION_FIXTURE = 'not-a-real-fixture'
     const result = await getDetectionGateway().detect('The first sentence. The second sentence.')
-    expect(result.classification).toBe('human-written')
+    expect(result.classification).toBe('mixed')
   })
 
   it('selects GPTZeroProvider when DETECTION_PROVIDER=gptzero', async () => {

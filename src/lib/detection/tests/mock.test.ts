@@ -27,6 +27,15 @@ describe('MockDetectionProvider', () => {
     expect(result.provider).toEqual({ id: 'mock' })
   })
 
+  it.each(['human', 'ai', 'mixed', 'low-confidence'] as const)(
+    'labels the %s fixture as a mock, never letting it read as a real detection',
+    async fixture => {
+      const provider = new MockDetectionProvider(fixture)
+      const result = await provider.detect(SAMPLE_TEXT)
+      expect(result.warnings[0]).toBe('Mock — not a real detection')
+    },
+  )
+
   it('never manufactures estimated_ai_like_fraction for a low-confidence result', async () => {
     const provider = new MockDetectionProvider('low-confidence')
     const result = await provider.detect(SAMPLE_TEXT)

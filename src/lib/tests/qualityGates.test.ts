@@ -233,10 +233,10 @@ describe('runQualityGates', () => {
     expect(result.failed_gate).toBeNull()
   })
 
-  it('reports entity_overlap first when both entity overlap and entailment fail', async () => {
+  it('reports entity_preservation first when both entity overlap and entailment fail', async () => {
     const client = mockClient('{"entailment_probability": 0.1, "issues": ["dropped fact"]}', [[1, 0], [1, 0]])
     const result = await runQualityGates(client, 'gpt-4o-mini', 'orig', 'output missing the fact', [lock('42')])
-    expect(result.failed_gate).toBe('entity_overlap')
+    expect(result.failed_gate).toBe('entity_preservation')
     expect(result.passed).toBe(false)
   })
 
@@ -255,7 +255,7 @@ describe('runQualityGates', () => {
 
   // ── Independent gate availability ──────────────────────────────────────────
   // A custom model endpoint that doesn't support the embedding call (or hits
-  // any other unrelated failure) must not take entity_overlap down with it —
+  // any other unrelated failure) must not take entity_preservation down with it —
   // that check has no external dependency and must always still run.
 
   function clientWithFailingEmbeddings(entailmentJson: string) {
@@ -284,7 +284,7 @@ describe('runQualityGates', () => {
   it('still catches a real fact drop even when the embedding call fails entirely', async () => {
     const client = clientWithFailingEmbeddings('{"entailment_probability": 1.0, "issues": []}')
     const result = await runQualityGates(client, 'gpt-4o-mini', 'orig', 'output missing the fact', [lock('42')])
-    expect(result.failed_gate).toBe('entity_overlap')
+    expect(result.failed_gate).toBe('entity_preservation')
     expect(result.passed).toBe(false)
     expect(result.missing_facts).toEqual(['42'])
   })
@@ -293,8 +293,8 @@ describe('runQualityGates', () => {
     const client = clientWithFailingEmbeddings('{"entailment_probability": 1.0, "issues": []}')
     const result = await runQualityGates(client, 'gpt-4o-mini', 'the cat sat', 'the cat sat', [lock('cat')])
     expect(result.semantic_similarity).toBeNull()
-    expect(result.nli_entailment).toBe(1)
-    expect(result.entity_overlap).toBe(1)
+    expect(result.entailment).toBe(1)
+    expect(result.entity_preservation).toBe(1)
   })
 
   it('flags semantic_similarity as unavailable (not just null) when the embedding call fails, while entailment stays available', async () => {
@@ -310,25 +310,25 @@ describe('runQualityGates', () => {
     expect(result.failed_gate).toBeNull()
   })
 
-  it('reports nli_entailment as null when only the entailment call fails, and still runs the others', async () => {
+  it('reports entailment as null when only the entailment call fails, and still runs the others', async () => {
     const client = clientWithFailingChat([[1, 0], [1, 0]])
     const result = await runQualityGates(client, 'gpt-4o-mini', 'the cat sat', 'the cat sat', [lock('cat')])
-    expect(result.nli_entailment).toBeNull()
+    expect(result.entailment).toBeNull()
     expect(result.entailment_issues).toEqual([])
     expect(result.semantic_similarity).toBe(1)
-    expect(result.entity_overlap).toBe(1)
+    expect(result.entity_preservation).toBe(1)
     expect(result.passed).toBe(true)
   })
 
-  it('a genuine entity_overlap failure still blocks passed even when both other gates are unavailable', async () => {
+  it('a genuine entity_preservation failure still blocks passed even when both other gates are unavailable', async () => {
     const chatCreate = vi.fn().mockRejectedValue(new Error('no chat support'))
     const embedCreate = vi.fn().mockRejectedValue(new Error('no embeddings support'))
     const client = { chat: { completions: { create: chatCreate } }, embeddings: { create: embedCreate } } as unknown as OpenAI
     const result = await runQualityGates(client, 'gpt-4o-mini', 'orig', 'output missing the fact', [lock('42')])
     expect(result.semantic_similarity).toBeNull()
-    expect(result.nli_entailment).toBeNull()
-    expect(result.entity_overlap).toBe(0)
-    expect(result.failed_gate).toBe('entity_overlap')
+    expect(result.entailment).toBeNull()
+    expect(result.entity_preservation).toBe(0)
+    expect(result.failed_gate).toBe('entity_preservation')
     expect(result.passed).toBe(false)
     expect(result.gates_available).toEqual({ semantic_similarity: false, entailment: false })
   })

@@ -231,7 +231,6 @@ export async function POST(req: NextRequest) {
         word_count: prep.word_count,
         char_count: prep.char_count,
         fact_lock_count: prep.fact_locks.length,
-        ai_signal_strength: 0,
       },
       processing_metadata: null,
       result_url: `/v1/jobs/${jobId}`,
@@ -274,7 +273,6 @@ export async function POST(req: NextRequest) {
         word_count: prep.word_count,
         char_count: prep.char_count,
         fact_lock_count: prep.fact_locks.length,
-        ai_signal_strength: 0,
       },
       processing_metadata: {
         model_used: result.modelUsed,
@@ -282,7 +280,7 @@ export async function POST(req: NextRequest) {
         processing_duration_ms: durationMs,
       },
       result_url: null,
-      warning: output.quality_scores.degraded
+      warning: output.quality_scores.overall.degraded
         ? 'Some quality checks could not run against the configured model endpoint — output may be under-scored.'
         : null,
     })
