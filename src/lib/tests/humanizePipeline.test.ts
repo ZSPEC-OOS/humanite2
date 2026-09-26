@@ -63,6 +63,43 @@ describe('buildUserPrompt — intensity guide integration', () => {
   })
 })
 
+describe('buildUserPrompt — Phase 10 genre/audience/document context integration', () => {
+  it('omits Genre/Audience lines and the document section when none are given', () => {
+    const prompt = buildUserPrompt('some text', [], 5, 'balanced', 'general')
+    expect(prompt).not.toMatch(/^Genre:/m)
+    expect(prompt).not.toMatch(/^Audience:/m)
+    expect(prompt).not.toContain('DOCUMENT-WIDE CONSISTENCY')
+  })
+
+  it('renders a Genre line and its overlay rules when a genre is given', () => {
+    const prompt = buildUserPrompt('some text', [], 5, 'balanced', 'general', null, 'patient_instructions')
+    expect(prompt).toContain('Genre: patient_instructions')
+  })
+
+  it('renders an Audience line and its overlay rules when an audience is given', () => {
+    const prompt = buildUserPrompt('some text', [], 5, 'balanced', 'general', null, null, 'expert')
+    expect(prompt).toContain('Audience: expert')
+  })
+
+  it('ignores an unrecognized genre/audience rather than throwing', () => {
+    const prompt = buildUserPrompt('some text', [], 5, 'balanced', 'general', null, 'not-a-real-genre', 'not-a-real-audience')
+    expect(prompt).not.toMatch(/^Genre:/m)
+    expect(prompt).not.toMatch(/^Audience:/m)
+  })
+
+  it('embeds the document-wide consistency section when a document context is given', () => {
+    const prompt = buildUserPrompt('some text', [], 5, 'balanced', 'general', null, null, null, {
+      genre: null,
+      audience: null,
+      terminology: { 'the Corporation': 'the Company' },
+      abbreviations: {},
+      sectionSummaries: [],
+    })
+    expect(prompt).toContain('DOCUMENT-WIDE CONSISTENCY')
+    expect(prompt).toContain('the Company')
+  })
+})
+
 function gate(overrides: Partial<QualityScores> = {}): QualityScores {
   return {
     semantic_similarity: 0.9,
@@ -689,6 +726,52 @@ describe('humanizeChunk — Phase 9 provider capabilities', () => {
     expect(chatCreate).toHaveBeenCalledTimes(2)
     expect(result.gatesUnavailable).toBe(true)
     expect(result.gate).toBeNull()
+  })
+})
+
+describe('humanizeChunk — Phase 10 genre/audience/document context threading', () => {
+  it('threads genre, audience and document context into the single-candidate retry loop\'s prompt', async () => {
+    const { client, chatCreate } = mockHumanizeClient([
+      { content: 'Revenue rose to 42 units.' },
+      { content: '{"entailment_probability": 1.0, "issues": []}' },
+    ])
+
+    await humanizeChunk(
+      client, 'gpt-4o-mini', 'fallback', 'Revenue rose to 42 units.', [FACT_42],
+      3, 'balanced', 'general', 0,
+      'patient_instructions', 'expert',
+      { genre: null, audience: null, terminology: { 'the Corporation': 'the Company' }, abbreviations: {}, sectionSummaries: [] },
+    )
+
+    const prompt = chatCreate.mock.calls[0]![0].messages[1].content as string
+    expect(prompt).toContain('Genre: patient_instructions')
+    expect(prompt).toContain('Audience: expert')
+    expect(prompt).toContain('DOCUMENT-WIDE CONSISTENCY')
+    expect(prompt).toContain('the Company')
+  })
+
+  it('threads genre, audience and document context into every Phase 8 candidate prompt', async () => {
+    const source = 'The company reported strong quarterly earnings.'
+    const judgeJson = JSON.stringify({ entailment_probability: 1.0, tone_alignment: 0.9, domain_alignment: 0.9, coherence: 0.9, naturalness: 0.9 })
+    const { client, chatCreate } = mockHumanizeClient([
+      { content: 'Candidate A.' },
+      { content: 'Candidate B.' },
+      { content: judgeJson },
+      { content: judgeJson },
+      { content: '{"claims": []}' },
+    ], [[1, 0], [1, 0]])
+
+    await humanizeChunk(
+      client, 'gpt-4o-mini', 'fallback', source, [],
+      4, 'balanced', 'general', 2,
+      'research_paper', 'academic', null,
+    )
+
+    for (const callIndex of [0, 1]) {
+      const prompt = chatCreate.mock.calls[callIndex]![0].messages[1].content as string
+      expect(prompt).toContain('Genre: research_paper')
+      expect(prompt).toContain('Audience: academic')
+    }
   })
 })
 

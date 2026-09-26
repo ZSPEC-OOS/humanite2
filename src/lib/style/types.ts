@@ -37,6 +37,46 @@ export function toValidDomain(value: string): Domain {
   return isDomain(value) ? value : 'general'
 }
 
+// Phase 10: genre and audience compile as OVERLAYS on top of tone/domain,
+// per the plan's own precedence: "domain > genre > audience > tone". Unlike
+// tone/domain (always one of a fixed set, defaulting to balanced/general),
+// genre and audience are OPTIONAL — a caller who never selects one gets no
+// overlay at all, not a fabricated default, since there's no neutral
+// "general genre" the way there's a neutral "general domain".
+export type Genre =
+  | 'essay' | 'research_paper' | 'report' | 'email' | 'proposal' | 'blog'
+  | 'documentation' | 'clinical_note' | 'patient_instructions' | 'contract' | 'memo'
+
+export type Audience =
+  | 'general' | 'expert' | 'executive' | 'academic' | 'customer' | 'patient' | 'regulatory'
+
+export const GENRES: readonly Genre[] = [
+  'essay', 'research_paper', 'report', 'email', 'proposal', 'blog',
+  'documentation', 'clinical_note', 'patient_instructions', 'contract', 'memo',
+]
+
+export const AUDIENCES: readonly Audience[] = [
+  'general', 'expert', 'executive', 'academic', 'customer', 'patient', 'regulatory',
+]
+
+function isGenre(value: string): value is Genre {
+  return (GENRES as readonly string[]).includes(value)
+}
+
+function isAudience(value: string): value is Audience {
+  return (AUDIENCES as readonly string[]).includes(value)
+}
+
+// Returns null (no overlay) for an absent or unrecognized value — never a
+// fabricated fallback genre/audience the caller never asked for.
+export function toValidGenre(value: string | undefined | null): Genre | null {
+  return value != null && isGenre(value) ? value : null
+}
+
+export function toValidAudience(value: string | undefined | null): Audience | null {
+  return value != null && isAudience(value) ? value : null
+}
+
 // A tag names which stylistic axis a rule governs, so a domain constraint
 // can override a tone rule on the same axis by tag rather than by
 // string-matching rule text.
@@ -77,9 +117,31 @@ export interface DomainProfile {
   overrides: StyleRuleTag[]
 }
 
+export interface GenreProfile {
+  genre: Genre
+  description: string
+  rules: StyleRule[]
+  examples: StyleExample[]
+  // Tags this genre's rules take precedence over — for anything BELOW it
+  // in the domain > genre > audience > tone chain (audience and tone).
+  overrides: StyleRuleTag[]
+}
+
+export interface AudienceProfile {
+  audience: Audience
+  description: string
+  rules: StyleRule[]
+  examples: StyleExample[]
+  // Tags this audience's rules take precedence over — tone only; domain
+  // and genre both outrank audience in the precedence chain.
+  overrides: StyleRuleTag[]
+}
+
 export interface CompiledStyle {
   tone: Tone
   domain: Domain
+  genre: Genre | null
+  audience: Audience | null
   rules: StyleRule[]
   examples: StyleExample[]
 }

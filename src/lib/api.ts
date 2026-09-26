@@ -141,6 +141,11 @@ export interface HumanizeSettings {
   intensity: number
   tone: string
   domain: string
+  // Phase 10 overlays — optional, default to no overlay (unlike tone/
+  // domain, which always default to a value). Compiled with precedence
+  // domain > genre > audience > tone; see src/lib/style/compiler.ts.
+  genre?: string | null
+  audience?: string | null
 }
 
 export interface HumanizeOutput {
@@ -223,6 +228,26 @@ export interface HumanizeOutput {
       succeeded: boolean
       sentences_repaired: number
     }
+    // Phase 10's whole-document consistency pass — null when it never ran
+    // (e.g. a partial async-job save between chunks), distinct from "ran
+    // and found nothing" (an empty violations/gaps array with score 1).
+    document: {
+      terminology_consistency: number
+      terminology_violations: { variant: string; canonical: string; count: number }[]
+      abbreviation_preservation: number
+      abbreviation_gaps: { abbreviation: string; expansion: string }[]
+      terminology_repair: {
+        attempted: boolean
+        succeeded: boolean
+        sentences_repaired: number
+      }
+      // Reported, not repaired — a document-wide register shift has no
+      // single localizable span a targeted repair can fix (see toneDrift.ts).
+      tone_drift: {
+        drifted_chunk_count: number
+        drifted_chunk_indexes: number[]
+      }
+    } | null
   }
   // Automatic AI-detection scan run against this output text once humanize
   // completes — null only if the scan itself failed (never blocks the
