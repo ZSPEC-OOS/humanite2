@@ -205,6 +205,16 @@ export interface HumanizeOutput {
   postprocessor_substitutions: number
 }
 
+// "Show 'requested 8, applied 5 (medical)' in the UI" per the Phase 4 spec
+// — effective intensity = min(requested, domain cap); see
+// src/lib/intensity/effectiveIntensity.ts for the caps table.
+export interface IntensityMetadata {
+  requested: number
+  applied: number
+  domain: string
+  capped: boolean
+}
+
 export interface HumanizeAPIResponse {
   job_id: string
   status: string
@@ -215,6 +225,7 @@ export interface HumanizeAPIResponse {
     char_count: number
     fact_lock_count: number
   } | null
+  intensity: IntensityMetadata | null
   processing_metadata: {
     model_used: string
     provider_used: string
