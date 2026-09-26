@@ -2,7 +2,7 @@ import type OpenAI from 'openai'
 import type { FactLock } from './preprocess'
 import type { TextChunk } from './chunk'
 import { postprocess } from './postprocess'
-import { runQualityGates, QualityScores, PreservationByType, GateAvailability } from './qualityGates'
+import { runQualityGates, checkEntityOverlap, cosineSimilarity, DEFAULT_THRESHOLDS, QualityScores, PreservationByType, GateAvailability } from './qualityGates'
 import { compileStyle, buildStyleSection, toValidTone, toValidDomain } from './style'
 import { buildIntensityGuide } from './intensity'
 import { validateFactLedger, buildFactLedger } from './fidelity'
@@ -10,6 +10,8 @@ import { measureIntensity } from './evaluation/intensity'
 import { evaluateIntensityAlignment } from './evaluation/styleEvaluators'
 import { repairChunk, type RepairStrategy } from './evaluation/repair'
 import { verifyClaims, restoreRelations, type ClaimVerificationResult, type RelationRepairStrategy } from './claims'
+import { runStructuredJudge, type StructuredJudgeResult } from './evaluation/judge'
+import { candidateCountForIntensity, buildRewritePlan, buildPlanSection, computeScore, type RewritePlan } from './selection'
 
 export const SYSTEM_PROMPT = `You are a professional editor. Your only job is to rewrite the provided text \
 so it reads as natural, fluent human prose. You must:
@@ -25,12 +27,19 @@ export function buildUserPrompt(
   intensity: number,
   tone: string,
   domain: string,
+  // Phase 8's shared structural plan (intensity >= 7 only) — every
+  // candidate humanizeChunk generates gets the SAME plan section, so they
+  // vary in wording rather than each independently guessing at which
+  // sentences to merge or split. Omitted (every pre-Phase-8 caller and
+  // test) renders nothing extra.
+  plan?: RewritePlan | null,
 ): string {
   const lockLines = factLocks.length
     ? factLocks.map(l => `- "${l.text}" [${l.lock_type}/${l.label}]`).join('\n')
     : '- (no explicit locks — still preserve all numbers, names, and dates exactly)'
 
   const intensityGuide = buildIntensityGuide(intensity)
+  const planSection = plan ? buildPlanSection(plan) : ''
 
   const compiledStyle = compileStyle(toValidTone(tone), toValidDomain(domain))
   const styleSection = buildStyleSection(compiledStyle)
@@ -43,7 +52,7 @@ ${lockLines}
 ${styleSection}
 
 ${intensityGuide}
-
+${planSection ? `\n${planSection}\n` : ''}
 ## STYLE GUIDANCE
 Prefer plainer alternatives to these AI-typical words where it does not change the sentence's technical or factual meaning — use judgment, not a fixed rule, and never inside a locked span:
 - "utilize" often just means "use"
@@ -174,13 +183,253 @@ export interface ChunkResult {
   relationRepair: RelationRepairSummary
 }
 
-// Runs the generate → postprocess → gate-check → (retry on failure) loop for
-// a single chunk of text. Shared by the synchronous path (one chunk = the
-// whole document) and the async background path (one call per chunk of a
-// long document) so both go through identical quality enforcement.
-export async function humanizeChunk(
+// ── Phase 8: candidate generation and selection ──────────────────────────────
+// "Search more at high intensity" — intensity 1-3 keeps the original
+// single-candidate retry loop below unchanged (it already fits its own
+// budget); intensity >= 4 replaces retrying-on-failure with generating
+// several independent candidates up front and picking the best one, per a
+// cheap-first funnel: deterministic fidelity (free) -> embedding similarity
+// (one batched call) -> the combined structured judge (survivors only).
+// Any critical fidelity failure disqualifies a candidate outright — it is
+// never ranked, only repaired (by the SAME post-selection repair/claims
+// steps the single-candidate path already runs) or, in the worst case,
+// shipped as the least-bad option for that repair to work on.
+
+interface CandidateAttempt {
+  text: string
+  substitutions: number
+  modelUsed: string
+  truncated: boolean
+}
+
+async function generateCandidates(
   client: OpenAI,
   model: string,
+  fallbackText: string,
+  factLocks: FactLock[],
+  intensity: number,
+  userPrompt: string,
+  count: number,
+): Promise<CandidateAttempt[]> {
+  const maxTokens = maxTokensForIntensity(intensity)
+  const completions = await Promise.all(
+    Array.from({ length: count }, () => client.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: maxTokens,
+      temperature: 0.7,
+    })),
+  )
+  return completions.map(completion => {
+    const choice = completion.choices[0]
+    const rewritten = choice?.message?.content?.trim() ?? fallbackText
+    const truncated = choice?.finish_reason === 'length'
+    const post = intensity >= 4 ? postprocess(rewritten, factLocks) : { text: rewritten, substitutions: 0 }
+    return { text: post.text, substitutions: post.substitutions, modelUsed: completion.model, truncated }
+  })
+}
+
+interface SelectionOutcome {
+  best: { text: string; substitutions: number; modelUsed: string; gate: QualityScores; truncated: boolean } | null
+  lastAttempt: CandidateAttempt
+  gatesUnavailable: boolean
+}
+
+type CandidateWithEntity = CandidateAttempt & { entity: ReturnType<typeof checkEntityOverlap> }
+
+// Every candidate was disqualified somewhere in the funnel — fidelity is a
+// hard constraint enforced by disqualifying, never by shipping nothing:
+// ship the least-bad candidate (by the same deterministic entity_preservation
+// score the funnel's own first stage uses) and score it for real with the
+// full orchestrator, so the caller's post-selection repair step has an
+// accurate gate to work from.
+async function fallbackToScoredCandidate(
+  client: OpenAI,
+  judgeModel: string,
+  sanitizedText: string,
+  factLocks: FactLock[],
+  tone: string,
+  domain: string,
+  candidates: CandidateWithEntity[],
+  disqualifiedAt: string,
+  lastAttempt: CandidateAttempt,
+): Promise<SelectionOutcome> {
+  const chosen = candidates.reduce((a, b) => (b.entity.score > a.entity.score ? b : a))
+  console.warn(`Candidate selection: every candidate was disqualified at the ${disqualifiedAt} stage — shipping the least-bad one for repair to work on`, {
+    candidateCount: candidates.length,
+  })
+
+  try {
+    const gate = await runQualityGates(client, judgeModel, sanitizedText, chosen.text, factLocks, undefined, { tone, domain })
+    return {
+      best: { text: chosen.text, substitutions: chosen.substitutions, modelUsed: chosen.modelUsed, gate, truncated: chosen.truncated },
+      lastAttempt,
+      gatesUnavailable: false,
+    }
+  } catch (err) {
+    console.warn('Quality gates unavailable for the fallback candidate, shipping unscored output', {
+      type: err instanceof Error ? err.constructor.name : typeof err,
+    })
+    return { best: null, lastAttempt: chosen, gatesUnavailable: true }
+  }
+}
+
+async function selectBestCandidate(
+  client: OpenAI,
+  model: string,
+  judgeModel: string,
+  fallbackText: string,
+  sanitizedText: string,
+  factLocks: FactLock[],
+  intensity: number,
+  tone: string,
+  domain: string,
+  candidateCount: number,
+): Promise<SelectionOutcome> {
+  // "Planning call (intensity >= 7 only) produces a RewritePlan ... that
+  // all candidates share." A planning failure degrades to no plan rather
+  // than aborting candidate generation entirely — every candidate still
+  // gets generated and judged normally, just without a shared structural
+  // nudge.
+  const plan = intensity >= 7
+    ? await buildRewritePlan(client, model, sanitizedText).catch(err => {
+        console.warn('Rewrite planning unavailable, generating candidates without a shared plan', {
+          type: err instanceof Error ? err.constructor.name : typeof err,
+        })
+        return { operations: [] }
+      })
+    : { operations: [] }
+
+  const userPrompt = buildUserPrompt(sanitizedText, factLocks, intensity, tone, domain, plan)
+  const candidates = await generateCandidates(client, model, fallbackText, factLocks, intensity, userPrompt, candidateCount)
+  const lastAttempt = candidates[0]!
+
+  // Stage 1: deterministic fidelity (free) — entity_preservation and the
+  // Phase 5 fact ledger, exactly the two checks that cost nothing, run
+  // first so a bad candidate never reaches a paid check at all.
+  const stage1: CandidateWithEntity[] = candidates.map(c => ({ ...c, entity: checkEntityOverlap(c.text, factLocks) }))
+  const stage1Survivors = stage1.filter(c =>
+    !c.truncated && c.entity.score >= DEFAULT_THRESHOLDS.entityOverlap && validateFactLedger(sanitizedText, c.text).passed,
+  )
+  if (stage1Survivors.length === 0) {
+    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage1, 'entity_preservation', lastAttempt)
+  }
+
+  // Stage 2: embedding similarity (cheap) — ONE batched call across every
+  // stage-1 survivor plus the source, not one call per candidate.
+  const similarityByCandidate = new Map<CandidateWithEntity, number>()
+  let similarityAvailable = true
+  try {
+    const resp = await client.embeddings.create({
+      model: 'text-embedding-3-small',
+      input: [sanitizedText, ...stage1Survivors.map(c => c.text)],
+    })
+    const embeddings = resp.data.map(d => d.embedding)
+    const sourceEmbedding = embeddings[0]!
+    stage1Survivors.forEach((c, i) => similarityByCandidate.set(c, cosineSimilarity(sourceEmbedding, embeddings[i + 1]!)))
+  } catch (err) {
+    console.warn('Batched candidate similarity unavailable, skipping the cheap filter stage', {
+      type: err instanceof Error ? err.constructor.name : typeof err,
+    })
+    similarityAvailable = false
+  }
+
+  const stage2Survivors = similarityAvailable
+    ? stage1Survivors.filter(c => similarityByCandidate.get(c)! >= DEFAULT_THRESHOLDS.semanticSimilarity)
+    : stage1Survivors
+  if (stage2Survivors.length === 0) {
+    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage1Survivors, 'semantic_similarity', lastAttempt)
+  }
+
+  // Stage 3: the combined structured judge call — survivors only.
+  const judgeResults = await Promise.allSettled(
+    stage2Survivors.map(c => runStructuredJudge(client, judgeModel, sanitizedText, c.text, tone, domain)),
+  )
+  const stage3Survivors: Array<{ candidate: CandidateWithEntity; judge: StructuredJudgeResult }> = []
+  judgeResults.forEach((result, i) => {
+    if (result.status === 'fulfilled' && result.value.entailment_probability >= DEFAULT_THRESHOLDS.entailment) {
+      stage3Survivors.push({ candidate: stage2Survivors[i]!, judge: result.value })
+    }
+  })
+
+  if (stage3Survivors.length === 0) {
+    const anyJudged = judgeResults.some(r => r.status === 'fulfilled')
+    if (!anyJudged) {
+      // The judge is unavailable entirely, not merely failing individual
+      // candidates on entailment — matches the single-candidate path's own
+      // gatesUnavailable convention rather than silently shipping unjudged.
+      return { best: null, lastAttempt, gatesUnavailable: true }
+    }
+    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage2Survivors, 'entailment', lastAttempt)
+  }
+
+  // Rank survivors by the plan's weighted formula
+  // (S = w_N·N + w_T·T + w_D·D + w_I·I + w_C·C) — the only point in this
+  // funnel where a soft quality dimension (not a hard fidelity constraint)
+  // decides the outcome.
+  let winner = stage3Survivors[0]!
+  let winnerScore = -Infinity
+  for (const survivor of stage3Survivors) {
+    const metrics = measureIntensity(sanitizedText, survivor.candidate.text, factLocks.map(l => l.text))
+    const intensityAlignment = evaluateIntensityAlignment(metrics.transformationMagnitude, intensity).score!
+    const score = computeScore({
+      naturalness: survivor.judge.naturalness,
+      tone_alignment: survivor.judge.tone_alignment,
+      domain_alignment: survivor.judge.domain_alignment,
+      intensity_alignment: intensityAlignment,
+      coherence: survivor.judge.coherence,
+    })
+    if (score > winnerScore) {
+      winnerScore = score
+      winner = survivor
+    }
+  }
+
+  const { candidate, judge } = winner
+  const similarity = similarityByCandidate.get(candidate) ?? null
+  const gate: QualityScores = {
+    semantic_similarity: similarity == null ? null : round(similarity),
+    entailment: round(judge.entailment_probability),
+    entity_preservation: round(candidate.entity.score),
+    passed: true,
+    failed_gate: null,
+    gates_available: { semantic_similarity: similarityAvailable, entailment: true },
+    missing_facts: candidate.entity.missing,
+    entailment_issues: judge.entailment_issues,
+    preservation_by_type: candidate.entity.by_type,
+    tone_alignment: round(judge.tone_alignment),
+    domain_alignment: round(judge.domain_alignment),
+    coherence: round(judge.coherence),
+    naturalness: round(judge.naturalness),
+    style_issues: judge.style_issues,
+  }
+
+  return {
+    best: { text: candidate.text, substitutions: candidate.substitutions, modelUsed: candidate.modelUsed, gate, truncated: candidate.truncated },
+    lastAttempt,
+    gatesUnavailable: false,
+  }
+}
+
+interface RetryLoopOutcome {
+  best: { text: string; substitutions: number; modelUsed: string; gate: QualityScores; truncated: boolean } | null
+  lastAttempt: { text: string; substitutions: number; modelUsed: string; truncated: boolean }
+  retryCount: number
+  gatesUnavailable: boolean
+}
+
+// The original single-candidate generate → postprocess → gate-check →
+// (retry on failure) loop, unchanged from before Phase 8 — used whenever
+// candidateCountForIntensity(intensity) is 1 (intensity 1-3), which already
+// fits its own budget without needing the candidate-search alternative
+// above.
+async function runSingleCandidateRetryLoop(
+  client: OpenAI,
+  model: string,
+  judgeModel: string,
   fallbackText: string,
   sanitizedText: string,
   factLocks: FactLock[],
@@ -188,13 +437,8 @@ export async function humanizeChunk(
   tone: string,
   domain: string,
   maxRetries: number,
-): Promise<ChunkResult> {
+): Promise<RetryLoopOutcome> {
   const basePrompt = buildUserPrompt(sanitizedText, factLocks, intensity, tone, domain)
-  // The judge (entailment/fidelity check) runs on a separately configured
-  // model when available, falling back to the generator itself only when no
-  // JUDGE_MODEL is set — a model judging its own output is a documented
-  // self-preference bias (ref. 7 in the improvement plan).
-  const judgeModel = process.env.JUDGE_MODEL || model
   let userPrompt = basePrompt
   let retryCount = 0
   let gatesUnavailable = false
@@ -259,6 +503,58 @@ export async function humanizeChunk(
     if (gateResult.passed || attempt === maxRetries) break
     userPrompt = `${basePrompt}\n\n${buildRetryAddendum(gateResult)}`
     if (truncated) currentMaxTokens = boostedMaxTokens(currentMaxTokens)
+  }
+
+  return { best, lastAttempt, retryCount, gatesUnavailable }
+}
+
+// Runs the generate → postprocess → gate-check → (retry on failure) loop for
+// a single chunk of text (candidateCountForIntensity(intensity) === 1), or
+// generates and selects among several candidates otherwise (Phase 8's
+// selectBestCandidate). Either way, the SAME post-selection repair/claim-
+// verification tail below runs on whichever text was chosen. Shared by the
+// synchronous path (one chunk = the whole document) and the async
+// background path (one call per chunk of a long document) so both go
+// through identical quality enforcement.
+export async function humanizeChunk(
+  client: OpenAI,
+  model: string,
+  fallbackText: string,
+  sanitizedText: string,
+  factLocks: FactLock[],
+  intensity: number,
+  tone: string,
+  domain: string,
+  maxRetries: number,
+): Promise<ChunkResult> {
+  // The judge (entailment/fidelity check) runs on a separately configured
+  // model when available, falling back to the generator itself only when no
+  // JUDGE_MODEL is set — a model judging its own output is a documented
+  // self-preference bias (ref. 7 in the improvement plan).
+  const judgeModel = process.env.JUDGE_MODEL || model
+  const candidateCount = candidateCountForIntensity(intensity)
+
+  let best: { text: string; substitutions: number; modelUsed: string; gate: QualityScores; truncated: boolean } | null
+  let lastAttempt: { text: string; substitutions: number; modelUsed: string; truncated: boolean }
+  let retryCount = 0
+  let gatesUnavailable = false
+
+  if (candidateCount > 1) {
+    // Phase 8: generate several independent candidates and select the best
+    // one, rather than retrying a single candidate on failure — see
+    // selectBestCandidate above.
+    const selection = await selectBestCandidate(client, model, judgeModel, fallbackText, sanitizedText, factLocks, intensity, tone, domain, candidateCount)
+    best = selection.best
+    lastAttempt = selection.lastAttempt
+    gatesUnavailable = selection.gatesUnavailable
+  } else {
+    const retryLoop = await runSingleCandidateRetryLoop(
+      client, model, judgeModel, fallbackText, sanitizedText, factLocks, intensity, tone, domain, maxRetries,
+    )
+    best = retryLoop.best
+    lastAttempt = retryLoop.lastAttempt
+    retryCount = retryLoop.retryCount
+    gatesUnavailable = retryLoop.gatesUnavailable
   }
 
   if (gatesUnavailable) {
