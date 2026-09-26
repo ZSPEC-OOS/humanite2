@@ -1,0 +1,110 @@
+import type { AdversarialFixture } from '../types'
+
+// Deterministic, no model calls — every fixture is checked against
+// preprocess.ts's real fact-locking plus qualityGates.ts's real
+// checkEntityOverlap (see tests/benchmark/tests/adversarialFixtures.test.ts),
+// not asserted by hand. `currentlyDetected` reflects what those two
+// functions, as actually implemented today, are verified to do — not what
+// they ought to do once Phase 5 ships a deterministic fact ledger with
+// modality/negation/comparator extractors and per-sentence binding.
+export const ADVERSARIAL_FIXTURES: AdversarialFixture[] = [
+  {
+    id: 'unit-quantity-recognized-unit',
+    category: 'unit-quantity',
+    description: 'A number+unit pair using a suffix preprocess.ts already recognizes (mg) — the plan\'s own canonical example.',
+    source: 'Store the sample at 5 mg per vial.',
+    corrupted: 'Store the sample at 50 mg per vial.',
+    mandatoryFacts: ['5 mg'],
+    currentlyDetected: true,
+  },
+  {
+    id: 'unit-quantity-unrecognized-unit',
+    category: 'unit-quantity',
+    description: 'A number+currency pair using a spelled-out unit ("dollars"/"euros") outside preprocess.ts\'s fixed unit whitelist — only the bare number gets locked, so the currency swap is invisible.',
+    source: 'The shipment weighs 5 kilograms and costs 200 dollars.',
+    corrupted: 'The shipment weighs 5 kilograms and costs 200 euros.',
+    mandatoryFacts: ['200 dollars'],
+    currentlyDetected: false,
+  },
+  {
+    id: 'modality-may-must',
+    category: 'modality',
+    description: 'Modal verb strengthened from permissive to mandatory — preprocess.ts has no modality extractor at all.',
+    source: 'Patients may discontinue the medication after 7 days.',
+    corrupted: 'Patients must discontinue the medication after 7 days.',
+    mandatoryFacts: ['may discontinue'],
+    currentlyDetected: false,
+  },
+  {
+    id: 'negation-dropped',
+    category: 'negation',
+    description: 'Negation dropped, inverting the claim — preprocess.ts has no negation extractor.',
+    source: 'The results did not increase significantly.',
+    corrupted: 'The results increased significantly.',
+    mandatoryFacts: ['did not increase'],
+    currentlyDetected: false,
+  },
+  {
+    id: 'comparator-sign-flip',
+    category: 'comparator',
+    description: 'Comparator direction flipped on a p-value — the number (0.05) is locked, but the comparator symbol is not part of the lock.',
+    source: 'Statistical analysis of the outcome yielded p > 0.05.',
+    corrupted: 'Statistical analysis of the outcome yielded p < 0.05.',
+    mandatoryFacts: ['p > 0.05'],
+    currentlyDetected: false,
+  },
+  {
+    id: 'sign-flip-percentage',
+    category: 'sign',
+    description: 'Leading +/- sign flipped on a percentage — NUMBER_RE\'s match starts at \\d, so a leading sign character is never part of the locked text.',
+    source: 'Revenue changed by +5% year over year.',
+    corrupted: 'Revenue changed by -5% year over year.',
+    mandatoryFacts: ['+5%'],
+    currentlyDetected: false,
+  },
+  {
+    id: 'range-endpoint-swap',
+    category: 'range-endpoint',
+    description: 'Range endpoints swapped (a dosing min/max inversion) — both numbers are individually locked and both still appear in the corrupted text, just repositioned; checkEntityOverlap counts occurrences globally, not per-sentence position.',
+    source: 'The dosing range spans from 5 mg to 20 mg.',
+    corrupted: 'The dosing range spans from 20 mg to 5 mg.',
+    mandatoryFacts: ['5 mg', '20 mg'],
+    currentlyDetected: false,
+  },
+  {
+    id: 'scientific-notation-exponent-sign',
+    category: 'scientific-notation',
+    description: 'Exponent sign dropped (a factor-of-10^8 change) — plain (non-LaTeX) scientific notation is not covered by EQUATION_RE, and NUMBER_RE tokenizes the exponent into a bare digit that survives the sign flip unchanged.',
+    source: 'The measured concentration was 3.2 x 10^-4 mol/L.',
+    corrupted: 'The measured concentration was 3.2 x 10^4 mol/L.',
+    mandatoryFacts: ['10^-4'],
+    currentlyDetected: false,
+  },
+  {
+    id: 'version-number-swap',
+    category: 'version-number',
+    description: 'Firmware versions swapped between two named devices — both version strings individually survive; only their binding to the correct device changed.',
+    source: 'Server Alpha runs firmware 2.1; Server Beta runs firmware 3.4.',
+    corrupted: 'Server Alpha runs firmware 3.4; Server Beta runs firmware 2.1.',
+    mandatoryFacts: ['firmware 2.1', 'firmware 3.4'],
+    currentlyDetected: false,
+  },
+  {
+    id: 'cross-reference-swap',
+    category: 'cross-reference',
+    description: 'Section cross-references swapped — both section numbers individually survive; only which topic each one points to changed.',
+    source: 'See Section 4 for methodology and Section 9 for results.',
+    corrupted: 'See Section 9 for methodology and Section 4 for results.',
+    mandatoryFacts: ['Section 4', 'Section 9'],
+    currentlyDetected: false,
+  },
+  {
+    id: 'entity-swap-compound',
+    category: 'entity-swap',
+    description: 'Two single-letter-labeled entities swapped — PROPER_NOUN_RE requires at least one lowercase letter after the initial capital, so a bare "A"/"B" label is never locked at all; CHEMICAL_RE cannot match across the space either.',
+    source: 'Compound A showed higher potency than Compound B in the assay.',
+    corrupted: 'Compound B showed higher potency than Compound A in the assay.',
+    mandatoryFacts: ['Compound A', 'Compound B'],
+    currentlyDetected: false,
+  },
+]
