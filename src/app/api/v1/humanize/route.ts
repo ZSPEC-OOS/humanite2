@@ -8,7 +8,8 @@ import { preprocess, FactLock } from '@/lib/preprocess'
 import { generateWatermark, hashContent } from '@/lib/watermark'
 import { chunkFactLockedText } from '@/lib/chunk'
 import { humanizeChunk, ChunkResult, joinChunkResults } from '@/lib/humanizePipeline'
-import { toValidDomain } from '@/lib/style'
+import { toValidDomain, toValidGenre, toValidAudience } from '@/lib/style'
+import { buildDocumentContext, emptyDocumentContext, runDocumentConsistencyPass, type DocumentContext } from '@/lib/document'
 import { effectiveIntensity } from '@/lib/intensity'
 import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
 import { buildOutput, tryClassifyOutput } from '@/lib/humanizeOutput'
@@ -40,6 +41,32 @@ interface HumanizeSettings {
   intensity: number
   tone: string
   domain: string
+  genre: string | null
+  audience: string | null
+}
+
+// Best-effort — a document without unusual terminology, abbreviations, or
+// section structure gets no less service from this failing than from
+// succeeding; see buildDocumentContext's own budget note (capped analysis
+// text, capped extraction counts) for why this stays a single call rather
+// than something worth retrying.
+async function buildDocumentContextSafely(
+  client: OpenAI,
+  model: string,
+  sourceText: string,
+  genre: string | null,
+  audience: string | null,
+): Promise<DocumentContext> {
+  const validGenre = toValidGenre(genre)
+  const validAudience = toValidAudience(audience)
+  try {
+    return await buildDocumentContext(client, model, sourceText, validGenre, validAudience)
+  } catch (err) {
+    console.warn('Document context analysis unavailable, continuing without cross-chunk consistency data', {
+      type: err instanceof Error ? err.constructor.name : typeof err,
+    })
+    return emptyDocumentContext(validGenre, validAudience)
+  }
 }
 
 // ── Async background processing ──────────────────────────────────────────────
@@ -62,12 +89,14 @@ async function processHumanizeJobAsync(
     const client = new OpenAI({ apiKey, baseURL })
     const start = Date.now()
     const chunks = chunkFactLockedText(sanitizedText, factLocks, CHUNK_MAX_CHARS)
+    const documentContext = await buildDocumentContextSafely(client, model, sanitizedText, settings.genre, settings.audience)
 
     const results: ChunkResult[] = []
     for (const chunk of chunks) {
       const result = await humanizeChunk(
         client, model, chunk.text, chunk.text, chunk.factLocks,
         settings.intensity, settings.tone, settings.domain, MAX_GATE_RETRIES,
+        settings.genre, settings.audience, documentContext,
       )
       results.push(result)
 
@@ -89,11 +118,13 @@ async function processHumanizeJobAsync(
       }), 'persist humanize job progress')
     }
 
-    const postText = joinChunkResults(results, chunks)
+    const joinedText = joinChunkResults(results, chunks)
+    const consistency = await runDocumentConsistencyPass(client, model, joinedText, documentContext, results.map(r => r.text))
+    const postText = consistency.text
     const modelUsed = results.at(-1)?.modelUsed ?? model
     const watermark = generateWatermark(jobId, modelUsed)
     const detection = await tryClassifyOutput(postText, userId, tier, userConfig?.gptzeroApiKey || undefined)
-    const output = buildOutput(postText, results, watermark, detection)
+    const output = buildOutput(postText, results, watermark, detection, consistency)
     const durationMs = Date.now() - start
 
     await saveTransformation({ jobId, userId, inputText: originalText, output, modelUsed })
@@ -134,7 +165,7 @@ export async function POST(req: NextRequest) {
 
   let body: {
     text?: string
-    settings?: { intensity?: number; tone?: string; domain?: string }
+    settings?: { intensity?: number; tone?: string; domain?: string; genre?: string | null; audience?: string | null }
   }
   try {
     body = await req.json()
@@ -155,7 +186,9 @@ export async function POST(req: NextRequest) {
   // domain like legal or medical never receives a rewrite instruction
   // stronger than its preservation rules can tolerate.
   const intensity = effectiveIntensity(requestedIntensity, toValidDomain(domain))
-  const settings: HumanizeSettings = { intensity: intensity.applied, tone, domain }
+  const genre = settingsIn.genre ?? null
+  const audience = settingsIn.audience ?? null
+  const settings: HumanizeSettings = { intensity: intensity.applied, tone, domain, genre, audience }
 
   if (text.length < 20) {
     return NextResponse.json(
@@ -251,16 +284,20 @@ export async function POST(req: NextRequest) {
     const { apiKey, baseURL, model } = resolveProvider(userConfig)
     const client = new OpenAI({ apiKey, baseURL })
     const start = Date.now()
+    const documentContext = await buildDocumentContextSafely(client, model, prep.sanitized_text, genre, audience)
 
     const result = await humanizeChunk(
       client, model, text, prep.sanitized_text, prep.fact_locks,
       intensity.applied, tone, domain, MAX_GATE_RETRIES,
+      genre, audience, documentContext,
     )
+    const consistency = await runDocumentConsistencyPass(client, model, result.text, documentContext, [result.text])
+    const finalText = consistency.text
     const durationMs = Date.now() - start
 
     const watermark = generateWatermark(jobId, result.modelUsed)
-    const detection = await tryClassifyOutput(result.text, auth.claims.sub, auth.claims.tier, userConfig?.gptzeroApiKey || undefined)
-    const output = buildOutput(result.text, [result], watermark, detection)
+    const detection = await tryClassifyOutput(finalText, auth.claims.sub, auth.claims.tier, userConfig?.gptzeroApiKey || undefined)
+    const output = buildOutput(finalText, [result], watermark, detection, consistency)
 
     await saveTransformation({ jobId, userId: auth.claims.sub, inputText: text, output, modelUsed: result.modelUsed })
 
@@ -269,7 +306,7 @@ export async function POST(req: NextRequest) {
       completedAt: new Date(),
       updatedAt: new Date(),
       watermarkFingerprint: watermark.fingerprint,
-      contentHash: hashContent(result.text),
+      contentHash: hashContent(finalText),
     }), 'complete humanize job')
 
     return NextResponse.json({

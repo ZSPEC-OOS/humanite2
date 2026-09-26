@@ -3,7 +3,7 @@ import type { FactLock } from './preprocess'
 import type { TextChunk } from './chunk'
 import { postprocess } from './postprocess'
 import { runQualityGates, checkEntityOverlap, cosineSimilarity, DEFAULT_THRESHOLDS, QualityScores, PreservationByType, GateAvailability } from './qualityGates'
-import { compileStyle, buildStyleSection, toValidTone, toValidDomain } from './style'
+import { compileStyle, buildStyleSection, toValidTone, toValidDomain, toValidGenre, toValidAudience } from './style'
 import { buildIntensityGuide } from './intensity'
 import { validateFactLedger, buildFactLedger } from './fidelity'
 import { measureIntensity } from './evaluation/intensity'
@@ -13,6 +13,7 @@ import { verifyClaims, restoreRelations, type ClaimVerificationResult, type Rela
 import { runStructuredJudge, type StructuredJudgeResult } from './evaluation/judge'
 import { candidateCountForIntensity, buildRewritePlan, buildPlanSection, computeScore, type RewritePlan } from './selection'
 import { resolveCapabilities } from './providers'
+import { buildDocumentContextSection, type DocumentContext } from './document'
 
 export const SYSTEM_PROMPT = `You are a professional editor. Your only job is to rewrite the provided text \
 so it reads as natural, fluent human prose. You must:
@@ -34,6 +35,16 @@ export function buildUserPrompt(
   // sentences to merge or split. Omitted (every pre-Phase-8 caller and
   // test) renders nothing extra.
   plan?: RewritePlan | null,
+  // Phase 10: optional overlays on top of tone/domain (see
+  // style/compiler.ts's domain > genre > audience > tone precedence) — raw
+  // strings, coerced the same safe-default way tone/domain already are,
+  // never crashing on an unrecognized value — and the document-wide
+  // terminology/abbreviation/section-summary context every chunk of a
+  // multi-chunk document shares. All omitted (every pre-Phase-10 caller and
+  // test) renders nothing extra.
+  genre?: string | null,
+  audience?: string | null,
+  documentContext?: DocumentContext | null,
 ): string {
   const lockLines = factLocks.length
     ? factLocks.map(l => `- "${l.text}" [${l.lock_type}/${l.label}]`).join('\n')
@@ -41,8 +52,9 @@ export function buildUserPrompt(
 
   const intensityGuide = buildIntensityGuide(intensity)
   const planSection = plan ? buildPlanSection(plan) : ''
+  const documentSection = documentContext ? buildDocumentContextSection(documentContext) : ''
 
-  const compiledStyle = compileStyle(toValidTone(tone), toValidDomain(domain))
+  const compiledStyle = compileStyle(toValidTone(tone), toValidDomain(domain), toValidGenre(genre), toValidAudience(audience))
   const styleSection = buildStyleSection(compiledStyle)
 
   return `## HARD CONSTRAINTS — DO NOT ALTER THESE EXACT STRINGS
@@ -53,7 +65,7 @@ ${lockLines}
 ${styleSection}
 
 ${intensityGuide}
-${planSection ? `\n${planSection}\n` : ''}
+${planSection ? `\n${planSection}\n` : ''}${documentSection ? `\n${documentSection}\n` : ''}
 ## STYLE GUIDANCE
 Prefer plainer alternatives to these AI-typical words where it does not change the sentence's technical or factual meaning — use judgment, not a fixed rule, and never inside a locked span:
 - "utilize" often just means "use"
@@ -300,6 +312,9 @@ async function selectBestCandidate(
   tone: string,
   domain: string,
   candidateCount: number,
+  genre?: string | null,
+  audience?: string | null,
+  documentContext?: DocumentContext | null,
 ): Promise<SelectionOutcome> {
   // "Planning call (intensity >= 7 only) produces a RewritePlan ... that
   // all candidates share." A planning failure degrades to no plan rather
@@ -315,7 +330,7 @@ async function selectBestCandidate(
       })
     : { operations: [] }
 
-  const userPrompt = buildUserPrompt(sanitizedText, factLocks, intensity, tone, domain, plan)
+  const userPrompt = buildUserPrompt(sanitizedText, factLocks, intensity, tone, domain, plan, genre, audience, documentContext)
   const candidates = await generateCandidates(client, model, fallbackText, factLocks, intensity, userPrompt, candidateCount)
   const lastAttempt = candidates[0]!
 
@@ -462,8 +477,11 @@ async function runSingleCandidateRetryLoop(
   tone: string,
   domain: string,
   maxRetries: number,
+  genre?: string | null,
+  audience?: string | null,
+  documentContext?: DocumentContext | null,
 ): Promise<RetryLoopOutcome> {
-  const basePrompt = buildUserPrompt(sanitizedText, factLocks, intensity, tone, domain)
+  const basePrompt = buildUserPrompt(sanitizedText, factLocks, intensity, tone, domain, null, genre, audience, documentContext)
   let userPrompt = basePrompt
   let retryCount = 0
   let gatesUnavailable = false
@@ -551,6 +569,9 @@ export async function humanizeChunk(
   tone: string,
   domain: string,
   maxRetries: number,
+  genre?: string | null,
+  audience?: string | null,
+  documentContext?: DocumentContext | null,
 ): Promise<ChunkResult> {
   // The judge (entailment/fidelity check) runs on a separately configured
   // model when available, falling back to the generator itself only when no
@@ -568,13 +589,13 @@ export async function humanizeChunk(
     // Phase 8: generate several independent candidates and select the best
     // one, rather than retrying a single candidate on failure — see
     // selectBestCandidate above.
-    const selection = await selectBestCandidate(client, model, judgeModel, fallbackText, sanitizedText, factLocks, intensity, tone, domain, candidateCount)
+    const selection = await selectBestCandidate(client, model, judgeModel, fallbackText, sanitizedText, factLocks, intensity, tone, domain, candidateCount, genre, audience, documentContext)
     best = selection.best
     lastAttempt = selection.lastAttempt
     gatesUnavailable = selection.gatesUnavailable
   } else {
     const retryLoop = await runSingleCandidateRetryLoop(
-      client, model, judgeModel, fallbackText, sanitizedText, factLocks, intensity, tone, domain, maxRetries,
+      client, model, judgeModel, fallbackText, sanitizedText, factLocks, intensity, tone, domain, maxRetries, genre, audience, documentContext,
     )
     best = retryLoop.best
     lastAttempt = retryLoop.lastAttempt

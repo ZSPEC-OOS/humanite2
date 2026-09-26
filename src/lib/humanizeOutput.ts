@@ -6,6 +6,7 @@ import { DetectionResult } from '@/lib/detection/contracts'
 import { recordScanTelemetry } from '@/lib/observability/scanTelemetry'
 import { checkAndRecordScanUsage } from '@/lib/usageLimits'
 import { evaluateStyle } from '@/lib/evaluation/styleEvaluators'
+import type { DocumentConsistencyResult } from '@/lib/document'
 
 // quality_scores schema v2 — replaces a single flat `passed` (which read as
 // a bare humanness verdict) with three distinct concerns: whether facts
@@ -19,6 +20,7 @@ export function buildOutput(
   results: ChunkResult[],
   watermark: ReturnType<typeof generateWatermark>,
   detection: DetectionResult | null,
+  documentConsistency?: DocumentConsistencyResult | null,
 ) {
   const agg = aggregateChunkResults(results)
   const style = evaluateStyle(agg.tone_alignment, agg.domain_alignment, agg.naturalness, agg.intensity_alignment)
@@ -85,6 +87,34 @@ export function buildOutput(
         succeeded: agg.relation_repair.succeeded,
         sentences_repaired: agg.relation_repair.sentences_repaired,
       },
+      // Phase 10's whole-document consistency pass — null when it never
+      // ran (e.g. a partial async-job save between chunks, before the
+      // document is fully assembled), distinct from the "ran and found
+      // nothing" case (an empty violations/gaps array with a 1.0 score).
+      document: documentConsistency ? {
+        terminology_consistency: documentConsistency.terminologyConsistency,
+        terminology_violations: documentConsistency.terminologyViolations.map(v => ({
+          variant: v.variant,
+          canonical: v.canonical,
+          count: v.count,
+        })),
+        abbreviation_preservation: documentConsistency.abbreviationPreservation,
+        abbreviation_gaps: documentConsistency.abbreviationGaps.map(g => ({
+          abbreviation: g.abbreviation,
+          expansion: g.expansion,
+        })),
+        terminology_repair: {
+          attempted: documentConsistency.terminologyRepair.attempted,
+          succeeded: documentConsistency.terminologyRepair.succeeded,
+          sentences_repaired: documentConsistency.terminologyRepair.sentencesRepaired,
+        },
+        // Reported, not repaired — see toneDrift.ts for why tone drift
+        // stays measurement-only in this phase.
+        tone_drift: {
+          drifted_chunk_count: documentConsistency.toneDriftedChunkCount,
+          drifted_chunk_indexes: documentConsistency.toneDriftedChunkIndexes,
+        },
+      } : null,
     },
     detection,
     // Distinguishes "not analyzed" (detection is null, this is set) from a

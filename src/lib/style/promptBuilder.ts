@@ -9,9 +9,13 @@ export function buildStyleSection(compiled: CompiledStyle): string {
   const exampleBlock = compiled.examples.length
     ? `\n\nExample of this register:\n${compiled.examples.map(e => `"${e.text}"`).join('\n')}`
     : ''
+  // Omitted entirely when not selected — no "Genre: (none)" line cluttering
+  // the pre-Phase-10 tone/domain-only prompt shape.
+  const genreLine = compiled.genre ? `\nGenre: ${compiled.genre}` : ''
+  const audienceLine = compiled.audience ? `\nAudience: ${compiled.audience}` : ''
 
   return `Tone: ${compiled.tone}
-Domain: ${compiled.domain}
+Domain: ${compiled.domain}${genreLine}${audienceLine}
 
 ${ruleLines}${exampleBlock}`
 }
