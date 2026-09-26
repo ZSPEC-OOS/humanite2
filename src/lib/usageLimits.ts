@@ -77,6 +77,19 @@ function todayKey(): string {
   return new Date().toISOString().slice(0, 10) // YYYY-MM-DD, UTC
 }
 
+// Sha256(email) hashes (matching auth-utils.ts's issueAccessToken, which is
+// the only producer of the email_hash JWT claim callers pass in here) that
+// bypass both pools' quotas entirely — an operator/owner allowlist for
+// accounts that shouldn't be metered against this deployment's own paid
+// keys, distinct from the free/pro/enterprise tiers above. Comma-separated;
+// re-read on every call like the tier overrides, for the same reason.
+function unlimitedEmailHashes(): Set<string> {
+  const raw = process.env.UNLIMITED_USAGE_EMAIL_HASHES ?? ''
+  return new Set(
+    raw.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
+  )
+}
+
 export interface UsageCheckResult {
   allowed: boolean
   reason?: string
@@ -105,7 +118,15 @@ async function checkAndRecordPoolUsage(
   tier: string,
   words: number,
   pool: UsagePool,
+  emailHash: string,
 ): Promise<UsageCheckResult> {
+  // Allowlisted accounts skip the quota (and the Firestore write) entirely —
+  // checked first so it also overrides the "not included in your plan" gate
+  // below.
+  if (emailHash && unlimitedEmailHashes().has(emailHash.toLowerCase())) {
+    return { allowed: true }
+  }
+
   const limits = limitsForTier(tier)[pool]
   const reqField = `${pool}Requests`
   const wordField = `${pool}Words`
@@ -165,10 +186,10 @@ async function checkAndRecordPoolUsage(
   }
 }
 
-export async function checkAndRecordGenerationUsage(userId: string, tier: string, words: number): Promise<UsageCheckResult> {
-  return checkAndRecordPoolUsage(userId, tier, words, 'generation')
+export async function checkAndRecordGenerationUsage(userId: string, tier: string, words: number, emailHash = ''): Promise<UsageCheckResult> {
+  return checkAndRecordPoolUsage(userId, tier, words, 'generation', emailHash)
 }
 
-export async function checkAndRecordScanUsage(userId: string, tier: string, words: number): Promise<UsageCheckResult> {
-  return checkAndRecordPoolUsage(userId, tier, words, 'scan')
+export async function checkAndRecordScanUsage(userId: string, tier: string, words: number, emailHash = ''): Promise<UsageCheckResult> {
+  return checkAndRecordPoolUsage(userId, tier, words, 'scan', emailHash)
 }
