@@ -1,4 +1,5 @@
 import type { CorpusItem } from '../types'
+import { item } from './helpers'
 
 export const ACADEMIC_CORPUS: CorpusItem[] = [
   {
@@ -81,4 +82,247 @@ export const ACADEMIC_CORPUS: CorpusItem[] = [
     prohibitedChanges: ['41 agricultural plots', 'decreased soil organic carbon', 'p = 0.40 in year 2'],
     expectedProperties: { minWordCount: 60, maxWordCount: 160 },
   },
+
+  // Phase 11 scale-up: academic-11 through academic-50, bringing this
+  // domain from 10 to 50 items.
+  item(
+    'academic-11', 'academic',
+    'A 12-week supervised aerobic exercise program in 180 adults with prehypertension reduced systolic blood pressure by an average of 6.8 mmHg relative to a stretching-only control group (n = 176), a difference that reached significance (p = 0.002). Diastolic pressure fell by 3.1 mmHg in the exercise group versus 0.9 mmHg in controls. Adherence, measured as sessions completed out of 36 prescribed, averaged 82 percent, and no serious adverse events were reported in either arm across the full study period.',
+    ['180 adults', '6.8 mmHg', 'n = 176', 'p = 0.002', '3.1 mmHg', '0.9 mmHg', '36 prescribed', '82 percent'],
+    ['a 12-week supervised aerobic exercise program in 18 adults', 'increased systolic blood pressure', 'a difference that reached significance (p = 0.82)'],
+  ),
+  item(
+    'academic-12', 'academic',
+    'In a double-blind trial of 512 older adults with low baseline vitamin D, daily supplementation of 2,000 IU for 12 months did not significantly reduce fracture incidence compared to placebo (4.1 percent versus 4.6 percent, p = 0.61), though serum 25-hydroxyvitamin D levels rose from a mean of 18 ng/mL to 42 ng/mL in the treatment group. A prespecified subgroup analysis of participants over age 75 showed a trend toward benefit that did not reach significance (p = 0.08).',
+    ['512 older adults', '2,000 IU', '12 months', '4.1 percent', '4.6 percent', 'p = 0.61', '18 ng/mL', '42 ng/mL', 'age 75', 'p = 0.08'],
+    ['daily supplementation of 20,000 IU', 'reduced fracture incidence by more than half', 'p = 0.061' /* corrupted precision, changes significance framing */],
+  ),
+  item(
+    'academic-13', 'academic',
+    'A school-based reading intervention delivered to 640 second-graders across 22 schools raised standardized comprehension scores by 0.34 standard deviations relative to matched controls (95% CI [0.21, 0.47]) after a single 9-month academic year. Gains were largest among students who began the year in the bottom quartile of reading ability, who improved by 0.51 standard deviations, compared to 0.19 standard deviations among students who began in the top quartile, suggesting the program primarily benefited struggling readers.',
+    ['640 second-graders', '22 schools', '0.34 standard deviations', '95% CI [0.21, 0.47]', '9-month', '0.51 standard deviations', '0.19 standard deviations'],
+    ['delivered to 64 second-graders', 'lowered standardized comprehension scores', '95% CI [-0.21, -0.47]'],
+  ),
+  item(
+    'academic-14', 'academic',
+    'The proposed classifier achieves 94.2 percent accuracy on the benchmark test set of 10,000 held-out images, outperforming the previous state-of-the-art result of 91.7 percent reported by Nakamura et al. (2022). Training required 48 GPU-hours on 8 A100 accelerators, roughly 60 percent less compute than the baseline architecture needed to reach its reported accuracy. Ablation experiments show that removing the attention module drops accuracy to 89.3 percent, confirming it accounts for the majority of the improvement over the baseline.',
+    ['94.2 percent', '10,000 held-out images', '91.7 percent', 'Nakamura et al. (2022)', '48 GPU-hours', '8 A100', '60 percent', '89.3 percent'],
+    ['achieves 4.2 percent accuracy', 'Nakamura et al. (2002)', 'drops accuracy to 9.3 percent'],
+  ),
+  item(
+    'academic-15', 'academic',
+    'A survey of 2,140 remote knowledge workers found that self-reported productivity was highest among those working 3 to 4 days remotely per week, rather than fully remote or fully in-office arrangements, a pattern the authors describe as an inverted-U relationship. Respondents working fully remotely reported 6.2 hours of focused work per day on average, compared to 7.4 hours for the 3-to-4-day hybrid group and 6.8 hours for fully in-office workers. The survey was fielded across 14 industries between January and March.',
+    ['2,140 remote knowledge workers', '3 to 4 days', 'inverted-U', '6.2 hours', '7.4 hours', '6.8 hours', '14 industries'],
+    ['a survey of 214 remote knowledge workers', 'highest among those working 8 to 9 days remotely per week', '62 hours of focused work per day'],
+  ),
+  item(
+    'academic-16', 'academic',
+    'This meta-analysis of 31 studies (total N = 2,890) examining caffeine\'s effect on simple reaction time found a small but reliable improvement, with reaction times decreasing by a pooled effect of g = 0.24 (95% CI [0.15, 0.33]) following doses of 200 to 400 milligrams. Heterogeneity across studies was moderate (I² = 41 percent). No dose-response relationship was detected between 200 and 400 milligrams, suggesting the effect may plateau within that range rather than continuing to scale with dose.',
+    ['31 studies', 'N = 2,890', 'g = 0.24', '95% CI [0.15, 0.33]', '200 to 400 milligrams', 'I² = 41 percent'],
+    ['found a small but reliable worsening', 'g = 2.4', 'I² = 4.1 percent'],
+  ),
+  item(
+    'academic-17', 'academic',
+    'Following 412 families over 8 years, this study finds that an authoritative parenting style, characterized by high warmth combined with consistent limit-setting, predicted better adolescent academic outcomes (β = 0.22, p < 0.01) than either permissive or authoritarian styles measured at the same time points. The association held after controlling for household income and parental education, though the effect size was notably smaller (β = 0.09) in the highest-income quartile of the sample, suggesting the parenting-style effect may partly reflect resource constraints in lower-income households.',
+    ['412 families', '8 years', 'β = 0.22', 'p < 0.01', 'β = 0.09', 'highest-income quartile'],
+    ['following 41 families', 'predicted worse adolescent academic outcomes', 'β = 2.2'],
+  ),
+  item(
+    'academic-18', 'academic',
+    'Regional climate model ensembles project a 12 to 18 percent increase in winter precipitation for the study basin by 2070 under a moderate emissions scenario, alongside a 20 to 30 percent decrease in summer precipitation over the same period. Model agreement was high for the winter projection (9 of 11 models agreeing on direction) but weaker for summer (7 of 11 models agreeing), reflecting greater uncertainty in how convective storm patterns will respond to warming. Snowpack is projected to decline by roughly 35 percent by mid-century.',
+    ['12 to 18 percent', '2070', '20 to 30 percent', '9 of 11 models', '7 of 11 models', '35 percent'],
+    ['project a 12 to 18 percent decrease in winter precipitation', 'by 2007', '11 of 11 models agreeing on direction'],
+  ),
+  item(
+    'academic-19', 'academic',
+    'Soil samples from 48 agricultural sites across 3 regions revealed microplastic concentrations averaging 1,250 particles per kilogram of dry soil, with fields under 15 years of continuous plastic mulch use showing concentrations more than 4 times higher than fields with no mulch history. Particle sizes below 100 micrometers accounted for 68 percent of all particles detected, raising concern about potential uptake into crop tissue. No significant relationship was found between microplastic concentration and measured crop yield in this sample.',
+    ['48 agricultural sites', '3 regions', '1,250 particles per kilogram', '15 years', 'more than 4 times', '68 percent'],
+    ['soil samples from 4 agricultural sites', 'concentrations averaging 12,500 particles per kilogram', 'more than 40 times higher'],
+  ),
+  item(
+    'academic-20', 'academic',
+    'A randomized trial of cognitive behavioral therapy for chronic lower back pain enrolled 328 participants and found that 10 weekly sessions reduced pain-related disability scores by 8.4 points on the Oswestry scale relative to usual care (p < 0.001), an effect that persisted, though somewhat attenuated to 5.9 points, at 12-month follow-up. Opioid use among participants who were taking opioids at baseline (n = 94) declined by 22 percent in the CBT group compared to 6 percent in the usual-care group.',
+    ['328 participants', '10 weekly sessions', '8.4 points', 'p < 0.001', '5.9 points', '12-month', 'n = 94', '22 percent', '6 percent'],
+    ['enrolled 32 participants', 'increased pain-related disability scores', 'n = 940'],
+  ),
+  item(
+    'academic-21', 'academic',
+    'This corpus analysis of 4,600 academic manuscripts across 6 fields finds that use of the present tense to describe prior findings ("the study shows") has increased from 12 percent of relevant clauses in the 1990s to 34 percent in the past decade, a shift most pronounced in the life sciences (41 percent) and least pronounced in the humanities (9 percent). The authors link this to evolving disciplinary norms around treating established findings as settled fact rather than as historically situated claims.',
+    ['4,600 academic manuscripts', '6 fields', '12 percent', '34 percent', '41 percent', '9 percent'],
+    ['a corpus analysis of 460 academic manuscripts', 'decreased from 12 percent', 'least pronounced in the humanities (91 percent)'],
+  ),
+  item(
+    'academic-22', 'academic',
+    'Biodiversity surveys of 26 urban parks found that species richness of ground-dwelling arthropods correlated positively with park size (r = 0.44, p = 0.02) but not with distance from the city center (r = 0.08, p = 0.68). Parks containing at least 3 distinct habitat types, such as woodland, meadow, and wetland, supported on average 2.3 times more species than single-habitat parks of comparable size, suggesting habitat heterogeneity matters more than raw area alone for arthropod diversity in this urban setting.',
+    ['26 urban parks', 'r = 0.44', 'p = 0.02', 'r = 0.08', 'p = 0.68', 'at least 3 distinct habitat types', '2.3 times more species'],
+    ['biodiversity surveys of 2 urban parks', 'correlated negatively with park size', 'r = 4.4'],
+  ),
+  item(
+    'academic-23', 'academic',
+    'A large-scale replication effort attempted to reproduce 98 psychology experiments originally published in 3 top journals, successfully replicating the original effect direction and significance in only 39 percent of cases, with replicated effect sizes averaging half the magnitude of the original studies. Studies with larger original sample sizes (above the median of 84 participants) replicated at a substantially higher rate, 58 percent, than studies below that median, at 21 percent, consistent with the hypothesis that underpowered original studies inflate apparent effect sizes.',
+    ['98 psychology experiments', '3 top journals', '39 percent', 'above the median of 84 participants', '58 percent', '21 percent'],
+    ['attempted to reproduce 9 psychology experiments', 'successfully replicating... in 93 percent of cases', 'replicated at a substantially higher rate, 21 percent'],
+  ),
+  item(
+    'academic-24', 'academic',
+    'Screening of 640 bacterial isolates from 5 hospital intensive care units identified the target resistance gene in 18 percent of samples, a prevalence that rose to 27 percent among isolates collected after 2020 compared to 11 percent before that year. Isolates carrying the gene showed a minimum inhibitory concentration at least 8 times higher than susceptible isolates, and whole-genome sequencing traced 3 distinct plasmid lineages responsible for the majority of gene transmission observed across the participating units.',
+    ['640 bacterial isolates', '5 hospital intensive care units', '18 percent', '27 percent', '2020', '11 percent', '8 times', '3 distinct plasmid lineages'],
+    ['screening of 64 bacterial isolates', 'identified the target resistance gene in 81 percent', 'a minimum inhibitory concentration at least 80 times higher'],
+  ),
+  item(
+    'academic-25', 'academic',
+    'An analysis of employment data from 38 counties that raised their minimum wage between 2015 and 2021 finds no statistically significant reduction in low-wage employment (elasticity of -0.03, 95% CI [-0.09, 0.03]), contrary to standard competitive-market predictions. Employment effects were similarly null when the sample was restricted to the 14 counties with the largest wage increases, of at least 20 percent. The authors note their design cannot rule out modest disemployment effects concentrated in specific subsectors not separately identifiable in the data.',
+    ['38 counties', '2015 and 2021', 'elasticity of -0.03', '95% CI [-0.09, 0.03]', '14 counties', 'at least 20 percent'],
+    ['an analysis of employment data from 3 counties', 'a statistically significant reduction in low-wage employment', 'elasticity of -3.0'],
+  ),
+  item(
+    'academic-26', 'academic',
+    'A longitudinal study tracking 720 adolescents over 4 years found that average daily screen time above 4 hours was associated with a modest decline in sustained-attention task performance (β = -0.14, p = 0.01), an association that weakened but remained significant (β = -0.09, p = 0.04) after controlling for baseline attention scores and household socioeconomic status. Screen time under 2 hours per day showed no measurable association with attention outcomes in either direction across the study period.',
+    ['720 adolescents', '4 years', 'above 4 hours', 'β = -0.14', 'p = 0.01', 'β = -0.09', 'p = 0.04', 'under 2 hours'],
+    ['tracking 72 adolescents', 'associated with a modest improvement in sustained-attention', 'β = 1.4'],
+  ),
+  item(
+    'academic-27', 'academic',
+    'Twin heritability estimates for general cognitive ability derived from 1,860 twin pairs (930 monozygotic, 930 dizygotic) yield a heritability coefficient of 0.62 in adulthood, notably higher than the 0.41 estimate obtained from the same cohort at age 10. Shared environmental influence, by contrast, declined from an estimated 0.28 in childhood to 0.07 in adulthood, a pattern consistent with prior reports that genetic influence on cognitive ability becomes more pronounced with age as individuals increasingly select environments matching their own predispositions.',
+    ['1,860 twin pairs', '930 monozygotic', '930 dizygotic', '0.62', '0.41', 'age 10', '0.28', '0.07'],
+    ['derived from 186 twin pairs', 'yield a heritability coefficient of 0.26', 'declined from an estimated 2.8 in childhood'],
+  ),
+  item(
+    'academic-28', 'academic',
+    'Panel data from 42 countries between 2010 and 2022 show that renewable electricity generation grew at a compound annual rate of 9.4 percent, outpacing overall electricity demand growth of 2.1 percent over the same period. Countries that introduced a feed-in tariff policy saw renewable adoption grow 3.2 percentage points faster per year on average than countries without such a policy, though the gap narrowed to 1.1 percentage points after 2018 as technology costs fell broadly across both groups.',
+    ['42 countries', '2010 and 2022', '9.4 percent', '2.1 percent', '3.2 percentage points', '2018', '1.1 percentage points'],
+    ['panel data from 4 countries', 'grew at a compound annual rate of 0.94 percent', 'narrowed to 11 percentage points'],
+  ),
+  item(
+    'academic-29', 'academic',
+    'A survey of 3,050 recent graduates finds that median student debt of $28,900 was associated with a statistically significant delay in reported career-risk-taking, such as starting a business or accepting a lower-paying job in a preferred field, relative to graduates with no debt (p = 0.003). Graduates with debt above $50,000 were 34 percent less likely to report having taken such a risk within 5 years of graduation than debt-free peers, though the association weakened considerably among graduates whose families had co-signed loans.',
+    ['3,050 recent graduates', '$28,900', 'p = 0.003', 'above $50,000', '34 percent', '5 years'],
+    ['a survey of 305 recent graduates', 'median student debt of $289,000', '34 percent more likely'],
+  ),
+  item(
+    'academic-30', 'academic',
+    'Long-term exposure data from 62 monitoring stations linked a 10 microgram-per-cubic-meter increase in fine particulate matter (PM2.5) to a 0.18-point-per-year faster decline on a standardized cognitive assessment among adults over age 65 (95% CI [0.09, 0.27]). The association remained significant after adjusting for smoking status, education, and cardiovascular disease history, and was notably stronger among the 22 percent of participants carrying the APOE4 genetic variant, a known Alzheimer\'s risk factor.',
+    ['62 monitoring stations', '10 microgram-per-cubic-meter', '0.18-point-per-year', 'age 65', '95% CI [0.09, 0.27]', '22 percent', 'APOE4'],
+    ['long-term exposure data from 6 monitoring stations', 'a 0.18-point-per-year slower decline', 'stronger among the 2 percent of participants'],
+  ),
+  item(
+    'academic-31', 'academic',
+    'Radiocarbon dating of charcoal samples from the excavation site places initial settlement at approximately 3,200 years before present, with a 2-sigma calibrated range of 3,050 to 3,350 years. A second, more intensive occupation layer dates to roughly 2,400 years before present and contains 3 times the density of ceramic fragments found in the earlier layer, suggesting a substantial population increase between the two occupation periods rather than continuous gradual growth.',
+    ['3,200 years', '2-sigma calibrated range', '3,050 to 3,350 years', '2,400 years', '3 times the density'],
+    ['places initial settlement at approximately 320 years before present', 'a 2-sigma calibrated range of 30,500 to 33,500 years', '30 times the density'],
+  ),
+  item(
+    'academic-32', 'academic',
+    'A meta-analysis pooling 96 clinical trials across 12 conditions estimates the average placebo response rate at 35 percent, though this varied substantially by condition, from 16 percent in trials for acute pain to 59 percent in trials for depression. Placebo response was significantly larger in trials using subjective self-report outcomes than in trials using objective biomarkers (mean difference 21 percentage points, p < 0.001), suggesting outcome measurement type substantially shapes the apparent size of the placebo effect.',
+    ['96 clinical trials', '12 conditions', '35 percent', '16 percent', '59 percent', '21 percentage points', 'p < 0.001'],
+    ['a meta-analysis pooling 9 clinical trials', 'estimates the average placebo response rate at 3.5 percent', 'mean difference 2.1 percentage points'],
+  ),
+  item(
+    'academic-33', 'academic',
+    'Fecal microbiome sequencing from 410 participants found that individuals consuming at least 30 distinct plant species per week harbored significantly greater bacterial diversity (Shannon index 6.2) than those consuming fewer than 10 distinct plant species (Shannon index 4.8, p < 0.001). Diversity was also positively correlated with self-reported fiber intake (r = 0.38) but showed no significant relationship with reported protein intake (r = 0.05), pointing to plant diversity specifically, rather than diet quality broadly, as the stronger predictor in this cohort.',
+    ['410 participants', 'at least 30 distinct plant species', 'Shannon index 6.2', 'fewer than 10', 'Shannon index 4.8', 'p < 0.001', 'r = 0.38', 'r = 0.05'],
+    ['fecal microbiome sequencing from 41 participants', 'significantly lower bacterial diversity', 'Shannon index 0.62'],
+  ),
+  item(
+    'academic-34', 'academic',
+    'This meta-analysis of 49 randomized trials (N = 3,940) finds that structured exercise programs reduce depressive symptom severity with a moderate pooled effect (g = 0.62, 95% CI [0.48, 0.76]), comparable in magnitude to effects reported for first-line antidepressant medication in similar populations. Effects were largest for supervised group exercise (g = 0.78) and smallest for unsupervised home-based programs (g = 0.31), and benefits persisted, though attenuated, at follow-ups conducted 6 months after the intervention ended.',
+    ['49 randomized trials', 'N = 3,940', 'g = 0.62', '95% CI [0.48, 0.76]', 'g = 0.78', 'g = 0.31', '6 months'],
+    ['a meta-analysis of 4 randomized trials', 'increase depressive symptom severity', 'g = 6.2'],
+  ),
+  item(
+    'academic-35', 'academic',
+    'A cross-national survey administered in 34 countries finds that generalized social trust, measured by agreement that "most people can be trusted," ranges from 74 percent in the highest-trust country to 8 percent in the lowest, a nearly 10-fold spread. Trust levels correlated strongly with a country\'s income inequality (r = -0.61) and only weakly with GDP per capita alone (r = 0.19), suggesting inequality is a stronger predictor of social trust than aggregate national wealth in this sample.',
+    ['34 countries', '74 percent', '8 percent', 'nearly 10-fold', 'r = -0.61', 'r = 0.19'],
+    ['a cross-national survey administered in 3 countries', 'ranges from 7.4 percent', 'r = 0.61' /* sign flip corrupting the direction of the inequality relationship */],
+  ),
+  item(
+    'academic-36', 'academic',
+    'Satellite monitoring of 210 coral reef sites over 15 years documents a 3-fold increase in the annual frequency of severe bleaching events, from an average of 0.4 events per site per decade in the 1990s to 1.3 events per site per decade in the most recent decade studied. Reefs that experienced at least 2 bleaching events within any 5-year window showed significantly slower recovery of live coral cover, averaging 8 years to return to pre-bleaching levels compared to 3 years for reefs bleached only once.',
+    ['210 coral reef sites', '15 years', '3-fold increase', '0.4 events per site per decade', '1.3 events per site per decade', 'at least 2 bleaching events', '5-year window', '8 years', '3 years'],
+    ['satellite monitoring of 21 coral reef sites', 'a 3-fold decrease', '13 events per site per decade'],
+  ),
+  item(
+    'academic-37', 'academic',
+    'A controlled study comparing handwritten versus laptop note-taking in 142 undergraduates found that handwriting produced significantly better performance on conceptual questions administered 1 week later (mean 74 percent versus 65 percent correct, p = 0.01), despite laptop users recording 2.5 times more words of content during the original lecture. No significant difference emerged on factual recall questions, suggesting the benefit of handwriting is concentrated in conceptual integration rather than simple information capture.',
+    ['142 undergraduates', '1 week later', '74 percent versus 65 percent', 'p = 0.01', '2.5 times more words'],
+    ['a controlled study comparing... in 14 undergraduates', 'significantly worse performance on conceptual questions', 'p = 0.10' /* corrupted precision shifting the reported significance */],
+  ),
+  item(
+    'academic-38', 'academic',
+    'Analysis of national income data spanning 1980 to 2022 shows the share of pretax income earned by the top 1 percent of households rose from 10.7 percent to 19.3 percent, while the bottom 50 percent\'s share fell from 20.1 percent to 13.2 percent over the same period. The gap between these two shares first exceeded 5 percentage points in 1988 and had grown to more than 6 percentage points by the most recent year of data, a trend the authors describe as accelerating since roughly 2010.',
+    ['1980 to 2022', 'top 1 percent', '10.7 percent', '19.3 percent', 'bottom 50 percent', '20.1 percent', '13.2 percent', '1988', '2010'],
+    ['spanning 1980 to 2002', 'rose from 10.7 percent to 1.93 percent', 'first exceeded 50 percentage points'],
+  ),
+  item(
+    'academic-39', 'academic',
+    'A nationally representative survey of 4,210 adults found that 31 percent expressed hesitancy toward at least one recommended vaccine, with hesitancy highest among respondents aged 18 to 29 (41 percent) and lowest among those 65 and older (19 percent). The most commonly cited reason, given by 54 percent of hesitant respondents, was concern about long-term side effects, ahead of distrust of pharmaceutical companies at 38 percent and religious objections at 6 percent.',
+    ['4,210 adults', '31 percent', '18 to 29', '41 percent', '65 and older', '19 percent', '54 percent', '38 percent', '6 percent'],
+    ['a nationally representative survey of 421 adults', '31 percent expressed enthusiasm', 'lowest among those 65 and older (91 percent)'],
+  ),
+  item(
+    'academic-40', 'academic',
+    'Temperature records from 58 major cities over 40 years show that urban core temperatures now average 2.9 degrees Celsius higher than surrounding rural areas during summer nights, up from a 1.8-degree gap measured at the start of the study period. Cities that increased tree canopy cover by at least 10 percentage points over the study period saw their urban-rural gap grow by only 0.4 degrees on average, compared to 1.6 degrees in cities where canopy cover declined or stayed flat.',
+    ['58 major cities', '40 years', '2.9 degrees Celsius', '1.8-degree gap', 'at least 10 percentage points', '0.4 degrees', '1.6 degrees'],
+    ['temperature records from 5 major cities', 'now average 0.29 degrees Celsius higher', 'grow by only 4 degrees on average'],
+  ),
+  item(
+    'academic-41', 'academic',
+    'Long-term banding data on 34 migratory songbird species show that average spring arrival at northern breeding grounds has shifted 6.2 days earlier per decade since 1980, a trend most pronounced in short-distance migrants (8.9 days earlier per decade) and weakest in long-distance trans-equatorial migrants (2.1 days earlier per decade). Species showing the smallest shifts also showed the steepest population declines, at an average of 1.4 percent per year, consistent with a growing mismatch between arrival timing and peak food availability.',
+    ['34 migratory songbird species', '6.2 days earlier per decade', '1980', '8.9 days earlier per decade', '2.1 days earlier per decade', '1.4 percent per year'],
+    ['banding data on 3 migratory songbird species', 'shifted 6.2 days later per decade', 'population growth, at an average of 14 percent per year'],
+  ),
+  item(
+    'academic-42', 'academic',
+    'A quasi-experimental comparison of 1,800 students who took an introductory statistics course online versus in person found no significant difference in final exam scores (72.4 versus 73.1 percent, p = 0.44), but online students were significantly more likely to withdraw before completion, at 18 percent versus 9 percent for in-person students (p < 0.001). Among students who did complete the course, self-reported satisfaction was lower in the online section, 3.4 out of 5 compared to 4.1 out of 5.',
+    ['1,800 students', '72.4 versus 73.1 percent', 'p = 0.44', '18 percent versus 9 percent', 'p < 0.001', '3.4 out of 5', '4.1 out of 5'],
+    ['a quasi-experimental comparison of 180 students', 'significantly less likely to withdraw', 'satisfaction was higher in the online section'],
+  ),
+  item(
+    'academic-43', 'academic',
+    'Wage data from 620,000 full-time workers show an unadjusted gender pay gap of 17.8 percent, which narrows to 4.3 percent after controlling for occupation, industry, hours worked, and experience, leaving a residual gap the authors attribute to a combination of within-occupation discrimination and unmeasured factors. The unadjusted gap was largest in finance (26 percent) and smallest in education (6 percent), a pattern that held consistently across the 5 years of data examined.',
+    ['620,000 full-time workers', '17.8 percent', '4.3 percent', '26 percent', 'education (6 percent)', '5 years'],
+    ['wage data from 62,000 full-time workers', 'an unadjusted gender pay gap of 1.78 percent', 'largest in finance (2.6 percent)'],
+  ),
+  item(
+    'academic-44', 'academic',
+    'Forest fire records covering 45 years across the study region show the annual area burned has increased from an average of 180,000 acres per year in the first 15-year period to 620,000 acres per year in the most recent 15-year period, more than a 3-fold increase. Fire season length, measured as the number of days with high fire-danger ratings, grew from an average of 95 days to 154 days over the same span, a change strongly correlated with earlier spring snowmelt (r = 0.71).',
+    ['45 years', '180,000 acres per year', '620,000 acres per year', '3-fold increase', '95 days', '154 days', 'r = 0.71'],
+    ['forest fire records covering 4.5 years', 'decreased from an average of 180,000 acres per year', 'r = -0.71'],
+  ),
+  item(
+    'academic-45', 'academic',
+    'A laboratory study restricted 88 participants to 4 hours of sleep for a single night and found a 23 percent increase in risky choices on a standardized gambling task the following day relative to a rested control group (n = 84) that slept 8 hours. Sleep-deprived participants also showed a 31 percent slower response time on a working-memory task, though self-reported confidence in their own decisions did not differ between groups, suggesting deprivation impaired performance without proportionally reducing perceived competence.',
+    ['88 participants', '4 hours of sleep', '23 percent', 'n = 84', '8 hours', '31 percent slower'],
+    ['restricted 8 participants to 4 hours of sleep', 'a 23 percent decrease in risky choices', '31 percent faster response time'],
+  ),
+  item(
+    'academic-46', 'academic',
+    'Network analysis of 1.2 million social media posts found that false claims spread 6 times faster and reached 1,500 users on average before correction, compared to 1,100 users for true claims that were never corrected at all within the observed window. Corrections, when they did occur, arrived a median of 14 hours after the original false post and reached only 23 percent of the original post\'s audience, leaving the majority of exposed users never seeing the correction.',
+    ['1.2 million social media posts', '6 times faster', '1,500 users', '1,100 users', '14 hours', '23 percent'],
+    ['network analysis of 12,000 social media posts', 'false claims spread 6 times slower', 'reached 15,000 users on average'],
+  ),
+  item(
+    'academic-47', 'academic',
+    'A field experiment across 62 grocery stores testing a simplified front-of-package nutrition label found that products carrying the new label saw a 7.3 percent increase in sales relative to a matched control group of stores using the old label, driven primarily by products in the top nutrition tier. Products in the lowest nutrition tier saw sales decline by 4.1 percent, and survey follow-up with 900 shoppers found that 61 percent reported noticing the new label within the first month of rollout.',
+    ['62 grocery stores', '7.3 percent', '4.1 percent', '900 shoppers', '61 percent'],
+    ['a field experiment across 6 grocery stores', 'saw a 7.3 percent decrease in sales', 'products in the lowest nutrition tier saw sales rise'],
+  ),
+  item(
+    'academic-48', 'academic',
+    'Comparing 240 children who began learning a second language before age 7 to 210 who began between ages 12 and 15, this study finds early learners achieved native-like grammatical judgment accuracy (96 percent) at significantly higher rates than late learners (74 percent), even after 10 or more years of total exposure to the second language. Vocabulary size, by contrast, showed no significant difference between groups after equating for years of exposure, consistent with a critical period specifically for grammatical acquisition rather than language learning broadly.',
+    ['240 children', 'before age 7', '210', 'ages 12 and 15', '96 percent', '74 percent', '10 or more years'],
+    ['comparing 24 children', 'significantly lower rates than late learners', 'fewer than 5 years of total exposure'],
+  ),
+  item(
+    'academic-49', 'academic',
+    'Cost data compiled across 90 grid-scale battery storage projects show the levelized cost of storage fell from $340 per megawatt-hour in 2015 to $115 per megawatt-hour in 2023, a 66 percent decline driven primarily by a 52 percent drop in battery pack manufacturing costs over the same period. Projects using lithium iron phosphate chemistry, which grew from 18 percent to 61 percent of new projects over the study period, achieved costs approximately 12 percent lower than comparable nickel-manganese-cobalt projects.',
+    ['90 grid-scale battery storage projects', '$340 per megawatt-hour', '2015', '$115 per megawatt-hour', '2023', '66 percent decline', '52 percent', '18 percent', '61 percent', '12 percent'],
+    ['cost data compiled across 9 grid-scale battery storage projects', 'rose from $340 per megawatt-hour', 'a 66 percent increase'],
+  ),
+  item(
+    'academic-50', 'academic',
+    'A repeated cross-sectional survey of 6,400 respondents across 8 election cycles finds that the share of partisans rating the opposing party as a "threat to the nation\'s well-being" rose from 39 percent to 72 percent over the period studied, with the sharpest single-cycle increase, 11 percentage points, occurring between the 2 most recent cycles surveyed. This increase was concentrated among respondents who reported consuming partisan news media daily, who rose from 44 percent to 81 percent holding this view, compared to a much smaller rise among infrequent news consumers.',
+    ['6,400 respondents', '8 election cycles', '39 percent', '72 percent', '11 percentage points', '44 percent', '81 percent'],
+    ['a repeated cross-sectional survey of 640 respondents', 'fell from 39 percent to 72 percent', 'sharpest single-cycle increase, 1 percentage point'],
+  ),
 ]

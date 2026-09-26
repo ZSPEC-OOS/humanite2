@@ -3,10 +3,10 @@ import { CORPUS } from '../corpus'
 import { DOMAINS } from '../types'
 
 describe('benchmark corpus — structural integrity', () => {
-  it('has exactly 10 documents per domain across all 6 domains (60 total)', () => {
-    expect(CORPUS).toHaveLength(60)
+  it('has exactly 50 documents per domain across all 6 domains (300 total, per the Phase 11 scale-up)', () => {
+    expect(CORPUS).toHaveLength(300)
     for (const domain of DOMAINS) {
-      expect(CORPUS.filter(item => item.domain === domain)).toHaveLength(10)
+      expect(CORPUS.filter(item => item.domain === domain)).toHaveLength(50)
     }
   })
 

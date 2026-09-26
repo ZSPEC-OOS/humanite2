@@ -1,4 +1,5 @@
 import type { CorpusItem } from '../types'
+import { item } from './helpers'
 
 export const GENERAL_CORPUS: CorpusItem[] = [
   {
@@ -81,4 +82,247 @@ export const GENERAL_CORPUS: CorpusItem[] = [
     prohibitedChanges: ['heat up to between 30 and 60 degrees Fahrenheit', 'produce finished compost in as little as 2 weeks', 'turning the pile every 6 to 8 weeks'],
     expectedProperties: { minWordCount: 60, maxWordCount: 160 },
   },
+
+  // Phase 11 scale-up: general-11 through general-50, bringing this domain
+  // from 10 to 50 items (see corpus/helpers.ts for the word-count helper).
+  item(
+    'general-11', 'general',
+    'The world stretches across 24 standard time zones, each roughly 15 degrees of longitude wide, though political borders bend many of them far from that ideal. The International Date Line, positioned near the 180th meridian, zigzags to keep island nations like Kiribati on a single calendar day. Crossing it eastbound subtracts a full day, while crossing westbound adds one, a quirk that lets a traveler technically celebrate the same birthday twice in a single trip if the timing lines up. Nepal and a handful of other countries use offsets of 45 or 30 minutes rather than a full hour, breaking from the tidier 24-zone model.',
+    ['24 standard time zones', '15 degrees', '180th meridian', 'Kiribati', '45 or 30 minutes'],
+    ['48 standard time zones', '150 degrees of longitude', 'near the 18th meridian'],
+  ),
+  item(
+    'general-12', 'general',
+    'The modern marathon distance of 26.2 miles was standardized at the 1908 London Olympics, extended from the traditional 25-mile course so the race could finish in front of the royal box. The current world record, set in 2023, stands at 2 hours 0 minutes 35 seconds, a pace of roughly 4 minutes and 37 seconds per mile sustained for the entire distance. Elite marathoners typically consume 60 to 90 grams of carbohydrate per hour during the race to avoid depleting glycogen stores, a practice most recreational runners only adopt for distances beyond 18 miles.',
+    ['26.2 miles', '1908 London Olympics', '25-mile course', '2 hours 0 minutes 35 seconds', '60 to 90 grams', '18 miles'],
+    ['distance of 62.2 miles', 'standardized at the 1980 London Olympics', '4 hours 0 minutes 35 seconds'],
+  ),
+  item(
+    'general-13', 'general',
+    'Most food safety guidelines recommend keeping a refrigerator at or below 40 degrees Fahrenheit and a freezer at 0 degrees Fahrenheit, temperatures that slow bacterial growth without freezing fresh produce. The "danger zone" for bacterial growth sits between 40 and 140 degrees Fahrenheit, and perishable food left in that range for more than 2 hours (or 1 hour above 90 degrees Fahrenheit) should be discarded. A refrigerator without power typically keeps food safely cold for about 4 hours if the door stays closed, while a full freezer can hold its temperature for roughly 48 hours.',
+    ['40 degrees Fahrenheit', '0 degrees Fahrenheit', 'between 40 and 140 degrees Fahrenheit', 'more than 2 hours', '1 hour above 90 degrees Fahrenheit', '4 hours', '48 hours'],
+    ['at or below 400 degrees Fahrenheit', 'danger zone... between 4 and 14 degrees Fahrenheit', 'safely cold for about 40 hours'],
+  ),
+  item(
+    'general-14', 'general',
+    'A standard piano has 88 keys, spanning just over 7 octaves from A0 to C8, a range fixed by piano makers in the late 19th century as a practical compromise between musical range and structural feasibility. Each octave doubles in frequency, so the A above middle C is tuned to 440 Hz while the A one octave higher rings at 880 Hz. Concert grand pianos use roughly 230 strings under a combined tension of about 18 tons, borne entirely by a cast iron frame first introduced in the 1820s.',
+    ['88 keys', '7 octaves', 'A0 to C8', '440 Hz', '880 Hz', '230 strings', '18 tons', '1820s'],
+    ['has 188 keys', 'tuned to 44 Hz', 'combined tension of about 180 tons'],
+  ),
+  item(
+    'general-15', 'general',
+    'Commercial airliners typically cruise between 31,000 and 38,000 feet, an altitude chosen to balance thinner air (which reduces drag and fuel burn) against the engine performance and cabin pressurization limits of a given aircraft. At that height, outside air temperature can drop below negative 60 degrees Fahrenheit, and the cabin is pressurized to feel like roughly 6,000 to 8,000 feet, not sea level, which is part of why some passengers feel mildly short of breath. A typical long-haul flight burns approximately 3,000 gallons of fuel per hour at cruise.',
+    ['31,000 and 38,000 feet', 'negative 60 degrees Fahrenheit', '6,000 to 8,000 feet', '3,000 gallons of fuel per hour'],
+    ['cruise between 3,100 and 3,800 feet', 'pressurized to feel like roughly 60,000 to 80,000 feet', 'burns approximately 30,000 gallons of fuel per hour'],
+  ),
+  item(
+    'general-16', 'general',
+    'The number stamped inside a plastic recycling symbol, from 1 to 7, identifies the resin type rather than guaranteeing the item is actually recyclable in a given municipality. Type 1 (PET) and type 2 (HDPE) are accepted by roughly 90 percent of curbside programs in the United States, while type 7, a catch-all category for mixed or unusual plastics, is accepted by fewer than 10 percent. A plastic bottle typically takes 450 years to decompose in a landfill, compared to roughly 2 to 6 weeks for a piece of food waste under similar conditions.',
+    ['1 to 7', 'Type 1 (PET)', 'type 2 (HDPE)', '90 percent', 'fewer than 10 percent', '450 years', '2 to 6 weeks'],
+    ['stamped inside a plastic recycling symbol, from 1 to 70', 'accepted by roughly 9 percent of curbside programs', 'takes 45 years to decompose'],
+  ),
+  item(
+    'general-17', 'general',
+    'A full night of sleep typically cycles through 4 to 6 sleep cycles, each lasting roughly 90 minutes and progressing through light sleep, deep sleep, and REM sleep in that order. REM sleep, when most vivid dreaming occurs, makes up only about 20 to 25 percent of total sleep time in adults but grows to nearly 50 percent in newborns. Deep sleep, concentrated in the first half of the night, is when the body releases most of its growth hormone and is the stage most associated with feeling physically rested the next day.',
+    ['4 to 6 sleep cycles', 'roughly 90 minutes', '20 to 25 percent', 'nearly 50 percent'],
+    ['cycles through 14 to 16 sleep cycles', 'lasting roughly 9 minutes', 'REM sleep... makes up only about 2 percent'],
+  ),
+  item(
+    'general-18', 'general',
+    'Green tea and black tea come from the same plant, Camellia sinensis, and differ mainly in oxidation: green tea leaves are heated shortly after picking to prevent oxidation, while black tea is fully oxidized before drying. Green tea is typically brewed at 160 to 180 degrees Fahrenheit for 2 to 3 minutes, since hotter water scorches the leaves and produces a bitter, astringent cup. Black tea tolerates near-boiling water, around 200 to 212 degrees Fahrenheit, and is usually steeped for 3 to 5 minutes. Both contain roughly 20 to 45 milligrams of caffeine per 8-ounce cup, well below coffee\'s typical 95 milligrams.',
+    ['Camellia sinensis', '160 to 180 degrees Fahrenheit', '2 to 3 minutes', '200 to 212 degrees Fahrenheit', '3 to 5 minutes', '20 to 45 milligrams', '95 milligrams'],
+    ['brewed at 16 to 18 degrees Fahrenheit', 'black tea... steeped for 30 to 50 minutes', 'well above coffee\'s typical 95 milligrams'],
+  ),
+  item(
+    'general-19', 'general',
+    'The Moon completes a full cycle of phases roughly every 29.5 days, a period known as a synodic month, slightly longer than the 27.3 days it takes to orbit the Earth once relative to the stars. The difference arises because the Earth itself moves along its own orbit while the Moon circles it, so the Moon needs a little extra time to catch up to the same Sun-Earth-Moon alignment. A "blue moon," the second full moon within a single calendar month, occurs roughly once every 2.7 years on average.',
+    ['29.5 days', '27.3 days', 'once every 2.7 years'],
+    ['every 2.5 days', 'takes 273 days to orbit the Earth', 'occurs roughly once every 27 years'],
+  ),
+  item(
+    'general-20', 'general',
+    'The modern Summer Olympics began in Athens in 1896 with 14 participating nations and 241 athletes competing in 43 events. By the 2020 Tokyo Games, held in 2021 due to the pandemic, the event had grown to more than 11,000 athletes from 206 delegations competing in 339 events. The Winter Olympics, first held separately in 1924 in Chamonix, France, now typically features around 100 events across roughly 15 sports, a much smaller program than its summer counterpart.',
+    ['1896', '14 participating nations', '241 athletes', '43 events', '2020 Tokyo Games', 'held in 2021', '1924 in Chamonix', 'France'],
+    ['began in Athens in 1986', '140 participating nations', 'held in 2012'],
+  ),
+  item(
+    'general-21', 'general',
+    'A standard shipping container comes in two common lengths, 20 feet and 40 feet, with the 40-foot version able to hold roughly 2,400 cubic feet of cargo and carry up to about 61,000 pounds combined weight of container and contents. Container volume is commonly expressed in TEUs, or twenty-foot equivalent units, with a 40-foot container counting as 2 TEU. The largest container ships in service can carry more than 24,000 TEU, a capacity that has roughly tripled since the early 2000s.',
+    ['20 feet and 40 feet', '2,400 cubic feet', '61,000 pounds', '2 TEU', '24,000 TEU'],
+    ['common lengths, 2 feet and 4 feet', 'hold roughly 24,000 cubic feet', 'carry more than 2,400 TEU'],
+  ),
+  item(
+    'general-22', 'general',
+    'Red wine is generally aged in oak barrels for 12 to 24 months before bottling, a process that softens tannins and adds flavor compounds like vanillin from the wood itself. Once bottled, most wine is made to be consumed within 1 to 5 years, though certain age-worthy reds can improve for 10 to 20 years or longer under proper cellar conditions, typically 55 degrees Fahrenheit and 70 percent humidity. Roughly 90 percent of all wine produced worldwide is intended for near-term consumption rather than long-term aging.',
+    ['12 to 24 months', '1 to 5 years', '10 to 20 years', '55 degrees Fahrenheit', '70 percent humidity', 'Roughly 90 percent'],
+    ['aged in oak barrels for 120 to 240 months', 'improve for 100 to 200 years', 'cellar conditions, typically 5 degrees Fahrenheit'],
+  ),
+  item(
+    'general-23', 'general',
+    'A single honeybee colony can contain between 20,000 and 80,000 bees at its summer peak, with a queen capable of laying up to 2,000 eggs per day during the height of the season. Producing just 1 pound of honey requires bees to visit roughly 2 million flowers and fly a combined distance equivalent to more than 1.5 times around the Earth. A healthy hive typically produces 30 to 60 pounds of surplus honey per year that beekeepers can harvest without endangering the colony\'s own winter food supply.',
+    ['20,000 and 80,000 bees', '2,000 eggs per day', '1 pound', '2 million flowers', '1.5 times around the Earth', '30 to 60 pounds'],
+    ['contain between 200 and 800 bees', 'laying up to 20,000 eggs per day', 'visit roughly 2,000 flowers'],
+  ),
+  item(
+    'general-24', 'general',
+    'Mount Everest stands 29,032 feet above sea level, a figure last officially updated in 2020 following a joint survey by China and Nepal. Most climbing expeditions attempt the summit during a narrow window in May, when the jet stream typically shifts away from the peak for a few weeks of calmer winds. Roughly 300 climbers have died attempting the mountain since 1922, and the "death zone" above 26,000 feet, where oxygen levels are too low to sustain human life for long, accounts for the majority of those fatalities.',
+    ['29,032 feet', '2020', 'China and Nepal', 'May', '300 climbers', '1922', '26,000 feet'],
+    ['stands 2,032 feet above sea level', 'last officially updated in 1920', 'narrow window in December'],
+  ),
+  item(
+    'general-25', 'general',
+    'The first adhesive postage stamp, the Penny Black, was issued in Britain in 1840 and featured a portrait of a young Queen Victoria. It cost 1 penny and could carry a letter weighing up to half an ounce anywhere within the country, a flat-rate system that replaced a confusing patchwork of distance-based fees. More than 68 million Penny Black stamps were printed during its roughly 1-year production run before it was replaced by the similarly designed Penny Red, whose red ink made cancellation marks easier to spot.',
+    ['Penny Black', '1840', '1 penny', 'half an ounce', '68 million', '1-year', 'Penny Red'],
+    ['issued in Britain in 1940', 'cost 10 pennies', 'More than 6.8 million Penny Black stamps'],
+  ),
+  item(
+    'general-26', 'general',
+    'A basic lean bread dough bakes best in an oven preheated to 450 to 475 degrees Fahrenheit, hot enough to trigger rapid "oven spring," the burst of expansion that happens in the first several minutes of baking before the crust sets. Enriched doughs containing butter, eggs, or sugar typically bake at a lower 350 to 375 degrees Fahrenheit to avoid burning the crust before the interior fully cooks. A loaf is generally done once its internal temperature reaches 190 to 210 degrees Fahrenheit, checked with an instant-read thermometer inserted into the center.',
+    ['450 to 475 degrees Fahrenheit', '350 to 375 degrees Fahrenheit', '190 to 210 degrees Fahrenheit'],
+    ['preheated to 45 to 47 degrees Fahrenheit', 'enriched doughs... bake at a lower 35 to 37 degrees Fahrenheit', 'internal temperature reaches 19 to 21 degrees Fahrenheit'],
+  ),
+  item(
+    'general-27', 'general',
+    'A typical car battery lasts 3 to 5 years, though extreme heat can shorten that lifespan considerably, since high under-hood temperatures accelerate the internal chemical breakdown that eventually leaves a battery unable to hold a charge. Most batteries are rated in cold cranking amps, a figure between 400 and 800 CCA for a standard passenger vehicle, measuring how much current the battery can deliver for 30 seconds at 0 degrees Fahrenheit while still maintaining a usable voltage. A battery that fails a load test at 9.6 volts or below is generally considered due for replacement.',
+    ['3 to 5 years', '400 and 800 CCA', '30 seconds', '0 degrees Fahrenheit', '9.6 volts'],
+    ['lasts 30 to 50 years', 'between 4,000 and 8,000 CCA', 'deliver for 300 seconds'],
+  ),
+  item(
+    'general-28', 'general',
+    'Residential solar panels typically convert 15 to 22 percent of the sunlight hitting them into usable electricity, a figure that has climbed steadily from around 12 percent two decades ago as manufacturing techniques have improved. A standard 400-watt panel measuring roughly 6.5 feet by 3.3 feet produces that output only under ideal test conditions; real-world output is usually 75 to 90 percent of the rated figure once temperature, dust, and angle are accounted for. Most residential systems are warrantied to retain at least 80 percent of their original output after 25 years.',
+    ['15 to 22 percent', 'around 12 percent', '400-watt panel', '75 to 90 percent', '80 percent', '25 years'],
+    ['convert 1.5 to 2.2 percent', 'climbed steadily from around 1.2 percent', 'retain at least 8 percent of their original output'],
+  ),
+  item(
+    'general-29', 'general',
+    'A standard 6-string guitar in concert tuning is set to E2, A2, D3, G3, B3, and E4 from lowest to highest string, with the low E vibrating at approximately 82.4 Hz and the high E at 329.6 Hz, exactly two octaves apart. Standard tension across all 6 strings on a typical acoustic guitar totals roughly 160 to 180 pounds, borne by the neck and top bracing. Guitars are commonly tuned down a half step or whole step for certain genres, which reduces total string tension by about 10 to 15 percent.',
+    ['E2, A2, D3, G3, B3, and E4', '82.4 Hz', '329.6 Hz', 'two octaves', '160 to 180 pounds', '10 to 15 percent'],
+    ['vibrating at approximately 824 Hz', 'exactly four octaves apart', 'totals roughly 1,600 to 1,800 pounds'],
+  ),
+  item(
+    'general-30', 'general',
+    'A standard 3x3 Rubik\'s Cube has 43,252,003,274,489,856,000 possible permutations, but any solvable configuration can be solved in 20 moves or fewer, a bound proven mathematically in 2010 and often called "God\'s Number." Competitive speedcubers now average well under 10 seconds for a single solve, with the current world record sitting at 3.13 seconds as of recent competitions. Most beginner methods, by contrast, take a new solver roughly 2 to 3 minutes once the underlying algorithms are memorized.',
+    ['43,252,003,274,489,856,000', '20 moves', '2010', 'under 10 seconds', '3.13 seconds', '2 to 3 minutes'],
+    ['has 4,325,200 possible permutations', 'solved in 200 moves or fewer', 'proven mathematically in 1910'],
+  ),
+  item(
+    'general-31', 'general',
+    'Gray whales undertake one of the longest known mammal migrations, traveling roughly 10,000 to 12,000 miles round trip each year between feeding grounds in the Arctic and breeding lagoons off Baja California. The journey takes 2 to 3 months each way, during which the whales eat very little, relying instead on fat reserves built up over the summer feeding season. Humpback whales make a comparable journey, and calves are typically born during the southbound leg, weighing around 2,000 pounds and gaining roughly 100 pounds per day on their mother\'s milk.',
+    ['10,000 to 12,000 miles', 'Baja California', '2 to 3 months', '2,000 pounds', '100 pounds per day'],
+    ['traveling roughly 1,000 to 1,200 miles round trip', 'the journey takes 20 to 30 months', 'weighing around 20,000 pounds'],
+  ),
+  item(
+    'general-32', 'general',
+    'A regulation soccer field for international matches measures between 110 and 120 yards long and 70 to 80 yards wide, though many domestic leagues allow somewhat smaller dimensions. The penalty area extends 18 yards from the goal line, and a penalty kick is taken from a spot 12 yards out. A regulation match runs 90 minutes split into two 45-minute halves, plus stoppage time added at the referee\'s discretion to account for delays during play.',
+    ['110 and 120 yards', '70 to 80 yards', '18 yards', '12 yards', '90 minutes', 'two 45-minute halves'],
+    ['measures between 1,100 and 1,200 yards long', 'penalty area extends 180 yards', 'a regulation match runs 9 minutes'],
+  ),
+  item(
+    'general-33', 'general',
+    'A recent survey of coffee shop customers found that 78 percent tip at least some amount when paying by card, compared to just 41 percent who reported tipping consistently when paying with cash. The average tip on a card transaction was 17 percent of the total, slightly below the 20 percent commonly cited as a restaurant norm. Customers under 35 were roughly twice as likely as those over 55 to say they feel pressured by on-screen tipping prompts, according to the same survey of 2,200 respondents.',
+    ['78 percent', '41 percent', '17 percent', '20 percent', 'roughly twice', '2,200 respondents'],
+    ['found that 8 percent tip at least some amount', 'average tip on a card transaction was 71 percent', 'survey of 220 respondents'],
+  ),
+  item(
+    'general-34', 'general',
+    'A large egg takes about 6 to 7 minutes in boiling water for a soft-boiled yolk and 9 to 12 minutes for a fully hard-boiled result, with altitude and starting water temperature both shifting those times somewhat. Starting eggs in cold water and bringing the pot to a boil together, rather than dropping them into already-boiling water, tends to produce a more evenly cooked white and reduces the chance of a cracked shell. Eggs cooked past about 15 minutes can develop a greenish ring around the yolk, caused by a harmless reaction between iron and sulfur compounds.',
+    ['6 to 7 minutes', '9 to 12 minutes', 'past about 15 minutes'],
+    ['takes about 60 to 70 minutes', 'a fully hard-boiled result... 90 to 120 minutes', 'cooked past about 1.5 minutes'],
+  ),
+  item(
+    'general-35', 'general',
+    'The Great Wall of China, including all its branches and secondary walls, stretches approximately 13,171 miles according to a comprehensive 2012 archaeological survey, though the commonly cited "main" wall built during the Ming dynasty accounts for roughly 5,500 miles of that total. Construction began more than 2,700 years ago under earlier states and continued in stages for centuries, with the most recognizable stone sections dating to the Ming dynasty between 1368 and 1644. Contrary to popular belief, the wall is not visible to the naked eye from the Moon.',
+    ['13,171 miles', '2012', '5,500 miles', '2,700 years', '1368 and 1644'],
+    ['stretches approximately 1,317 miles', 'Ming dynasty accounts for roughly 550 miles', 'began more than 270 years ago'],
+  ),
+  item(
+    'general-36', 'general',
+    'The 8-hour workday traces largely to labor movements of the late 19th and early 20th centuries, popularized by the slogan "eight hours for work, eight hours for rest, eight hours for what we will." Ford Motor Company adopted an 8-hour day in 1914 alongside a then-unusual $5 daily wage, a move credited with reducing turnover and boosting productivity enough to offset the higher labor cost. The Fair Labor Standards Act of 1938 later codified overtime pay for hours worked beyond 40 per week in the United States, rather than mandating an 8-hour cap outright.',
+    ['eight hours for work, eight hours for rest, eight hours for what we will', '1914', '$5 daily wage', 'Fair Labor Standards Act of 1938', '40 per week'],
+    ['adopted an 8-hour day in 1814', 'a then-unusual $50 daily wage', 'beyond 4 per week'],
+  ),
+  item(
+    'general-37', 'general',
+    'The International Space Station orbits at an altitude of roughly 250 miles above Earth, completing a full orbit approximately every 90 minutes, which means the astronauts aboard experience about 16 sunrises and sunsets each day. It travels at a speed of about 17,500 miles per hour, fast enough to cross the continental United States in roughly 10 minutes. The station has been continuously occupied since November 2000, making it one of the longest-running collaborative engineering projects in history.',
+    ['250 miles', 'every 90 minutes', '16 sunrises', '17,500 miles per hour', '10 minutes', 'November 2000'],
+    ['orbits at an altitude of roughly 2,500 miles', 'completing a full orbit approximately every 9 minutes', 'traveling at a speed of about 1,750 miles per hour'],
+  ),
+  item(
+    'general-38', 'general',
+    'General guidance suggests adults drink around 2.7 to 3.7 liters of total water per day from all sources, including food, though the often-cited "8 glasses a day" rule is a rough simplification rather than a precisely researched figure. Roughly 20 percent of daily water intake typically comes from food rather than beverages, with fruits and vegetables like cucumber and watermelon being more than 90 percent water by weight. Needs rise significantly with heat, altitude, and exercise; an hour of vigorous activity can increase fluid loss by 1 to 2 liters through sweat alone.',
+    ['2.7 to 3.7 liters', '8 glasses a day', 'Roughly 20 percent', 'more than 90 percent', '1 to 2 liters'],
+    ['drink around 27 to 37 liters', 'roughly 2 percent of daily water intake', 'increase fluid loss by 10 to 20 liters'],
+  ),
+  item(
+    'general-39', 'general',
+    'Standard vinyl records spin at one of three speeds: 33 and 1/3 RPM for full-length albums, 45 RPM for singles, and the older 78 RPM format used before the 1950s. A 12-inch LP at 33 and 1/3 RPM can typically hold about 22 minutes of audio per side before groove spacing has to narrow enough to hurt sound quality, while a 7-inch single at 45 RPM usually holds only 4 to 5 minutes per side. Vinyl experienced a notable resurgence starting around 2007, with sales in the United States growing for 17 consecutive years afterward.',
+    ['33 and 1/3 RPM', '45 RPM', '78 RPM', 'before the 1950s', '22 minutes', '4 to 5 minutes', '2007', '17 consecutive years'],
+    ['spin at one of three speeds: 3 and 1/3 RPM', 'used before the 1850s', 'hold about 220 minutes of audio per side'],
+  ),
+  item(
+    'general-40', 'general',
+    'Traditional cheesemaking ages hard cheeses like Parmesan for a minimum of 12 months, and premium versions are often aged 24 to 36 months to develop the characteristic crunchy tyrosine crystals and deeper flavor. Soft cheeses such as brie, by contrast, are typically ready in just 4 to 8 weeks. Aging rooms are usually held at 50 to 55 degrees Fahrenheit and 80 to 85 percent humidity, conditions that slow moisture loss while still allowing the enzymatic breakdown that develops flavor over time.',
+    ['minimum of 12 months', '24 to 36 months', '4 to 8 weeks', '50 to 55 degrees Fahrenheit', '80 to 85 percent'],
+    ['ages hard cheeses... for a minimum of 1 month', 'ready in just 40 to 80 weeks', 'held at 5 to 5.5 degrees Fahrenheit'],
+  ),
+  item(
+    'general-41', 'general',
+    'The Appalachian Trail runs approximately 2,197 miles from Springer Mountain, Georgia, to Mount Katahdin, Maine, crossing 14 states along the way. A thru-hike typically takes 5 to 7 months to complete, and roughly 25 percent of hikers who attempt the full trail in a single season actually finish it. Hikers commonly lose 15 to 30 pounds over the course of a thru-hike despite eating 4,000 to 6,000 calories a day, since the trail\'s roughly 515,000 feet of cumulative elevation gain burns calories faster than most hikers can replace them.',
+    ['2,197 miles', 'Springer Mountain, Georgia', 'Mount Katahdin, Maine', '14 states', '5 to 7 months', 'roughly 25 percent', '4,000 to 6,000 calories', '515,000 feet'],
+    ['runs approximately 219 miles', 'crossing 4 states', 'roughly 75 percent of hikers who attempt the full trail'],
+  ),
+  item(
+    'general-42', 'general',
+    'Shoe sizing in the United States traces to a 1/3-inch unit called a "barleycorn," with a men\'s size 1 corresponding to a foot roughly 8 and 2/3 inches long and each whole size adding exactly 1/3 of an inch. Women\'s sizes typically run 1.5 sizes larger than the equivalent men\'s size under the common conversion used by most American retailers. Because sizing standards were never fully unified internationally, a single physical foot length can correspond to three different numbers depending on whether it\'s measured in US, UK, or EU sizing.',
+    ['1/3-inch', 'barleycorn', '8 and 2/3 inches', '1.5 sizes larger', 'US, UK, or EU sizing'],
+    ['traces to a 3-inch unit', 'corresponding to a foot roughly 18 and 2/3 inches long', '15 sizes larger than the equivalent men\'s size'],
+  ),
+  item(
+    'general-43', 'general',
+    'A single lightning bolt can reach temperatures of roughly 54,000 degrees Fahrenheit, nearly 5 times hotter than the surface of the sun, though the bolt itself lasts only about 30 microseconds. The rapid heating causes the surrounding air to expand explosively, producing the shockwave heard as thunder, which travels at the speed of sound, roughly 1 mile every 5 seconds. At any given moment, an estimated 1,800 thunderstorms are occurring somewhere on Earth, together producing about 100 lightning strikes every second worldwide.',
+    ['54,000 degrees Fahrenheit', 'nearly 5 times', '30 microseconds', '1 mile every 5 seconds', '1,800 thunderstorms', '100 lightning strikes'],
+    ['reach temperatures of roughly 5,400 degrees Fahrenheit', 'nearly 50 times hotter', 'lasts only about 300 microseconds'],
+  ),
+  item(
+    'general-44', 'general',
+    'Standard domestic mail delivery in the United States typically takes 1 to 5 business days depending on the service selected, while first-class international mail can take anywhere from 7 to 21 business days depending on the destination country and customs processing. Priority Mail Express, the fastest standard option, guarantees overnight delivery to most addresses by either 6 p.m. or 10 a.m. the next day, with a money-back guarantee if that window is missed. Roughly 425 million pieces of mail move through the postal system on a typical day.',
+    ['1 to 5 business days', '7 to 21 business days', '6 p.m. or 10 a.m.', '425 million'],
+    ['takes 10 to 50 business days', 'guarantees overnight delivery... by either 6 a.m. or 10 p.m.', 'Roughly 42.5 million pieces of mail'],
+  ),
+  item(
+    'general-45', 'general',
+    'The Panama Canal spans approximately 51 miles between the Atlantic and Pacific oceans, and a typical transit through its original locks takes 8 to 10 hours including wait times. The canal\'s expanded locks, opened in 2016, can accommodate ships carrying up to 14,000 twenty-foot equivalent units, roughly triple the capacity the original 1914 locks were built to handle. Each transit through the original locks uses about 52 million gallons of fresh water per ship, water that flows entirely by gravity from Gatun Lake rather than being pumped.',
+    ['51 miles', '8 to 10 hours', '2016', '14,000 twenty-foot equivalent units', '1914', '52 million gallons'],
+    ['spans approximately 5.1 miles', 'takes 80 to 100 hours', 'opened in 2061'],
+  ),
+  item(
+    'general-46', 'general',
+    'Olympic swimming pools are standardized at 50 meters long, 25 meters wide, and at least 2 meters deep, holding approximately 660,000 gallons of water maintained between 77 and 82 degrees Fahrenheit. Lane markings use 10 lanes, though only 8 are used in most competitions, with the outer 2 reserved as buffer lanes to reduce wave interference from the pool walls. Water is typically replaced or filtered continuously at a rate that turns over the entire pool volume roughly every 4 to 6 hours during heavy competition use.',
+    ['50 meters long', '25 meters wide', 'at least 2 meters deep', '660,000 gallons', '77 and 82 degrees Fahrenheit', '10 lanes', 'only 8', 'every 4 to 6 hours'],
+    ['standardized at 500 meters long', 'holding approximately 6,600 gallons', 'maintained between 7 and 8 degrees Fahrenheit'],
+  ),
+  item(
+    'general-47', 'general',
+    'The average one-way commute in the United States runs about 27.6 minutes, according to recent census data, up from roughly 25 minutes two decades earlier. Commuters who drive alone make up about 76 percent of all workers, while roughly 9 percent carpool and just under 5 percent use public transit nationwide, though that figure rises well above 50 percent in a handful of dense urban centers. Workers with commutes longer than 90 minutes each way, sometimes called "super commuters," now account for more than 3 percent of the workforce in some metropolitan areas.',
+    ['27.6 minutes', 'roughly 25 minutes', '76 percent', 'roughly 9 percent', 'just under 5 percent', 'longer than 90 minutes', 'more than 3 percent'],
+    ['runs about 2.76 minutes', 'drive alone make up about 7.6 percent', 'commutes longer than 9 minutes each way'],
+  ),
+  item(
+    'general-48', 'general',
+    'Seasoning a cast iron skillet involves coating it in a thin layer of oil and baking it upside down at 450 to 500 degrees Fahrenheit for about 1 hour, a process that polymerizes the oil into a hard, slightly nonstick surface. Repeating this process 3 to 5 times before regular use builds a more durable coating than a single application. A well-seasoned pan can last for generations with basic care, and many cooks avoid soap entirely, relying instead on hot water and a stiff brush, since harsh detergents can strip the seasoning built up over years of use.',
+    ['450 to 500 degrees Fahrenheit', 'about 1 hour', '3 to 5 times'],
+    ['baking it upside down at 45 to 50 degrees Fahrenheit', 'for about 10 hours', 'repeating this process 30 to 50 times'],
+  ),
+  item(
+    'general-49', 'general',
+    'A standard deck of playing cards contains 52 cards across 4 suits of 13 ranks each, a structure that has remained largely unchanged since French card makers standardized it in the 15th century. The number of possible ways to arrange a shuffled deck, 52 factorial, is so large that a truly random shuffle almost certainly produces an ordering that has never existed before in the history of card games. Most casinos require a minimum of 7 standard "riffle" shuffles to sufficiently randomize a deck before play, based on research into how quickly card order information decays.',
+    ['52 cards', '4 suits', '13 ranks', '15th century', '52 factorial', 'minimum of 7'],
+    ['contains 25 cards across 4 suits', '31 ranks each', 'standardized it in the 19th century'],
+  ),
+  item(
+    'general-50', 'general',
+    'Most lawn care guides recommend mowing cool-season grasses like Kentucky bluegrass to a height of 2.5 to 3.5 inches, since taller grass shades the soil, retains moisture better, and develops deeper roots than grass cut short. The "one-third rule" holds that no more than one-third of the blade height should be removed in a single mowing, meaning grass kept at 3 inches should be cut again once it reaches about 4.5 inches. Warm-season grasses such as Bermuda tolerate a much shorter cut, typically 1 to 2 inches, reflecting their different growth habit.',
+    ['2.5 to 3.5 inches', 'one-third rule', 'one-third of the blade height', '4.5 inches', '1 to 2 inches'],
+    ['mowing... to a height of 25 to 35 inches', 'no more than three-thirds of the blade height', 'cut again once it reaches about 45 inches'],
+  ),
 ]

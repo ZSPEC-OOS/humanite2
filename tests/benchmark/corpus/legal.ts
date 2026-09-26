@@ -1,4 +1,5 @@
 import type { CorpusItem } from '../types'
+import { item } from './helpers'
 
 export const LEGAL_CORPUS: CorpusItem[] = [
   {
@@ -81,4 +82,247 @@ export const LEGAL_CORPUS: CorpusItem[] = [
     prohibitedChanges: ['shall be binding whether or not set forth in writing', 'Exhibits A through Z', 'the remaining provisions shall be void'],
     expectedProperties: { minWordCount: 60, maxWordCount: 140 },
   },
+
+  // Phase 11 scale-up: legal-11 through legal-50, bringing this domain
+  // from 10 to 50 items.
+  item(
+    'legal-11', 'legal',
+    'The Employee shall not, for a period of 12 months following termination of employment, directly or indirectly solicit any client of the Company with whom the Employee had material contact during the final 24 months of employment. This restriction applies within a geographic radius of 50 miles of any Company office at which the Employee was principally based. A breach of this Section entitles the Company to injunctive relief in addition to, and not in lieu of, any other remedy available at law.',
+    ['12 months', 'final 24 months', '50 miles', 'in addition to, and not in lieu of'],
+    ['for a period of 120 months following termination', 'material contact during the final 2 months of employment', 'within a geographic radius of 5 miles'],
+  ),
+  item(
+    'legal-12', 'legal',
+    'The Purchaser shall deposit an earnest money payment of $50,000 within 3 business days of the Effective Date, to be held in escrow and applied toward the purchase price at Closing. Should the Purchaser fail to close through no fault of the Seller, the earnest money shall be forfeited to the Seller as liquidated damages, the parties agreeing that actual damages would be difficult to ascertain and that this amount represents a reasonable estimate thereof.',
+    ['$50,000', 'within 3 business days', 'forfeited to the Seller', 'liquidated damages'],
+    ['an earnest money payment of $500,000', 'within 30 business days', 'refunded to the Purchaser as liquidated damages'],
+  ),
+  item(
+    'legal-13', 'legal',
+    'This Power of Attorney shall become effective immediately upon execution and shall remain in effect until revoked in writing by the Principal or until the Principal\'s death, whichever occurs first, and is not conditioned upon any subsequent determination of incapacity. The Agent named herein shall have authority to act in all financial matters described in Sections 2 through 9, but shall have no authority over healthcare decisions, which are governed exclusively by a separate healthcare directive.',
+    ['effective immediately upon execution', 'until revoked in writing', 'Sections 2 through 9', 'no authority over healthcare decisions'],
+    ['shall become effective only upon a determination of incapacity', 'Sections 20 through 90', 'shall have exclusive authority over healthcare decisions'],
+  ),
+  item(
+    'legal-14', 'legal',
+    'The Franchisee shall pay an initial franchise fee of $35,000 upon execution of this Agreement and an ongoing royalty of 6 percent of Gross Sales, payable monthly by the 10th day following the end of each calendar month. Gross Sales below $50,000 in any calendar month shall nonetheless incur a minimum royalty payment of $2,500 for that month, regardless of actual sales volume, to ensure a baseline contribution toward the Franchisor\'s ongoing support obligations.',
+    ['$35,000', '6 percent', '10th day', '$50,000', '$2,500'],
+    ['an initial franchise fee of $350,000', 'an ongoing royalty of 60 percent', 'payable monthly by the 100th day'],
+  ),
+  item(
+    'legal-15', 'legal',
+    'Any notice required under this Agreement shall be deemed delivered 3 business days after mailing by certified mail, return receipt requested, or upon confirmed transmission if sent by email with a read receipt, whichever method is used. Notices to the Company shall be sent to the address specified in Exhibit A, and either party may change its designated address for notice by providing written notice of the change at least 10 days in advance.',
+    ['3 business days', 'return receipt requested', 'Exhibit A', 'at least 10 days in advance'],
+    ['deemed delivered 30 business days after mailing', 'Exhibit Z', 'at least 100 days in advance'],
+  ),
+  item(
+    'legal-16', 'legal',
+    'The Guarantor unconditionally and irrevocably guarantees payment of all amounts owed by the Borrower under the Loan Agreement, up to a maximum aggregate liability of $1,200,000, and this guarantee shall remain in full force and effect until the Loan is paid in full, notwithstanding any extension, renewal, or modification of the underlying Loan Agreement made without the Guarantor\'s separate consent. The Guarantor waives any right to require the Lender to first pursue collection from the Borrower before enforcing this guarantee.',
+    ['unconditionally and irrevocably', 'maximum aggregate liability of $1,200,000', 'until the Loan is paid in full', 'waives any right to require the Lender to first pursue collection'],
+    ['conditionally and revocably guarantees payment', 'maximum aggregate liability of $12,000', 'requires the Lender to first pursue collection from the Borrower'],
+  ),
+  item(
+    'legal-17', 'legal',
+    'This Confidentiality Agreement permits disclosure of Confidential Information to the Receiving Party\'s employees and contractors strictly on a need-to-know basis, provided each such person is bound by confidentiality obligations at least as protective as those set forth herein. Disclosure pursuant to a valid subpoena or court order is permitted only after the Receiving Party provides the Disclosing Party with prompt written notice, allowing the Disclosing Party a reasonable opportunity, of at least 5 business days where practicable, to seek a protective order.',
+    ['need-to-know basis', 'at least as protective as those set forth herein', 'prompt written notice', 'at least 5 business days'],
+    ['permits disclosure of Confidential Information to any employee regardless of need-to-know', 'less protective than those set forth herein', 'at least 50 business days'],
+  ),
+  item(
+    'legal-18', 'legal',
+    'The Landlord shall complete the tenant improvement work described in Exhibit B within 90 days of lease execution, and the Tenant\'s obligation to pay Rent shall not commence until the earlier of substantial completion of such work or 120 days after lease execution, whichever comes first. Any delay caused by the Tenant\'s requested changes to the approved plans shall extend both deadlines by an amount of time equal to the delay so caused.',
+    ['Exhibit B', 'within 90 days', '120 days after lease execution', 'extend both deadlines'],
+    ['complete the tenant improvement work... within 9 days', 'the earlier of substantial completion of such work or 12 days', 'shall not extend either deadline'],
+  ),
+  item(
+    'legal-19', 'legal',
+    'Upon a Change of Control of the Company, as defined in Section 12, each outstanding stock option held by the Executive shall immediately vest in full, notwithstanding any vesting schedule otherwise applicable, provided the Executive remains employed by the Company through the date of the Change of Control. If the Executive is terminated without Cause within 12 months following a Change of Control, the Executive shall additionally be entitled to a lump-sum severance payment equal to 18 months of base salary.',
+    ['Section 12', 'immediately vest in full', 'within 12 months following a Change of Control', '18 months of base salary'],
+    ['as defined in Section 120', 'shall vest according to the original schedule notwithstanding a Change of Control', 'within 120 months following a Change of Control'],
+  ),
+  item(
+    'legal-20', 'legal',
+    'This Settlement Agreement resolves all claims asserted or that could have been asserted in the underlying litigation, in exchange for a payment of $475,000 to be made within 30 days of the Effective Date, and includes a mutual release of all claims arising from the facts alleged in the complaint. Neither party admits liability, and the terms of this Agreement, including the settlement amount, shall remain confidential except as required by law or to enforce this Agreement\'s own terms.',
+    ['$475,000', 'within 30 days', 'mutual release', 'Neither party admits liability'],
+    ['a payment of $4,750,000', 'within 300 days of the Effective Date', 'Both parties admit liability'],
+  ),
+  item(
+    'legal-21', 'legal',
+    'The Executor shall provide a full accounting of the Estate to all beneficiaries within 90 days of the decedent\'s date of death, and annually thereafter until the Estate is fully administered and closed. Any beneficiary objecting to the accounting must file a written objection within 30 days of receipt, after which the accounting shall be deemed approved absent timely objection, and the Executor shall be discharged from further liability with respect to the matters disclosed therein.',
+    ['within 90 days', 'annually thereafter', 'within 30 days of receipt', 'discharged from further liability'],
+    ['a full accounting... within 9 days of the decedent\'s date of death', 'within 300 days of receipt', 'not discharged from further liability'],
+  ),
+  item(
+    'legal-22', 'legal',
+    'The Distributor is granted exclusive distribution rights within the designated Territory described in Exhibit C for an initial term of 5 years, automatically renewing for successive 2-year terms unless either party provides written notice of non-renewal at least 180 days before the then-current term expires. The Distributor must meet an annual minimum purchase requirement of $2 million to maintain exclusivity; failure to meet this threshold for 2 consecutive years converts the arrangement to non-exclusive.',
+    ['Exhibit C', 'initial term of 5 years', 'successive 2-year terms', 'at least 180 days', '$2 million', '2 consecutive years'],
+    ['exclusive distribution rights... for an initial term of 50 years', 'successive 20-year terms', 'at least 18 days before the then-current term expires'],
+  ),
+  item(
+    'legal-23', 'legal',
+    'This Arbitration Clause requires that any claim be brought within 1 year of the date the claim accrues, a contractual limitations period the parties agree shall supersede any longer statutory limitations period that might otherwise apply, to the extent permitted by applicable law. The arbitration shall be conducted by 3 arbitrators, 1 selected by each party and the third selected by the 2 party-appointed arbitrators, with the arbitration seated in the state specified in Section 15.',
+    ['within 1 year', 'supersede any longer statutory limitations period', '3 arbitrators', 'Section 15'],
+    ['brought within 10 years of the date the claim accrues', 'conducted by 30 arbitrators', 'as specified in Section 150'],
+  ),
+  item(
+    'legal-24', 'legal',
+    'The Insured must report any claim or circumstance that could give rise to a claim within 60 days of first becoming aware of it, and failure to provide timely notice may result in denial of coverage to the extent the Insurer is prejudiced by the delay. This Policy provides coverage up to a limit of $3,000,000 per claim and $5,000,000 in the aggregate for all claims made during the Policy Period, subject to a retention of $25,000 per claim borne by the Insured before coverage attaches.',
+    ['within 60 days', '$3,000,000 per claim', '$5,000,000 in the aggregate', '$25,000 per claim'],
+    ['report any claim... within 600 days', 'coverage up to a limit of $300,000 per claim', 'a retention of $250,000 per claim'],
+  ),
+  item(
+    'legal-25', 'legal',
+    'The Trademark License granted herein is limited to use of the Licensed Marks solely in connection with the Products listed in Exhibit D and solely within the United States and Canada, and the Licensee shall not use the Licensed Marks in any manner likely to dilute or tarnish their value. All uses of the Licensed Marks are subject to prior written approval by the Licensor, which approval shall not be unreasonably withheld and shall be deemed granted if no response is provided within 15 business days of submission.',
+    ['Exhibit D', 'United States and Canada', 'shall not be unreasonably withheld', 'within 15 business days'],
+    ['limited to use of the Licensed Marks... worldwide without restriction', 'shall be unreasonably withheld at the Licensor\'s sole discretion', 'within 150 business days of submission'],
+  ),
+  item(
+    'legal-26', 'legal',
+    'The Board of Directors shall consist of no fewer than 5 and no more than 9 members, with directors serving staggered 3-year terms such that approximately one-third of the Board stands for election each year. A quorum for any Board meeting requires the presence of a majority of directors then in office, and any action of the Board requires the affirmative vote of a majority of directors present at a meeting at which a quorum is present, except as otherwise specified in Section 7 for certain enumerated major transactions.',
+    ['no fewer than 5 and no more than 9 members', 'staggered 3-year terms', 'majority of directors then in office', 'Section 7'],
+    ['no fewer than 50 and no more than 90 members', 'staggered 30-year terms', 'unanimous vote of directors then in office'],
+  ),
+  item(
+    'legal-27', 'legal',
+    'The Assignor hereby assigns all right, title, and interest in the Patent and any continuations, divisionals, or foreign counterparts thereof to the Assignee, in exchange for the consideration described in Section 3, and agrees to execute any further documents reasonably necessary to perfect the Assignee\'s ownership. This assignment does not include any rights to inventions conceived after the Effective Date, which shall remain the sole property of the Assignor absent a separate written agreement.',
+    ['Section 3', 'reasonably necessary to perfect', 'does not include any rights to inventions conceived after the Effective Date'],
+    ['as described in Section 30', 'unnecessary to perfect the Assignee\'s ownership', 'includes all rights to inventions conceived after the Effective Date'],
+  ),
+  item(
+    'legal-28', 'legal',
+    'The Franchisor may terminate this Agreement immediately upon written notice if the Franchisee fails to pay any amount due within 15 days of the due date, fails to maintain required insurance coverage, or is convicted of a felony related to the operation of the franchised business. For all other defaults, the Franchisee shall have 30 days after written notice to cure the default before termination becomes effective, except that a default previously cured twice within a 12-month period need not be given a further cure opportunity.',
+    ['within 15 days', '30 days after written notice', 'previously cured twice within a 12-month period'],
+    ['fails to pay any amount due within 150 days of the due date', '300 days after written notice to cure the default', 'previously cured twice within a 120-month period'],
+  ),
+  item(
+    'legal-29', 'legal',
+    'This Data Processing Addendum requires the Processor to notify the Controller of any Personal Data Breach without undue delay and in any event within 48 hours of becoming aware of it, providing sufficient information to allow the Controller to meet its own regulatory notification obligations. The Processor shall implement and maintain technical and organizational measures including, at minimum, encryption of data at rest and in transit, and shall permit the Controller to audit compliance no more than once per 12-month period absent a suspected breach.',
+    ['within 48 hours', 'encryption of data at rest and in transit', 'no more than once per 12-month period'],
+    ['within 480 hours of becoming aware of it', 'encryption of data at rest only', 'no more than once per 120-month period'],
+  ),
+  item(
+    'legal-30', 'legal',
+    'The Joint Venture shall be governed by a Management Committee composed of 2 representatives appointed by each Party, with major decisions, as enumerated in Schedule 2, requiring unanimous approval and all other decisions requiring a simple majority. Profits and losses shall be allocated 60 percent to Party A and 40 percent to Party B, consistent with their respective initial capital contributions of $6,000,000 and $4,000,000.',
+    ['2 representatives', 'Schedule 2', 'unanimous approval', '60 percent to Party A', '40 percent to Party B', '$6,000,000', '$4,000,000'],
+    ['composed of 20 representatives appointed by each Party', 'requiring a simple majority for major decisions enumerated in Schedule 2', 'initial capital contributions of $60,000,000 and $40,000,000'],
+  ),
+  item(
+    'legal-31', 'legal',
+    'The Warrant entitles the holder to purchase up to 100,000 shares of common stock at an exercise price of $2.50 per share, exercisable at any time within 5 years of the issuance date, after which the Warrant shall expire and become void if unexercised. The exercise price and number of underlying shares are subject to customary anti-dilution adjustment in the event of a stock split, stock dividend, or similar recapitalization event affecting the Company\'s outstanding common stock.',
+    ['100,000 shares', '$2.50 per share', 'within 5 years', 'anti-dilution adjustment'],
+    ['entitles the holder to purchase up to 1,000,000 shares', 'an exercise price of $25.00 per share', 'within 50 years of the issuance date'],
+  ),
+  item(
+    'legal-32', 'legal',
+    'The Guest agrees to indemnify and hold harmless the Venue from any claim arising out of the Guest\'s use of the rented space, except to the extent such claim arises from the Venue\'s own gross negligence or willful misconduct. The Guest shall provide a certificate of general liability insurance with coverage of at least $1,000,000 per occurrence no later than 10 days before the event date, and failure to provide such certificate entitles the Venue to cancel the reservation without refund.',
+    ['gross negligence or willful misconduct', 'at least $1,000,000 per occurrence', 'no later than 10 days before the event date', 'without refund'],
+    ['except to the extent such claim arises from the Guest\'s own gross negligence', 'at least $10,000 per occurrence', 'no later than 100 days before the event date'],
+  ),
+  item(
+    'legal-33', 'legal',
+    'This Consulting Agreement classifies the Consultant as an independent contractor and not an employee, and the Consultant shall be solely responsible for all applicable taxes on amounts paid hereunder. The Consultant shall invoice the Company monthly for hours worked at the rate of $185 per hour, not to exceed 40 hours per week without prior written authorization from the Company\'s designated project manager, with payment due within 30 days of receipt of a proper invoice.',
+    ['independent contractor and not an employee', '$185 per hour', 'not to exceed 40 hours per week', 'within 30 days'],
+    ['classifies the Consultant as an employee and not an independent contractor', 'at the rate of $18.50 per hour', 'not to exceed 400 hours per week'],
+  ),
+  item(
+    'legal-34', 'legal',
+    'The Escrow Agent shall release the Holdback Amount of $600,000 to the Seller on the date that is 18 months after Closing, less any amounts properly claimed by the Buyer for indemnifiable losses under Article 9 and still pending resolution as of that date. Any dispute over a claimed amount shall be resolved through the dispute resolution procedure set forth in Section 11, and undisputed amounts shall be released promptly notwithstanding an ongoing dispute over a separate claimed amount.',
+    ['$600,000', '18 months after Closing', 'Article 9', 'Section 11'],
+    ['release the Holdback Amount of $6,000,000', 'on the date that is 180 months after Closing', 'as set forth in Section 110'],
+  ),
+  item(
+    'legal-35', 'legal',
+    'The Employee Handbook set forth herein is intended as a general guide to Company policy and does not constitute an employment contract or a guarantee of continued employment for any specific duration; employment remains at-will and may be terminated by either party at any time, with or without cause or notice, except as otherwise required by applicable law. The Company reserves the right to modify any policy described herein at its sole discretion upon 15 days\' notice to employees.',
+    ['does not constitute an employment contract', 'at-will', 'with or without cause or notice', 'upon 15 days\' notice'],
+    ['constitutes a binding employment contract guaranteeing continued employment', 'only for cause and only with notice', 'upon 150 days\' notice to employees'],
+  ),
+  item(
+    'legal-36', 'legal',
+    'The Manufacturer warrants that the Goods shall be free from defects in material and workmanship for a period of 3 years from the date of delivery, and shall, at its option, repair, replace, or refund the purchase price of any Goods found defective within that period, provided the Buyer notifies the Manufacturer in writing within 10 days of discovering the defect. This warranty does not extend to defects caused by misuse, unauthorized modification, or failure to follow the Manufacturer\'s maintenance instructions.',
+    ['3 years', 'repair, replace, or refund', 'within 10 days of discovering the defect', 'does not extend to defects caused by misuse'],
+    ['free from defects in material and workmanship for a period of 30 years', 'within 100 days of discovering the defect', 'does extend to defects caused by misuse'],
+  ),
+  item(
+    'legal-37', 'legal',
+    'This Non-Compete provision is limited in duration to 18 months following separation and in geographic scope to the 3 states in which the Employee actually provided services during the final year of employment, restrictions the parties acknowledge are reasonable and necessary to protect the Company\'s legitimate business interests. Should a court find any portion of this restriction overbroad, the parties agree the court may modify the scope or duration to the minimum extent necessary to render it enforceable, rather than voiding the provision entirely.',
+    ['18 months following separation', '3 states', 'final year of employment', 'may modify the scope or duration'],
+    ['limited in duration to 180 months following separation', 'in geographic scope to the 30 states', 'must void the provision entirely rather than modify it'],
+  ),
+  item(
+    'legal-38', 'legal',
+    'The Condominium Association\'s governing documents require a supermajority vote of 67 percent of unit owners to approve any special assessment exceeding $500,000 in the aggregate, while assessments below that threshold require only a simple majority of the Board. Owners shall be given at least 30 days\' written notice before any special assessment vote, and any approved assessment shall be payable over a period of not less than 12 months absent a supermajority vote of 75 percent approving a shorter payment period.',
+    ['67 percent', 'exceeding $500,000', 'at least 30 days\' written notice', 'not less than 12 months', '75 percent'],
+    ['a supermajority vote of 6.7 percent', 'exceeding $5,000,000', 'at least 300 days\' written notice'],
+  ),
+  item(
+    'legal-39', 'legal',
+    'The Buyer shall have a due diligence period of 45 days from the Effective Date during which it may terminate this Agreement for any reason or no reason and receive a full refund of its earnest money deposit. After expiration of the due diligence period without termination, the earnest money becomes non-refundable except in the event of a material breach by the Seller or the failure of a condition precedent expressly identified in Section 6.',
+    ['due diligence period of 45 days', 'full refund of its earnest money deposit', 'non-refundable except in the event of a material breach', 'Section 6'],
+    ['a due diligence period of 450 days', 'a partial refund of its earnest money deposit', 'as identified in Section 60'],
+  ),
+  item(
+    'legal-40', 'legal',
+    'The Recipient of the grant funds described in this Agreement shall submit quarterly progress reports and a final report within 60 days of the grant period\'s conclusion, and shall maintain financial records supporting all expenditures for a minimum of 5 years following the grant period\'s conclusion, subject to audit by the Grantor at any time during that retention period. Failure to submit required reports within 30 days of the applicable deadline may result in suspension of further disbursements pending cure.',
+    ['within 60 days', 'minimum of 5 years', 'within 30 days of the applicable deadline'],
+    ['a final report within 600 days of the grant period\'s conclusion', 'a minimum of 50 years following the grant period\'s conclusion', 'within 300 days of the applicable deadline'],
+  ),
+  item(
+    'legal-41', 'legal',
+    'This Waiver of Subrogation applies to all claims arising from property damage covered by either party\'s property insurance, regardless of fault, and each party shall ensure its property insurance policy includes a waiver of subrogation endorsement consistent with this Section. This waiver does not apply to claims for bodily injury or to property damage exceeding the applicable policy\'s coverage limits, which shall be governed by the general liability and indemnification provisions set forth in Section 14.',
+    ['regardless of fault', 'waiver of subrogation endorsement', 'does not apply to claims for bodily injury', 'Section 14'],
+    ['applies only where fault can be established', 'does not require a waiver of subrogation endorsement', 'as set forth in Section 140'],
+  ),
+  item(
+    'legal-42', 'legal',
+    'The Licensee shall pay a one-time implementation fee of $80,000 and an annual subscription fee of $120,000, payable in advance and non-refundable except as expressly provided in Section 8 regarding uptime service-level failures. Should uptime fall below the guaranteed 99.5 percent in any calendar month, the Licensee shall receive a service credit of 5 percent of that month\'s pro-rated subscription fee for each full percentage point below the guarantee, up to a maximum credit of 25 percent in any single month.',
+    ['$80,000', '$120,000', 'Section 8', '99.5 percent', '5 percent', 'maximum credit of 25 percent'],
+    ['a one-time implementation fee of $800,000', 'an annual subscription fee of $1,200,000', 'as expressly provided in Section 80'],
+  ),
+  item(
+    'legal-43', 'legal',
+    'The Grantor conveys the Easement described in Exhibit E to the Grantee for the purpose of installing and maintaining underground utility lines, and this Easement shall run with the land and bind all future owners of the burdened parcel. The Grantee shall restore the surface of the burdened parcel to substantially its prior condition within 30 days of completing any excavation work, and shall provide the Grantor with at least 5 business days\' advance notice before any excavation, except in the case of an emergency repair.',
+    ['Exhibit E', 'run with the land', 'within 30 days of completing any excavation work', 'at least 5 business days\' advance notice'],
+    ['described in Exhibit V', 'shall not run with the land', 'within 300 days of completing any excavation work'],
+  ),
+  item(
+    'legal-44', 'legal',
+    'The Whistleblower Policy prohibits retaliation against any employee who reports a suspected violation in good faith, regardless of whether the report is later substantiated, and requires that all reports be investigated within 30 days of receipt by the compliance department. An employee who believes they have experienced retaliation in violation of this Policy may file a complaint directly with the Audit Committee, bypassing normal management channels, and such complaints must be acknowledged within 5 business days of receipt.',
+    ['regardless of whether the report is later substantiated', 'within 30 days of receipt', 'bypassing normal management channels', 'within 5 business days'],
+    ['prohibits retaliation... only if the report is later substantiated', 'within 300 days of receipt by the compliance department', 'within 50 business days of receipt'],
+  ),
+  item(
+    'legal-45', 'legal',
+    'This Prenuptial Agreement provides that all property owned by either party prior to the marriage, together with any appreciation thereon, shall remain the separate property of that party, while property acquired during the marriage through joint effort shall be deemed marital property subject to equitable division. Either party may petition to have this Agreement set aside within 2 years of learning of a material misrepresentation made by the other party in connection with the financial disclosures required under Section 5.',
+    ['together with any appreciation thereon', 'equitable division', 'within 2 years', 'Section 5'],
+    ['shall become marital property upon marriage', 'subject to equal division regardless of contribution', 'within 20 years of learning of a material misrepresentation'],
+  ),
+  item(
+    'legal-46', 'legal',
+    'The Subcontractor shall complete all work described in Exhibit F within 120 days of the Notice to Proceed, and shall be assessed liquidated damages of $1,500 per day for each day of unexcused delay beyond that deadline, up to a maximum of $75,000 in aggregate liquidated damages. The deadline shall be extended on a day-for-day basis for delays caused by the General Contractor, force majeure events, or differing site conditions not reasonably discoverable during a pre-bid site visit.',
+    ['Exhibit F', 'within 120 days', '$1,500 per day', 'maximum of $75,000'],
+    ['complete all work described in Exhibit R', 'within 12 days of the Notice to Proceed', '$15,000 per day for each day of unexcused delay'],
+  ),
+  item(
+    'legal-47', 'legal',
+    'The Health Savings Account custodial agreement permits the Accountholder to make tax-deductible contributions up to the annual limit set by federal regulation, currently $4,150 for self-only coverage, and to withdraw funds at any time for qualified medical expenses without tax or penalty. Withdrawals for non-qualified expenses before age 65 are subject to ordinary income tax plus a 20 percent additional penalty, a penalty that no longer applies to non-qualified withdrawals made after the Accountholder reaches age 65.',
+    ['$4,150', 'without tax or penalty', 'before age 65', '20 percent additional penalty'],
+    ['currently $41,500 for self-only coverage', 'before age 650', 'a 200 percent additional penalty'],
+  ),
+  item(
+    'legal-48', 'legal',
+    'The Charter School\'s authorization may be revoked by the Authorizer for material and substantial failure to meet the academic performance standards described in Exhibit G over any 2 consecutive school years, following a notice-and-cure period of not less than 90 days. The School shall submit an annual report to the Authorizer no later than October 1 of each year, and the Authorizer shall complete its comprehensive review of the School\'s performance at least once every 5 years as required by the enabling statute.',
+    ['Exhibit G', '2 consecutive school years', 'not less than 90 days', 'October 1', 'at least once every 5 years'],
+    ['as described in Exhibit T', 'over any 20 consecutive school years', 'not less than 900 days'],
+  ),
+  item(
+    'legal-49', 'legal',
+    'The Union and the Employer agree to a 3-year collective bargaining agreement providing for a wage increase of 4 percent in the first year, 3 percent in the second year, and 3 percent in the third year, alongside an increase in the Employer\'s contribution to the health plan from $850 to $1,050 per employee per month, phased in over the agreement\'s term. Grievances must be filed within 15 business days of the incident giving rise to the grievance, and unresolved grievances proceed to binding arbitration under Article 20.',
+    ['3-year', '4 percent', '$850 to $1,050', 'within 15 business days', 'Article 20'],
+    ['a 30-year collective bargaining agreement', 'a wage increase of 40 percent in the first year', 'within 150 business days of the incident'],
+  ),
+  item(
+    'legal-50', 'legal',
+    'The Municipal Bond Indenture requires the Issuer to maintain a debt service coverage ratio of at least 1.25 to 1, tested semiannually, and failure to maintain this ratio for 2 consecutive testing periods constitutes an Event of Default entitling the Trustee to accelerate the outstanding principal balance of $42,000,000. The Issuer must additionally fund a debt service reserve account equal to the lesser of 10 percent of the original principal amount or maximum annual debt service, currently calculated at $3,600,000.',
+    ['1.25 to 1', 'tested semiannually', '2 consecutive testing periods', '$42,000,000', '10 percent', '$3,600,000'],
+    ['a debt service coverage ratio of at least 12.5 to 1', 'tested annually', 'principal balance of $420,000,000'],
+  ),
 ]

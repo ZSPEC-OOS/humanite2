@@ -1,4 +1,5 @@
 import type { CorpusItem } from '../types'
+import { item } from './helpers'
 
 export const BUSINESS_CORPUS: CorpusItem[] = [
   {
@@ -81,4 +82,247 @@ export const BUSINESS_CORPUS: CorpusItem[] = [
     prohibitedChanges: ['score declined to 42', 'time-to-first-value from 9 days to 30 days', 'the enterprise segment\'s NPS, at 82'],
     expectedProperties: { minWordCount: 60, maxWordCount: 160 },
   },
+
+  // Phase 11 scale-up: business-11 through business-50, bringing this
+  // domain from 10 to 50 items.
+  item(
+    'business-11', 'business',
+    'The company closed its Series C funding round at $85 million, valuing the business at $620 million post-money, up from a $310 million valuation at its Series B just 14 months earlier. The round was led by a new investor contributing $40 million, with existing investors participating for the remaining $45 million. Proceeds are earmarked primarily for international expansion, with 60 percent allocated to opening offices in 4 new countries over the next 18 months.',
+    ['$85 million', '$620 million', '$310 million', '14 months', '$40 million', '$45 million', '60 percent', '4 new countries', '18 months'],
+    ['closed its Series C funding round at $8.5 million', 'valuing the business at $62 million', 'just 140 months earlier'],
+  ),
+  item(
+    'business-12', 'business',
+    'Same-store sales grew 5.4 percent this quarter, the eighth consecutive quarter of positive growth, while overall foot traffic declined 2.1 percent, meaning average transaction value rose to compensate. The loyalty program, now enrolling 3.2 million members, drove 44 percent of total revenue, up from 38 percent a year earlier. Management opened 12 new stores this quarter and closed 4 underperforming locations, ending the period with 618 stores in operation.',
+    ['5.4 percent', 'eighth consecutive quarter', '2.1 percent', '3.2 million members', '44 percent', '38 percent', '12 new stores', '4 underperforming locations', '618 stores'],
+    ['same-store sales grew 54 percent this quarter', 'overall foot traffic declined 21 percent', 'ending the period with 68 stores'],
+  ),
+  item(
+    'business-13', 'business',
+    'The company issued $400 million in 5-year corporate bonds at a coupon rate of 4.75 percent, oversubscribed by 3.2 times, allowing pricing to tighten 15 basis points from initial guidance. Proceeds will refinance $250 million in existing debt maturing next year and fund $150 million of capital expenditure. The bond carries a credit rating of BBB, one notch above the company\'s rating at its last debt issuance 3 years ago.',
+    ['$400 million', '5-year', '4.75 percent', '3.2 times', '15 basis points', '$250 million', '$150 million', 'BBB', '3 years ago'],
+    ['issued $40 million in 5-year corporate bonds', 'oversubscribed by 0.32 times', 'tighten 150 basis points'],
+  ),
+  item(
+    'business-14', 'business',
+    'A pricing experiment across 3 test markets found that raising the flagship product\'s price by 8 percent reduced unit volume by only 3 percent, implying a price elasticity of roughly -0.38 and a net positive effect on revenue. Margin per unit improved by 11 percentage points as a result. The company plans to roll the increase out to all 40 remaining markets over the next 2 quarters, though it will monitor the 6 markets with the most price-sensitive customer base separately before finalizing full rollout.',
+    ['3 test markets', '8 percent', '3 percent', '-0.38', '11 percentage points', '40 remaining markets', '2 quarters', '6 markets'],
+    ['a pricing experiment across 30 test markets', 'reduced unit volume by only 30 percent', 'implying a price elasticity of roughly -3.8'],
+  ),
+  item(
+    'business-15', 'business',
+    'Warehouse headcount will be reduced by 220 positions, approximately 9 percent of the distribution workforce, as part of a restructuring expected to generate $38 million in annualized savings once fully implemented within 6 months. Severance costs of $12 million will be recognized this quarter. The company said the affected roles are concentrated in 3 facilities being consolidated into a single larger distribution center opening next year, and that no reductions are planned for its retail or corporate staff.',
+    ['220 positions', 'approximately 9 percent', '$38 million', '6 months', '$12 million', '3 facilities'],
+    ['reduced by 2,200 positions', 'approximately 90 percent of the distribution workforce', 'generate $3.8 million in annualized savings'],
+  ),
+  item(
+    'business-16', 'business',
+    'The company\'s new loyalty tier, requiring $1,000 in annual spend to unlock, has been adopted by 180,000 customers within its first 6 months, exceeding an internal target of 120,000. Members of this tier spend an average of 2.4 times more annually than non-members and show a 12-month retention rate of 91 percent, compared to 68 percent for the base loyalty tier. The program\'s cost, driven mainly by free shipping and birthday discounts, runs approximately $22 per enrolled member per year.',
+    ['$1,000', '180,000 customers', '6 months', '120,000', '2.4 times', '91 percent', '68 percent', '$22 per enrolled member'],
+    ['requiring $10,000 in annual spend', 'adopted by 18,000 customers', 'exceeding an internal target of 1,200,000'],
+  ),
+  item(
+    'business-17', 'business',
+    'The company\'s largest customer, accounting for 18 percent of total revenue last year, renewed its contract for 3 additional years at a rate 6 percent higher than the prior agreement, alongside a expanded scope that management estimates will add $9 million in incremental annual revenue. The renewal reduces customer concentration risk only modestly, since the next 4 largest customers combined represent an additional 22 percent of revenue, meaning the top 5 customers together still account for 40 percent of the total.',
+    ['18 percent', '3 additional years', '6 percent higher', '$9 million', '4 largest customers', '22 percent', 'top 5 customers', '40 percent'],
+    ['accounting for 81 percent of total revenue', 'renewed its contract for 30 additional years', 'a rate 60 percent higher'],
+  ),
+  item(
+    'business-18', 'business',
+    'The manufacturing plant reduced its scrap rate from 6.8 percent to 2.9 percent over 18 months by introducing statistical process control on its 4 highest-volume production lines, saving an estimated $3.1 million annually in wasted raw material. Overall equipment effectiveness rose from 68 percent to 79 percent over the same period, though the plant manager noted the remaining gap to the company\'s 85 percent target is concentrated almost entirely in changeover time between product runs.',
+    ['6.8 percent', '2.9 percent', '18 months', '4 highest-volume production lines', '$3.1 million', '68 percent', '79 percent', '85 percent'],
+    ['reduced its scrap rate from 68 percent to 29 percent', 'saving an estimated $31 million annually', 'rose from 6.8 percent to 7.9 percent' /* corrupted magnitude of the OEE improvement */],
+  ),
+  item(
+    'business-19', 'business',
+    'The company\'s cloud infrastructure costs grew 42 percent year-over-year to $18.6 million, outpacing revenue growth of 26 percent over the same period, prompting a cost-optimization initiative targeting $4.5 million in annual savings through reserved-instance purchasing and workload consolidation across its 3 primary cloud providers. Engineering estimates the initiative, once fully implemented over 9 months, will reduce infrastructure cost as a percentage of revenue from 11 percent to approximately 8 percent.',
+    ['42 percent', '$18.6 million', '26 percent', '$4.5 million', '3 primary cloud providers', '9 months', '11 percent', 'approximately 8 percent'],
+    ['grew 4.2 percent year-over-year', 'outpacing revenue growth of 260 percent', 'reduce infrastructure cost... from 11 percent to approximately 18 percent'],
+  ),
+  item(
+    'business-20', 'business',
+    'An internal audit of expense reports covering 14,000 submissions over 1 year flagged 3.1 percent as requiring follow-up review, with the most common issue, found in 41 percent of flagged reports, being missing itemized receipts for expenses above the $75 threshold. Total questioned spending across all flagged reports came to $620,000, of which $180,000 was ultimately recovered after employee follow-up, with the remainder deemed legitimate upon review.',
+    ['14,000 submissions', '1 year', '3.1 percent', '41 percent', '$75 threshold', '$620,000', '$180,000'],
+    ['covering 1,400 submissions', 'flagged 31 percent as requiring follow-up review', 'above the $750 threshold'],
+  ),
+  item(
+    'business-21', 'business',
+    'The company\'s new pricing model, moving from per-seat to usage-based billing, was adopted by 62 percent of the customer base within the first 3 months of availability. Average revenue per account rose 19 percent among customers who switched, though 8 percent of switchers saw their bill increase by more than 50 percent and have since filed support tickets requesting a return to the legacy pricing model, which remains available through the end of the current fiscal year.',
+    ['62 percent', '3 months', '19 percent', '8 percent', 'more than 50 percent', 'end of the current fiscal year'],
+    ['adopted by 6.2 percent of the customer base', 'average revenue per account rose 91 percent', 'more than 5 percent'],
+  ),
+  item(
+    'business-22', 'business',
+    'A vendor risk assessment of the company\'s top 50 suppliers, representing 78 percent of total procurement spend, identified 6 suppliers with concentrated single-source risk on components with no qualified alternate supplier. The company has since qualified backup suppliers for 4 of those 6, targeting completion of the remaining 2 within the next 2 quarters, and has increased safety-stock coverage for the highest-risk components from 3 weeks to 8 weeks in the interim.',
+    ['top 50 suppliers', '78 percent', '6 suppliers', '4 of those 6', 'remaining 2', 'next 2 quarters', '3 weeks', '8 weeks'],
+    ['a vendor risk assessment of the company\'s top 5 suppliers', 'representing 7.8 percent of total procurement spend', 'increased safety-stock coverage... from 30 weeks to 80 weeks'],
+  ),
+  item(
+    'business-23', 'business',
+    'Customer support ticket volume rose 34 percent following the product launch, but average resolution time held steady at 6.2 hours thanks to a 40 percent increase in support staffing implemented 2 months ahead of launch in anticipation of the volume increase. First-contact resolution rate, however, dipped from 71 percent to 64 percent during the launch month before recovering to 69 percent the following month as the team completed training on the new product\'s 12 most common issue categories.',
+    ['34 percent', '6.2 hours', '40 percent', '2 months', '71 percent', '64 percent', '69 percent', '12 most common issue categories'],
+    ['ticket volume rose 3.4 percent', 'average resolution time held steady at 62 hours', 'dipped from 71 percent to 6.4 percent'],
+  ),
+  item(
+    'business-24', 'business',
+    'The company\'s carbon footprint reduction plan targets a 45 percent cut in Scope 1 and Scope 2 emissions by 2030 relative to a 2019 baseline, with 22 percent already achieved as of the most recent reporting year, driven primarily by a shift to renewable electricity contracts covering 6 of its 9 major facilities. The remaining 3 facilities, all leased rather than owned, are expected to transition by 2027 once current lease terms allow for on-site solar installation.',
+    ['45 percent', '2030', '2019', '22 percent', '6 of its 9 major facilities', 'remaining 3 facilities', '2027'],
+    ['targets a 4.5 percent cut', 'relative to a 2091 baseline', 'with 220 percent already achieved'],
+  ),
+  item(
+    'business-25', 'business',
+    'The company\'s free trial-to-paid conversion rate improved from 11 percent to 17 percent after shortening the trial period from 30 days to 14 days and adding a guided onboarding flow completed by 74 percent of trial users. Users who completed onboarding converted at 28 percent, versus just 6 percent for those who skipped it, making onboarding completion the single strongest predictor of conversion identified across the 9 variables the product team analyzed.',
+    ['11 percent', '17 percent', '30 days', '14 days', '74 percent', '28 percent', '6 percent', '9 variables'],
+    ['improved from 11 percent to 71 percent', 'shortening the trial period from 30 days to 140 days', 'converted at 82 percent'],
+  ),
+  item(
+    'business-26', 'business',
+    'The company\'s data center consolidation project, merging 14 regional facilities into 5 larger sites, is projected to reduce annual operating costs by $9.4 million once complete, against a one-time migration cost of $6.2 million spread across 2 fiscal years. Server utilization is expected to rise from an average of 34 percent to 71 percent as workloads are consolidated onto fewer, more fully loaded machines, and the project is currently tracking 1 month ahead of its original 16-month schedule.',
+    ['14 regional facilities', '5 larger sites', '$9.4 million', '$6.2 million', '2 fiscal years', '34 percent', '71 percent', '1 month ahead', '16-month'],
+    ['merging 140 regional facilities into 50 larger sites', 'reduce annual operating costs by $94 million', 'tracking 1 month behind'],
+  ),
+  item(
+    'business-27', 'business',
+    'A study of 3,400 job applications submitted to the company found that resumes listing a referral from a current employee were 4.2 times more likely to result in an interview offer than resumes without one, and referred candidates who were ultimately hired had a 12-month retention rate of 88 percent versus 71 percent for non-referred hires. Referral bonuses, currently set at $2,000 per successful hire, will increase to $3,000 for hard-to-fill technical roles starting next quarter.',
+    ['3,400 job applications', '4.2 times', '12-month', '88 percent', '71 percent', '$2,000', '$3,000'],
+    ['a study of 340 job applications', '4.2 times less likely', 'retention rate of 18 percent'],
+  ),
+  item(
+    'business-28', 'business',
+    'The mobile app redesign increased average session length from 4.1 minutes to 6.8 minutes and daily active users by 16 percent within 8 weeks of launch, though a subset of long-time users, representing about 9 percent of the base, reported difficulty locating features they previously used frequently. Support has since restored a "classic layout" toggle for that group, and early data shows 74 percent of users who opted into the classic layout switched back to the new design within 30 days.',
+    ['4.1 minutes', '6.8 minutes', '16 percent', '8 weeks', '9 percent', '74 percent', '30 days'],
+    ['increased average session length from 41 minutes to 68 minutes', 'daily active users by 160 percent', 'switched back to the new design within 3 days'],
+  ),
+  item(
+    'business-29', 'business',
+    'The company\'s international segment now accounts for 31 percent of total revenue, up from 19 percent 3 years ago, with the fastest growth coming from its 4 Southeast Asian markets, which grew a combined 58 percent last year on a currency-neutral basis. Foreign exchange headwinds reduced reported international revenue growth by 6 percentage points compared to the currency-neutral figure, and management expects this segment to reach 40 percent of total revenue within the next 5 years if current growth rates hold.',
+    ['31 percent', '19 percent', '3 years ago', '4 Southeast Asian markets', '58 percent', '6 percentage points', '40 percent', 'next 5 years'],
+    ['accounts for 13 percent of total revenue', 'grew a combined 5.8 percent last year', 'reduced reported international revenue growth by 60 percentage points'],
+  ),
+  item(
+    'business-30', 'business',
+    'Following a data breach affecting approximately 210,000 customer records, the company incurred estimated remediation costs of $4.8 million, including credit-monitoring services offered to all affected customers for 24 months. Customer churn among affected users rose 3.2 percentage points above baseline in the 2 quarters following disclosure, though churn among unaffected customers showed no measurable change, suggesting the reputational impact was contained rather than company-wide.',
+    ['210,000 customer records', '$4.8 million', '24 months', '3.2 percentage points', '2 quarters'],
+    ['affecting approximately 21,000 customer records', 'estimated remediation costs of $48 million', 'churn among affected users fell 3.2 percentage points'],
+  ),
+  item(
+    'business-31', 'business',
+    'The company\'s executive team approved a $75 million investment in automating its 3 largest fulfillment centers over the next 2 years, projected to reduce cost per order by 28 percent and increase peak-season throughput capacity by 45 percent. The investment requires a workforce transition plan, since automation is expected to reduce headcount needs at those 3 sites by approximately 300 positions, all of which the company has committed to filling through attrition and redeployment rather than layoffs.',
+    ['$75 million', '3 largest fulfillment centers', '2 years', '28 percent', '45 percent', '300 positions'],
+    ['a $7.5 million investment', 'projected to reduce cost per order by 2.8 percent', 'reduce headcount needs... by approximately 3,000 positions'],
+  ),
+  item(
+    'business-32', 'business',
+    'The company\'s employee stock purchase plan allows enrollment of up to 15 percent of eligible pay at a 15 percent discount to market price, and participation grew from 34 percent of eligible employees to 47 percent after the discount was raised from 10 percent last year. Total shares purchased under the plan across the most recent offering period came to 2.1 million, representing approximately 0.8 percent of shares outstanding, funded entirely through employee payroll deductions rather than new share issuance.',
+    ['up to 15 percent', '15 percent discount', '34 percent', '47 percent', '10 percent last year', '2.1 million', '0.8 percent'],
+    ['allows enrollment of up to 150 percent of eligible pay', 'participation grew from 34 percent... to 4.7 percent', 'representing approximately 8 percent of shares outstanding'],
+  ),
+  item(
+    'business-33', 'business',
+    'A benchmarking study of 40 competitors in the industry found the company\'s average delivery time of 2.3 days ranks in the top quartile, faster than the industry median of 3.8 days, though its return rate of 12 percent sits slightly above the industry median of 9.5 percent. Customers who experienced a return handled through the company\'s newly launched instant-refund feature, used in 61 percent of return cases since its rollout 4 months ago, reported satisfaction scores 22 points higher than customers using the standard return process.',
+    ['40 competitors', '2.3 days', '3.8 days', '12 percent', '9.5 percent', '61 percent', '4 months ago', '22 points'],
+    ['a benchmarking study of 4 competitors', 'average delivery time of 23 days', 'return rate of 1.2 percent'],
+  ),
+  item(
+    'business-34', 'business',
+    'The newly opened flagship store generated $2.1 million in sales during its first month, roughly 3.4 times the average of the company\'s other 60 locations during their respective first months, though management cautions that novelty foot traffic typically fades by month 4, when comparable prior openings settled to roughly 1.6 times the chain average. The store employs 85 staff, more than double the typical location\'s headcount of about 35.',
+    ['$2.1 million', '3.4 times', '60 locations', 'month 4', '1.6 times', '85 staff', 'about 35'],
+    ['generated $21 million in sales', 'roughly 34 times the average', 'employs 8 staff'],
+  ),
+  item(
+    'business-35', 'business',
+    'The company renegotiated its office lease portfolio, reducing total leased square footage from 1.4 million to 820,000 square feet across its 22 offices as part of a permanent shift toward hybrid work, generating $18 million in annual rent savings starting next fiscal year. Average office utilization on peak days, measured by badge swipes, sits at 58 percent of the reduced footprint, still below the company\'s internal target of 70 percent, prompting consideration of further consolidation at 4 underutilized locations.',
+    ['1.4 million', '820,000 square feet', '22 offices', '$18 million', '58 percent', '70 percent', '4 underutilized locations'],
+    ['reducing total leased square footage from 14 million to 8.2 million square feet', 'generating $180 million in annual rent savings', 'sits at 5.8 percent of the reduced footprint'],
+  ),
+  item(
+    'business-36', 'business',
+    'The company\'s annual customer satisfaction survey, completed by 8,200 respondents this year, recorded an overall satisfaction score of 4.1 out of 5, up from 3.7 last year, with the largest gains reported in the "response time" category, which rose from 3.2 to 4.0. The "pricing value" category remained the lowest-rated dimension at 3.3, essentially unchanged from 3.4 a year earlier, and has been flagged by leadership as the top priority for the coming year\'s product roadmap.',
+    ['8,200 respondents', '4.1 out of 5', '3.7 last year', '3.2 to 4.0', '3.3', '3.4 a year earlier'],
+    ['completed by 820 respondents', 'recorded an overall satisfaction score of 1.4 out of 5', 'rose from 3.2 to 4.9'],
+  ),
+  item(
+    'business-37', 'business',
+    'The company\'s procurement team negotiated a 3-year supply agreement locking in raw material costs at $4.20 per unit, roughly 9 percent below the current spot price of $4.62, protecting an estimated $6.8 million in annual spend from price volatility. The agreement includes a volume commitment of at least 1.6 million units per year, below which a make-whole penalty of $0.30 per unit shortfall applies, a term the procurement team negotiated down from an initial proposal of $0.75 per unit.',
+    ['3-year', '$4.20 per unit', '9 percent', '$4.62', '$6.8 million', '1.6 million units', '$0.30 per unit', '$0.75 per unit'],
+    ['a 30-year supply agreement', 'roughly 90 percent below the current spot price', 'a volume commitment of at least 16 million units per year'],
+  ),
+  item(
+    'business-38', 'business',
+    'The company\'s call center reduced average handle time from 8.4 minutes to 6.1 minutes after introducing an AI-assisted knowledge-base tool used on 72 percent of calls, without a corresponding drop in customer satisfaction, which held steady at 84 percent positive. Agent turnover, previously 38 percent annually, fell to 29 percent in the 12 months following the tool\'s rollout, which the company attributes partly to reduced call-handling stress reported in exit interviews with departing agents.',
+    ['8.4 minutes', '6.1 minutes', '72 percent', '84 percent', '38 percent', '29 percent', '12 months'],
+    ['reduced average handle time from 84 minutes to 61 minutes', 'used on 7.2 percent of calls', 'turnover... fell to 2.9 percent'],
+  ),
+  item(
+    'business-39', 'business',
+    'An analysis of 900 retail locations found that stores within 0.5 miles of a competitor location saw 6 percent lower same-store sales growth than stores with no competitor within 2 miles, a gap that narrowed to 2 percent once the analysis controlled for local population density. Stores that added a curbside pickup option, now available at 640 of the 900 locations analyzed, saw same-store sales growth 4.1 percentage points higher than stores without the option, regardless of competitor proximity.',
+    ['900 retail locations', '0.5 miles', '6 percent', '2 miles', '2 percent', '640 of the 900', '4.1 percentage points'],
+    ['an analysis of 90 retail locations', 'saw 60 percent lower same-store sales growth', 'a gap that narrowed to 20 percent'],
+  ),
+  item(
+    'business-40', 'business',
+    'The company\'s board approved a special one-time dividend of $1.85 per share, totaling approximately $410 million, funded from proceeds of last quarter\'s divestiture of a non-core business unit for $650 million. The regular quarterly dividend of $0.28 per share remains unchanged and unaffected by the special dividend, and management stated the remaining $240 million of divestiture proceeds not distributed will be allocated to debt reduction over the next 12 months.',
+    ['$1.85 per share', '$410 million', '$650 million', '$0.28 per share', '$240 million', '12 months'],
+    ['a special one-time dividend of $18.50 per share', 'totaling approximately $41 million', 'divestiture... for $65 million'],
+  ),
+  item(
+    'business-41', 'business',
+    'The company\'s new markdown-optimization algorithm, deployed across 220 stores in a pilot, reduced end-of-season clearance inventory by 31 percent while improving clearance-period gross margin by 3.8 percentage points compared to the prior manual markdown process. Full-price sell-through in the pilot stores rose slightly to 74 percent from 71 percent, suggesting the algorithm\'s more gradual early-season markdowns did not meaningfully cannibalize full-price demand. Rollout to the remaining 780 stores is planned over the next 3 quarters.',
+    ['220 stores', '31 percent', '3.8 percentage points', '74 percent', '71 percent', '780 stores', '3 quarters'],
+    ['deployed across 22 stores', 'reduced end-of-season clearance inventory by 3.1 percent', 'rollout to the remaining 78 stores'],
+  ),
+  item(
+    'business-42', 'business',
+    'A compensation benchmarking review of 62 comparable public companies found the CEO\'s total compensation ranks at the 71st percentile, while median employee pay ranks at the 44th percentile, producing a pay ratio of 312-to-1, above the peer median ratio of 265-to-1. The compensation committee has proposed capping future increases in CEO cash bonus at 8 percent annually until the ratio moves back within 10 percent of the peer median, a target it expects to reach within 4 years.',
+    ['62 comparable public companies', '71st percentile', '44th percentile', '312-to-1', '265-to-1', '8 percent annually', 'within 10 percent', '4 years'],
+    ['a compensation benchmarking review of 6 comparable public companies', 'ranks at the 17th percentile', 'a pay ratio of 32-to-1'],
+  ),
+  item(
+    'business-43', 'business',
+    'The company\'s trade-in program processed 145,000 devices in its first full year, recovering an estimated $9.2 million in resale and refurbishment value against $2.6 million in program operating costs. Devices in "like new" condition, representing 22 percent of intake, resold for an average of 61 percent of original retail price, while devices classified as "heavily used," at 18 percent of intake, were routed to a recycling partner rather than resale, recovering only material-scrap value.',
+    ['145,000 devices', '$9.2 million', '$2.6 million', '22 percent', '61 percent', '18 percent'],
+    ['processed 14,500 devices', 'recovering an estimated $92 million', 'against $26 million in program operating costs'],
+  ),
+  item(
+    'business-44', 'business',
+    'The company\'s partner-referral channel generated $22 million in new bookings last year, up from $14 million the year before, now representing 16 percent of total new bookings compared to 11 percent 2 years ago. The top 10 partners by volume accounted for 68 percent of channel bookings, prompting the company to launch a tiered incentive program for its remaining 140 smaller partners aimed at growing their combined contribution from the current 32 percent to a targeted 45 percent within 3 years.',
+    ['$22 million', '$14 million', '16 percent', '11 percent', '2 years ago', 'top 10 partners', '68 percent', '140 smaller partners', '32 percent', '45 percent', '3 years'],
+    ['generated $2.2 million in new bookings', 'now representing 1.6 percent of total new bookings', 'top 10 partners by volume accounted for 6.8 percent'],
+  ),
+  item(
+    'business-45', 'business',
+    'An internal review of the sales pipeline found that deals with 3 or more stakeholders involved on the customer side closed at a 41 percent rate, compared to 19 percent for deals with a single identified stakeholder, despite taking on average 6 weeks longer to close, 14 weeks versus 8 weeks. Average deal size for multi-stakeholder deals was also 2.8 times larger, leading the sales team to revise its qualification criteria to prioritize opportunities showing early evidence of multi-stakeholder buy-in.',
+    ['3 or more stakeholders', '41 percent', '19 percent', '6 weeks longer', '14 weeks', '8 weeks', '2.8 times larger'],
+    ['deals with 3 or more stakeholders... closed at a 4.1 percent rate', 'compared to 91 percent for deals with a single identified stakeholder', 'taking on average 60 weeks longer'],
+  ),
+  item(
+    'business-46', 'business',
+    'The company migrated 82 percent of its customer base to the new billing platform over a planned 9-month transition, encountering payment-processing errors affecting approximately 1.4 percent of migrated accounts, all of which were resolved within 48 hours of detection. The remaining 18 percent of accounts, concentrated among customers on legacy multi-year contracts, will migrate in a final wave planned for next quarter once contract-specific billing logic has been fully replicated on the new platform.',
+    ['82 percent', '9-month', '1.4 percent', '48 hours', '18 percent'],
+    ['migrated 8.2 percent of its customer base', 'affecting approximately 14 percent of migrated accounts', 'resolved within 480 hours of detection'],
+  ),
+  item(
+    'business-47', 'business',
+    'The company\'s employee referral hiring channel filled 220 of the 640 open positions this year, or 34 percent of total hires, at an average cost-per-hire of $1,900, compared to $4,600 for positions filled through external recruiting agencies. Referred hires also showed a 6-percentage-point higher 1-year retention rate than non-referred hires across the same period, prompting a proposal to raise the referral bonus by 25 percent for roles in the 3 departments with the highest current vacancy rates.',
+    ['220 of the 640', '34 percent', '$1,900', '$4,600', '6-percentage-point', '25 percent', '3 departments'],
+    ['filled 22 of the 64 open positions', 'at an average cost-per-hire of $19,000', 'compared to $460 for positions filled through external recruiting agencies'],
+  ),
+  item(
+    'business-48', 'business',
+    'The company\'s packaging redesign reduced material use per unit by 24 percent and cut shipping-related damage claims from 2.8 percent of shipments to 1.1 percent, saving an estimated $3.4 million annually in combined material and replacement costs. The new packaging is 18 percent lighter, contributing to a separate 6 percent reduction in outbound freight costs, and has been rolled out to all but 2 of the company\'s 30 product lines, with the remaining 2 scheduled for redesign next quarter.',
+    ['24 percent', '2.8 percent', '1.1 percent', '$3.4 million', '18 percent lighter', '6 percent', '2 of the company\'s 30 product lines'],
+    ['reduced material use per unit by 2.4 percent', 'cut shipping-related damage claims from 2.8 percent of shipments to 11 percent', 'saving an estimated $34 million annually'],
+  ),
+  item(
+    'business-49', 'business',
+    'The company\'s annual engagement survey found that managers who completed the optional leadership-training program, taken by 340 of the company\'s 900 people managers, had teams reporting engagement scores 14 points higher on average than teams led by managers who did not take the training. Team-level voluntary attrition was also 5.2 percentage points lower under trained managers, a gap that held even after controlling for team tenure and department, prompting a proposal to make the training mandatory for all new managers starting next year.',
+    ['340 of the company\'s 900', '14 points higher', '5.2 percentage points lower'],
+    ['taken by 34 of the company\'s 90 people managers', '14 points lower on average', '5.2 percentage points higher'],
+  ),
+  item(
+    'business-50', 'business',
+    'The company\'s new fraud-detection model, deployed across all payment processing, reduced confirmed fraud losses by 46 percent year-over-year while flagging only 0.9 percent of legitimate transactions for manual review, down from 2.3 percent under the previous model. False decline rate, a key driver of lost legitimate sales, fell from 1.8 percent to 0.6 percent, an improvement the finance team estimates recovered approximately $7.5 million in previously abandoned legitimate transactions over the first 6 months.',
+    ['46 percent', '0.9 percent', '2.3 percent', '1.8 percent', '0.6 percent', '$7.5 million', '6 months'],
+    ['reduced confirmed fraud losses by 4.6 percent year-over-year', 'flagging only 9 percent of legitimate transactions', 'false decline rate... fell from 18 percent to 6 percent'],
+  ),
 ]

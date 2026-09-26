@@ -1,4 +1,5 @@
 import type { CorpusItem } from '../types'
+import { item } from './helpers'
 
 export const MEDICAL_CORPUS: CorpusItem[] = [
   {
@@ -81,4 +82,247 @@ export const MEDICAL_CORPUS: CorpusItem[] = [
     prohibitedChanges: ['exclusive breastfeeding is recommended for the first 60 months', 'should be given cow\'s milk as a primary drink before 12 months', 'Vitamin D supplementation of 4000 IU per day'],
     expectedProperties: { minWordCount: 60, maxWordCount: 160 },
   },
+
+  // Phase 11 scale-up: medical-11 through medical-50, bringing this domain
+  // from 10 to 50 items.
+  item(
+    'medical-11', 'medical',
+    'The recommended starting dose of the anticoagulant is 5 mg twice daily, reduced to 2.5 mg twice daily in patients meeting at least 2 of 3 criteria: age 80 or older, body weight 60 kg or less, or serum creatinine 1.5 mg/dL or greater. The drug should not be used in patients with a creatinine clearance below 15 mL/min. Missed doses should be taken as soon as remembered on the same day but never doubled up to make up for a missed dose.',
+    ['5 mg twice daily', '2.5 mg twice daily', 'age 80 or older', '60 kg or less', '1.5 mg/dL or greater', 'below 15 mL/min', 'never doubled up'],
+    ['starting dose of the anticoagulant is 50 mg twice daily', 'should be used in patients with a creatinine clearance below 15 mL/min', 'missed doses should always be doubled at the next scheduled dose'],
+  ),
+  item(
+    'medical-12', 'medical',
+    'In a trial of 480 patients with major depressive disorder, the study medication produced a significantly greater reduction in depression rating scale scores than placebo at week 8 (mean difference 4.6 points, 95% CI 2.1 to 7.1, p < 0.001). Response, defined as at least a 50 percent symptom reduction, occurred in 52 percent of the treatment group versus 31 percent of placebo. Discontinuation due to adverse events occurred in 8 percent of the treatment group compared to 3 percent of placebo, most commonly attributed to nausea.',
+    ['480 patients', 'week 8', '4.6 points', '95% CI 2.1 to 7.1', 'p < 0.001', '52 percent', '31 percent', '8 percent', '3 percent'],
+    ['a trial of 48 patients', 'a significantly smaller reduction in depression rating scale scores', 'response... occurred in 52 percent of the treatment group versus 91 percent of placebo'],
+  ),
+  item(
+    'medical-13', 'medical',
+    'Adults with a body mass index of 30 or higher are classified as having obesity, while a BMI between 25 and 29.9 is classified as overweight; a BMI below 18.5 is classified as underweight. Weight loss of 5 to 10 percent of body weight has been shown to meaningfully reduce cardiovascular risk factors, and current guidelines recommend at least 150 minutes of moderate-intensity activity per week combined with a structured dietary intervention as first-line management before considering pharmacologic or surgical options.',
+    ['30 or higher', 'between 25 and 29.9', 'below 18.5', '5 to 10 percent', 'at least 150 minutes'],
+    ['a body mass index of 3 or higher', 'a BMI between 2.5 and 2.99', 'a BMI below 1.85 is classified as underweight'],
+  ),
+  item(
+    'medical-14', 'medical',
+    'The vaccine\'s 2-dose primary series is administered 8 weeks apart, and a booster dose is recommended 6 months after completion of the primary series for adults aged 65 and older or those who are immunocompromised. Efficacy against hospitalization was measured at 89 percent in the 6 months following the primary series, declining to approximately 74 percent by month 12 without a booster, which restored efficacy to 91 percent within 2 weeks of administration.',
+    ['2-dose', '8 weeks apart', '6 months', 'aged 65 and older', '89 percent', '74 percent', 'month 12', '91 percent', '2 weeks'],
+    ['2-dose primary series is administered 80 weeks apart', 'a booster dose is recommended 60 months after completion', 'efficacy against hospitalization was measured at 9 percent'],
+  ),
+  item(
+    'medical-15', 'medical',
+    'This medication must not be combined with monoamine oxidase inhibitors (MAOIs), and at least 14 days must elapse after discontinuing an MAOI before starting this drug, due to the risk of serotonin syndrome. The recommended starting dose is 20 mg once daily, which may be increased to 40 mg after 4 weeks if response is inadequate, with a maximum recommended dose of 60 mg per day. Abrupt discontinuation after long-term use should be avoided; the dose should instead be tapered over at least 2 weeks.',
+    ['must not be combined', 'at least 14 days', '20 mg once daily', '40 mg after 4 weeks', 'maximum recommended dose of 60 mg', 'tapered over at least 2 weeks'],
+    ['may be combined with monoamine oxidase inhibitors', 'at least 140 days must elapse', 'maximum recommended dose of 600 mg per day'],
+  ),
+  item(
+    'medical-16', 'medical',
+    'A cohort study following 3,200 patients after hip fracture surgery found that early mobilization, defined as standing or walking within 24 hours of surgery, was associated with a 30-day mortality rate of 3.1 percent compared to 7.4 percent among patients mobilized later than 24 hours. The association remained significant after adjustment for age, comorbidity burden, and fracture type (adjusted odds ratio 0.52, 95% CI 0.38 to 0.71). Length of hospital stay was also shorter in the early-mobilization group, averaging 5.2 days versus 8.9 days.',
+    ['3,200 patients', 'within 24 hours', '3.1 percent', '7.4 percent', 'odds ratio 0.52', '95% CI 0.38 to 0.71', '5.2 days', '8.9 days'],
+    ['following 320 patients', 'a 30-day mortality rate of 31 percent', 'adjusted odds ratio 5.2'],
+  ),
+  item(
+    'medical-17', 'medical',
+    'Current guidelines recommend against routine prostate-specific antigen (PSA) screening in men over age 70 due to limited evidence of mortality benefit and substantial risk of overdiagnosis, while shared decision-making is recommended for men aged 55 to 69. A PSA level above 4.0 ng/mL is traditionally considered elevated, though roughly 25 percent of men with prostate cancer have a PSA below this threshold, and roughly 15 percent of men with an elevated PSA do not have cancer on subsequent biopsy.',
+    ['over age 70', 'aged 55 to 69', 'above 4.0 ng/mL', 'roughly 25 percent', 'below this threshold', 'roughly 15 percent'],
+    ['recommend routine prostate-specific antigen (PSA) screening in men over age 70', 'a PSA level above 40.0 ng/mL', 'roughly 2.5 percent of men with prostate cancer'],
+  ),
+  item(
+    'medical-18', 'medical',
+    'This inhaler delivers 90 micrograms of medication per actuation, and the maximum recommended dose is 8 actuations (720 micrograms) within a 24-hour period; exceeding this limit increases the risk of cardiac side effects including tachycardia. Patients using more than 1 canister per month, which corresponds to more than approximately 6.7 actuations per day on average, should be reassessed for inadequate asthma control rather than simply refilling the prescription, per current management guidelines.',
+    ['90 micrograms', 'maximum recommended dose is 8 actuations (720 micrograms)', 'within a 24-hour period', 'more than 1 canister per month', 'more than approximately 6.7 actuations per day'],
+    ['delivers 900 micrograms of medication per actuation', 'maximum recommended dose is 80 actuations', 'within a 240-hour period'],
+  ),
+  item(
+    'medical-19', 'medical',
+    'A meta-analysis of 22 randomized trials (n = 6,100) found that low-dose aspirin reduced the risk of recurrent cardiovascular events by 19 percent (relative risk 0.81, 95% CI 0.74 to 0.89) in patients with established cardiovascular disease, but increased the risk of major gastrointestinal bleeding by 55 percent (relative risk 1.55, 95% CI 1.22 to 1.97) compared to placebo. The net benefit was judged to favor aspirin use in secondary prevention, but not in primary prevention among lower-risk populations examined in a separate analysis.',
+    ['22 randomized trials', 'n = 6,100', '19 percent', 'relative risk 0.81', '95% CI 0.74 to 0.89', '55 percent', 'relative risk 1.55', '95% CI 1.22 to 1.97'],
+    ['a meta-analysis of 2 randomized trials', 'reduced the risk of recurrent cardiovascular events by 91 percent', 'decreased the risk of major gastrointestinal bleeding by 55 percent'],
+  ),
+  item(
+    'medical-20', 'medical',
+    'Postpartum patients should be counseled that lochia, the vaginal discharge following delivery, typically lasts 4 to 6 weeks, and should contact their provider if bleeding soaks more than 1 pad per hour for 2 or more consecutive hours, a sign of possible postpartum hemorrhage. Routine postpartum visits are recommended at 3 weeks and again at 6 to 12 weeks after delivery, earlier than the single 6-week visit previously standard, to address the higher-risk period in the first 3 weeks postpartum.',
+    ['4 to 6 weeks', 'more than 1 pad per hour', '2 or more consecutive hours', '3 weeks', '6 to 12 weeks', 'first 3 weeks postpartum'],
+    ['lochia... typically lasts 40 to 60 weeks', 'soaks more than 10 pads per hour', 'recommended at 30 weeks'],
+  ),
+  item(
+    'medical-21', 'medical',
+    'Patients undergoing the procedure should discontinue the anticoagulant 5 days beforehand and may resume it 24 to 48 hours afterward provided there is no evidence of bleeding, per the current periprocedural management protocol. Bridging with a short-acting agent is recommended only for patients at high thromboembolic risk, defined as a CHA2DS2-VASc score of 7 or higher, a threshold met by fewer than 5 percent of patients in this practice\'s typical caseload.',
+    ['discontinue the anticoagulant 5 days beforehand', '24 to 48 hours afterward', 'CHA2DS2-VASc score of 7 or higher', 'fewer than 5 percent'],
+    ['discontinue the anticoagulant 50 days beforehand', 'may resume it 240 to 480 hours afterward', 'a CHA2DS2-VASc score of 70 or higher'],
+  ),
+  item(
+    'medical-22', 'medical',
+    'Among 1,240 patients hospitalized for community-acquired pneumonia, those who received antibiotics within 4 hours of arrival had a significantly shorter median length of stay, 4.1 days, compared to 6.3 days for patients whose antibiotics were delayed beyond 4 hours. In-hospital mortality was 3.2 percent in the timely-treatment group versus 6.8 percent in the delayed group, though the authors caution the association may partly reflect that more severely ill patients experienced greater diagnostic delay.',
+    ['1,240 patients', 'within 4 hours', '4.1 days', '6.3 days', 'delayed beyond 4 hours', '3.2 percent', '6.8 percent'],
+    ['among 124 patients hospitalized', 'a significantly longer median length of stay, 4.1 days', 'in-hospital mortality was 32 percent'],
+  ),
+  item(
+    'medical-23', 'medical',
+    'Current guidelines recommend initiating statin therapy in adults aged 40 to 75 with an estimated 10-year cardiovascular risk of 7.5 percent or higher, using a moderate-intensity statin expected to lower LDL cholesterol by 30 to 49 percent, or a high-intensity statin for a reduction of 50 percent or more in patients at especially high risk. Liver enzyme testing is not routinely required after initiation unless the patient develops symptoms of hepatotoxicity, a change from earlier guidance that recommended routine monitoring.',
+    ['aged 40 to 75', '7.5 percent or higher', '30 to 49 percent', '50 percent or more', 'not routinely required'],
+    ['aged 40 to 75 with an estimated 10-year cardiovascular risk of 75 percent or higher', 'lower LDL cholesterol by 3 to 4.9 percent', 'mandatory every month after initiation regardless of symptoms'],
+  ),
+  item(
+    'medical-24', 'medical',
+    'In a trial of 860 patients with moderate-to-severe rheumatoid arthritis, the biologic agent achieved an ACR50 response, meaning at least 50 percent improvement in disease activity measures, in 44 percent of patients at week 24 compared to 18 percent with placebo. Serious infections occurred in 2.6 percent of the treatment group versus 1.1 percent of placebo over the trial period, and the drug carries a boxed warning regarding increased infection risk, including reactivation of latent tuberculosis.',
+    ['860 patients', 'ACR50', 'at least 50 percent', '44 percent', 'week 24', '18 percent', '2.6 percent', '1.1 percent'],
+    ['a trial of 86 patients', 'an ACR50 response... in 44 percent of patients at week 24 compared to 81 percent with placebo', 'serious infections occurred in 26 percent'],
+  ),
+  item(
+    'medical-25', 'medical',
+    'This medication is contraindicated in pregnancy category X and must not be prescribed to patients who are pregnant or may become pregnant without confirmed use of 2 forms of reliable contraception, given a well-established risk of severe birth defects. A negative pregnancy test is required within 7 days before starting treatment and monthly thereafter for the duration of therapy, per the mandatory risk-management program all prescribers must complete before dispensing.',
+    ['pregnancy category X', 'must not be prescribed', '2 forms of reliable contraception', 'within 7 days', 'monthly thereafter'],
+    ['is recommended in pregnancy category X', 'confirmed use of 20 forms of reliable contraception', 'required within 70 days before starting treatment'],
+  ),
+  item(
+    'medical-26', 'medical',
+    'Newborn hearing screening should occur before 1 month of age, with diagnostic audiologic evaluation completed by 3 months of age for infants who do not pass the initial screen, and intervention, if indicated, begun by 6 months of age, per the "1-3-6" early hearing detection framework. Approximately 2 to 3 infants per 1,000 births are born with some degree of hearing loss, and early intervention before 6 months has been associated with significantly better language outcomes than intervention begun later.',
+    ['before 1 month of age', 'by 3 months of age', 'by 6 months of age', '1-3-6', '2 to 3 infants per 1,000 births'],
+    ['newborn hearing screening should occur before 10 months of age', 'completed by 30 months of age', 'begun by 60 months of age'],
+  ),
+  item(
+    'medical-27', 'medical',
+    'The recommended tetanus booster interval is every 10 years for adults with a complete primary series, but a wound-specific booster is recommended after 5 years for a dirty or contaminated wound rather than waiting the full 10-year interval. Tetanus immune globulin is additionally recommended for patients with an uncertain or incomplete vaccination history who sustain a high-risk wound, since the disease carries a case-fatality rate of approximately 10 to 20 percent even with modern intensive care.',
+    ['every 10 years', 'after 5 years', '10-year interval', 'approximately 10 to 20 percent'],
+    ['recommended tetanus booster interval is every 100 years', 'a wound-specific booster is recommended after 50 years', 'case-fatality rate of approximately 1 to 2 percent'],
+  ),
+  item(
+    'medical-28', 'medical',
+    'A study of 540 patients undergoing elective colonoscopy found that a split-dose bowel preparation, taken the evening before and the morning of the procedure, achieved adequate bowel cleansing in 92 percent of cases, compared to 74 percent for a same-day-only preparation and 68 percent for an evening-only preparation. Adenoma detection rate was correspondingly higher with split-dose preparation, 38 percent versus 27 percent, attributed to improved visualization of the right colon in particular.',
+    ['540 patients', 'evening before and the morning', '92 percent', '74 percent', '68 percent', '38 percent', '27 percent'],
+    ['a study of 54 patients', 'achieved adequate bowel cleansing in 9.2 percent of cases', 'adenoma detection rate... 38 percent versus 72 percent'],
+  ),
+  item(
+    'medical-29', 'medical',
+    'This medication should not be taken with grapefruit juice, which can increase drug levels by up to 3-fold by inhibiting intestinal CYP3A4 metabolism, substantially raising the risk of dose-related side effects including hypotension. Patients should avoid grapefruit products for at least 4 hours before and after dosing if occasional consumption cannot be avoided entirely, though complete avoidance is the officially recommended approach given the variability in effect between grapefruit products.',
+    ['should not be taken with grapefruit juice', 'up to 3-fold', 'CYP3A4', 'at least 4 hours'],
+    ['may be taken with grapefruit juice', 'decrease drug levels by up to 3-fold', 'avoid grapefruit products for at least 40 hours'],
+  ),
+  item(
+    'medical-30', 'medical',
+    'Among 2,100 patients presenting to the emergency department with chest pain, a high-sensitivity troponin below 5 ng/L at presentation, combined with a normal ECG and symptom onset more than 3 hours prior, identified a group with a 30-day major adverse cardiac event rate of only 0.5 percent, supporting early discharge without admission. Patients not meeting these criteria underwent serial troponin testing at 1 and 3 hours, with a rise greater than 3 ng/L between measurements considered diagnostic of myocardial infarction.',
+    ['2,100 patients', 'below 5 ng/L', 'more than 3 hours prior', '0.5 percent', '1 and 3 hours', 'greater than 3 ng/L'],
+    ['among 210 patients', 'a high-sensitivity troponin below 50 ng/L', 'a 30-day major adverse cardiac event rate of only 5 percent'],
+  ),
+  item(
+    'medical-31', 'medical',
+    'Current guidance recommends exclusive use of car seats rear-facing until at least age 2, or until the child exceeds the seat\'s height or weight limit, whichever comes first, before transitioning to forward-facing with a harness. Booster seat use is recommended from the time a child outgrows the forward-facing harness limit, typically around age 4 to 6, until the vehicle\'s seat belt fits properly without a booster, generally around age 8 to 12 depending on the child\'s height.',
+    ['rear-facing until at least age 2', 'around age 4 to 6', 'around age 8 to 12'],
+    ['rear-facing until at least age 20', 'typically around age 40 to 60', 'generally around age 80 to 120'],
+  ),
+  item(
+    'medical-32', 'medical',
+    'A randomized trial of 390 patients with generalized anxiety disorder found that 8 weeks of a structured cognitive behavioral therapy protocol reduced anxiety scale scores by 9.8 points versus 3.1 points in a waitlist control (p < 0.001), with 61 percent of the treatment group achieving remission compared to 14 percent of controls. Gains were largely maintained at 6-month follow-up, with only a 1.2-point average increase in scores among treatment responders.',
+    ['390 patients', '8 weeks', '9.8 points', '3.1 points', 'p < 0.001', '61 percent', '14 percent', '6-month', '1.2-point'],
+    ['a randomized trial of 39 patients', 'reduced anxiety scale scores by 98 points', '61 percent of the treatment group achieving remission compared to 41 percent of controls'],
+  ),
+  item(
+    'medical-33', 'medical',
+    'This antiviral must be started within 48 hours of symptom onset to achieve its full benefit, reducing the duration of symptoms by approximately 1 day on average when started in that window, but showing minimal benefit when started after 48 hours have elapsed. The recommended dose is 75 mg twice daily for 5 days, adjusted to 75 mg once daily for patients with a creatinine clearance between 30 and 60 mL/min, and not recommended at all below a clearance of 10 mL/min without dialysis.',
+    ['within 48 hours', 'approximately 1 day', 'after 48 hours', '75 mg twice daily', '5 days', '75 mg once daily', 'between 30 and 60 mL/min', 'below a clearance of 10 mL/min'],
+    ['must be started within 480 hours of symptom onset', 'reducing the duration of symptoms by approximately 10 days', 'recommended dose is 750 mg twice daily'],
+  ),
+  item(
+    'medical-34', 'medical',
+    'Guidelines recommend against routine use of opioids as first-line therapy for chronic non-cancer pain, reserving them for cases where non-opioid therapy has failed, and recommend prescribing the lowest effective dose for the shortest duration necessary, generally no more than 7 days for acute pain. Patients on long-term opioid therapy above 50 morphine milligram equivalents per day should be reassessed regularly, since risk of overdose roughly doubles at doses above 50 MME and rises further above 90 MME per day.',
+    ['no more than 7 days', 'above 50 morphine milligram equivalents per day', 'roughly doubles at doses above 50 MME', 'above 90 MME per day'],
+    ['recommend opioids as first-line therapy for chronic non-cancer pain', 'generally no more than 70 days for acute pain', 'roughly doubles at doses above 500 MME'],
+  ),
+  item(
+    'medical-35', 'medical',
+    'A cohort of 1,600 patients started on the new diabetes medication showed a mean HbA1c reduction of 1.1 percentage points at 6 months, alongside an average weight loss of 4.2 kg over the same period, an effect the manufacturer attributes partly to the drug\'s appetite-suppressing mechanism rather than glycemic control alone. Gastrointestinal side effects, primarily nausea, led to discontinuation in 6 percent of patients, most commonly within the first 4 weeks of starting the medication before dose titration was complete.',
+    ['1,600 patients', '1.1 percentage points', '6 months', '4.2 kg', '6 percent', 'first 4 weeks'],
+    ['a cohort of 160 patients', 'a mean HbA1c reduction of 11 percentage points', 'an average weight loss of 42 kg'],
+  ),
+  item(
+    'medical-36', 'medical',
+    'Postoperative nausea and vomiting occurs in approximately 30 percent of surgical patients overall, but risk rises to 60 to 80 percent in high-risk patients meeting 3 or more of the Apfel risk factors: female sex, non-smoking status, history of motion sickness or postoperative nausea, and planned use of postoperative opioids. Prophylactic administration of 2 antiemetic agents with different mechanisms reduces risk by approximately 50 percent compared to a single agent in this high-risk population.',
+    ['approximately 30 percent', '60 to 80 percent', '3 or more', 'approximately 50 percent'],
+    ['occurs in approximately 3 percent of surgical patients', 'risk rises to 6 to 8 percent in high-risk patients', 'reduces risk by approximately 5 percent'],
+  ),
+  item(
+    'medical-37', 'medical',
+    'Guidelines recommend delaying elective surgery for at least 7 weeks after an uncomplicated COVID-19 infection in asymptomatic patients, and longer, up to 12 weeks, for patients who required hospitalization, given data showing elevated perioperative complication rates within these windows. Patients with ongoing symptoms at the time surgery is being considered should have surgery delayed further regardless of the specific week count, pending symptom resolution and clearance from the treating physician.',
+    ['at least 7 weeks', 'up to 12 weeks', 'required hospitalization'],
+    ['delaying elective surgery for at least 70 weeks', 'up to 120 weeks for patients who required hospitalization', 'proceeding with elective surgery for patients who required hospitalization'],
+  ),
+  item(
+    'medical-38', 'medical',
+    'A trial of 720 patients with heart failure and reduced ejection fraction found that the study drug reduced the combined endpoint of cardiovascular death or heart failure hospitalization by 26 percent (hazard ratio 0.74, 95% CI 0.65 to 0.85) over a median follow-up of 18 months, with benefit apparent within the first 30 days of treatment. Symptomatic hypotension occurred in 11 percent of the treatment group versus 7 percent of placebo, the most common reason for dose reduction.',
+    ['720 patients', '26 percent', 'hazard ratio 0.74', '95% CI 0.65 to 0.85', '18 months', 'within the first 30 days', '11 percent', '7 percent'],
+    ['a trial of 72 patients', 'increased the combined endpoint... by 26 percent', 'hazard ratio 7.4'],
+  ),
+  item(
+    'medical-39', 'medical',
+    'Current guidance recommends against giving aspirin or other salicylates to children and teenagers with a viral illness due to the risk of Reye syndrome, a rare but serious condition with a case-fatality rate historically estimated between 20 and 40 percent before the practice was widely discontinued. Acetaminophen and ibuprofen remain the recommended alternatives for fever and pain management in this age group, dosed by weight rather than age given the wide variation in body size within any given age range.',
+    ['against giving aspirin', 'Reye syndrome', 'between 20 and 40 percent', 'dosed by weight rather than age'],
+    ['recommends giving aspirin or other salicylates to children', 'case-fatality rate historically estimated between 2 and 4 percent', 'dosed by age rather than weight'],
+  ),
+  item(
+    'medical-40', 'medical',
+    'A randomized trial comparing 2 wound-closure techniques in 480 patients undergoing cesarean delivery found that subcuticular suture closure resulted in a wound complication rate of 4.1 percent compared to 9.8 percent with staple closure, a difference driven primarily by lower rates of wound separation (2.2 percent versus 6.4 percent). Cosmetic satisfaction scores at the 6-week follow-up visit also favored suture closure, 8.6 out of 10 versus 7.1 out of 10 with staples.',
+    ['480 patients', '4.1 percent', '9.8 percent', '2.2 percent', '6.4 percent', '6-week', '8.6 out of 10', '7.1 out of 10'],
+    ['a randomized trial comparing... in 48 patients', 'a wound complication rate of 41 percent', 'lower rates of wound separation (22 percent versus 64 percent)'],
+  ),
+  item(
+    'medical-41', 'medical',
+    'Guidelines recommend that patients with well-controlled type 1 diabetes and no acute complications may participate in most forms of exercise, including high-intensity activity, provided blood glucose is checked before, during activity longer than 60 minutes, and after exercise, and that exercise is avoided or delayed if pre-exercise glucose exceeds 250 mg/dL with ketones present. A pre-exercise glucose below 100 mg/dL should prompt consumption of 15 to 30 grams of fast-acting carbohydrate before beginning activity.',
+    ['longer than 60 minutes', 'exceeds 250 mg/dL', 'below 100 mg/dL', '15 to 30 grams'],
+    ['activity longer than 600 minutes', 'exceeds 2,500 mg/dL with ketones present', 'below 1,000 mg/dL should prompt consumption'],
+  ),
+  item(
+    'medical-42', 'medical',
+    'A surveillance study of 3,400 surgical site infections found that adherence to all 5 components of a standardized prevention bundle, including appropriately timed antibiotic prophylaxis within 60 minutes before incision, was associated with an infection rate of 1.8 percent compared to 5.2 percent when 1 or more bundle components were missed. The antibiotic-timing component alone showed the strongest independent association, with infections occurring in 2.1 percent of appropriately timed cases versus 6.7 percent of cases with delayed or omitted prophylaxis.',
+    ['3,400 surgical site infections', 'all 5 components', 'within 60 minutes', '1.8 percent', '5.2 percent', '2.1 percent', '6.7 percent'],
+    ['a surveillance study of 340 surgical site infections', 'an infection rate of 18 percent', 'within 600 minutes before incision'],
+  ),
+  item(
+    'medical-43', 'medical',
+    'Current guidance recommends universal screening for postpartum depression using a validated tool at least once during the perinatal period, most commonly at the 6-week postpartum visit, with a positive screen, generally a score of 10 or higher on the Edinburgh Postnatal Depression Scale, prompting further clinical evaluation. Approximately 1 in 7 postpartum individuals experience clinically significant depressive symptoms, though fewer than half are identified without formal screening.',
+    ['6-week postpartum visit', '10 or higher', 'Edinburgh Postnatal Depression Scale', '1 in 7', 'fewer than half'],
+    ['most commonly at the 60-week postpartum visit', 'a score of 100 or higher', 'approximately 1 in 70 postpartum individuals'],
+  ),
+  item(
+    'medical-44', 'medical',
+    'The recommended pediatric dosing for the antibiotic suspension is 45 mg/kg/day divided into 2 doses for standard infections, increased to 90 mg/kg/day divided into 2 doses for high-risk infections such as those involving resistant organisms, with a maximum single dose not to exceed 2,000 mg regardless of calculated weight-based dose in larger children. Treatment duration is typically 10 days, though 5 to 7 days may be appropriate for milder infections in patients older than 2 years.',
+    ['45 mg/kg/day', '2 doses', '90 mg/kg/day', 'not to exceed 2,000 mg', '10 days', '5 to 7 days', 'older than 2 years'],
+    ['pediatric dosing... is 450 mg/kg/day', 'increased to 900 mg/kg/day', 'not to exceed 20,000 mg'],
+  ),
+  item(
+    'medical-45', 'medical',
+    'A study of 610 patients with atrial fibrillation found that a rhythm-control strategy, aiming to restore and maintain normal sinus rhythm, showed no significant difference in the combined endpoint of stroke, major bleeding, or death compared to a rate-control strategy over 4 years of follow-up (hazard ratio 0.96, 95% CI 0.78 to 1.18). Quality-of-life scores modestly favored rhythm control at 1 year (mean difference 3.4 points) but this difference was no longer significant by 3 years of follow-up.',
+    ['610 patients', '4 years', 'hazard ratio 0.96', '95% CI 0.78 to 1.18', '1 year', '3.4 points', '3 years'],
+    ['a study of 61 patients', 'a significant difference in the combined endpoint', 'hazard ratio 9.6'],
+  ),
+  item(
+    'medical-46', 'medical',
+    'Guidelines recommend that infants be placed on their backs for every sleep, on a firm surface free of soft bedding, pillows, or loose blankets, a practice associated with a more than 50 percent reduction in sudden infant death syndrome since it became widespread recommendation. Room-sharing without bed-sharing is recommended for at least the first 6 months, and ideally the first year, of an infant\'s life, based on data showing this arrangement reduces risk by as much as 50 percent compared to bed-sharing.',
+    ['on their backs', 'more than 50 percent reduction', 'at least the first 6 months', 'as much as 50 percent'],
+    ['infants be placed on their stomachs', 'more than 5 percent reduction in sudden infant death syndrome', 'at least the first 60 months'],
+  ),
+  item(
+    'medical-47', 'medical',
+    'Current guidance recommends that adults receive a shingles vaccine starting at age 50, administered as 2 doses given 2 to 6 months apart, regardless of prior history of chickenpox or shingles infection or receipt of the older, less effective vaccine. Efficacy against shingles is estimated at 97 percent in adults aged 50 to 69 and remains above 91 percent in those 70 and older, with protection shown to persist for at least 7 years based on current follow-up data.',
+    ['starting at age 50', '2 doses', '2 to 6 months apart', '97 percent', 'aged 50 to 69', 'above 91 percent', '70 and older', 'at least 7 years'],
+    ['starting at age 15', 'administered as 20 doses', 'given 20 to 60 months apart'],
+  ),
+  item(
+    'medical-48', 'medical',
+    'A trial of 340 patients with moderate-to-severe psoriasis found that 76 percent of patients treated with the biologic achieved at least 75 percent improvement in psoriasis severity (PASI 75) at week 16, compared to 4 percent with placebo, and 39 percent achieved complete or near-complete skin clearance (PASI 90). Injection-site reactions occurred in 14 percent of the treatment group, generally mild and self-limiting, without any reported cases of the serious infections seen more commonly with other biologic classes in this trial.',
+    ['340 patients', '76 percent', 'at least 75 percent', 'PASI 75', 'week 16', '4 percent', '39 percent', 'PASI 90', '14 percent'],
+    ['a trial of 34 patients', '76 percent of patients treated with the biologic achieved at least 75 percent improvement... compared to 40 percent with placebo', 'injection-site reactions occurred in 41 percent'],
+  ),
+  item(
+    'medical-49', 'medical',
+    'Guidelines recommend that patients starting long-term corticosteroid therapy at a dose equivalent to 7.5 mg or more of prednisone daily for an expected duration of 3 months or longer receive calcium and vitamin D supplementation and be considered for bone-protective medication given the substantially elevated fracture risk at these doses and durations. Bone density testing is recommended at baseline and then every 1 to 2 years while corticosteroid therapy continues at this dose or higher.',
+    ['7.5 mg or more', '3 months or longer', 'every 1 to 2 years'],
+    ['a dose equivalent to 75 mg or more of prednisone daily', 'an expected duration of 30 months or longer', 'every 10 to 20 years'],
+  ),
+  item(
+    'medical-50', 'medical',
+    'A study of 920 patients undergoing total knee replacement found that those who began formal physical therapy within 24 hours of surgery achieved a knee flexion range of motion of 98 degrees by discharge, compared to 84 degrees for patients who began therapy after 24 hours, and were discharged home an average of 0.8 days sooner. At 1-year follow-up, 88 percent of the early-mobilization group reported being satisfied with their surgical outcome, compared to 79 percent in the delayed-mobilization group.',
+    ['920 patients', 'within 24 hours', '98 degrees', '84 degrees', '0.8 days sooner', '1-year follow-up', '88 percent', '79 percent'],
+    ['a study of 92 patients', 'a knee flexion range of motion of 9.8 degrees', '88 percent of the early-mobilization group reported being satisfied... compared to 98 percent'],
+  ),
 ]
