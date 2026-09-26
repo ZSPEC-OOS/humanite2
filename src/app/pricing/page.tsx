@@ -8,19 +8,23 @@ import { PRICING_TIERS } from '@/lib/pricing'
 const FAQS = [
   {
     q: 'Can I use my own AI model instead of the built-in one?',
-    a: 'Yes — every plan supports bringing your own OpenAI-compatible API key (OpenAI, DeepSeek, or a self-hosted model). Pro syncs that configuration across your devices.',
+    a: 'Yes — every plan supports bringing your own OpenAI-compatible API key (OpenAI, DeepSeek, or a self-hosted model). Pro and Max sync that configuration across your devices.',
   },
   {
     q: 'What happens to text longer than my plan’s limit?',
-    a: 'Free processes documents synchronously up to 24,000 characters per request. Pro raises that to 200,000 characters, processed as a background job with automatic progress recovery if it runs long.',
+    a: 'Starter processes documents synchronously up to 24,000 characters per request. Pro and Max raise that to 200,000 characters, processed as a background job with automatic progress recovery if it runs long.',
   },
   {
-    q: 'Is there a free trial for Pro?',
-    a: 'The Free plan has no time limit, so you can try the core tool for as long as you like before upgrading for longer documents and saved presets.',
+    q: 'What are generated and scanned words?',
+    a: 'Generated words are what Humanize rewrites for you each month. Scanned words are what our AI-detection check can review each month — every plan gets an equal amount of both, so you can always verify what you generate.',
+  },
+  {
+    q: 'Is there a free trial?',
+    a: 'No — all three plans are paid from the first day. Starter is the lowest-cost way to try Humanize with real generation and detection quotas.',
   },
   {
     q: 'Can I cancel anytime?',
-    a: 'Yes, Pro is billed monthly with no long-term contract.',
+    a: 'Yes — every plan is billed monthly with no long-term contract.',
   },
 ]
 
@@ -40,7 +44,7 @@ export default function PricingPage() {
               Pay for what you write
             </h1>
             <p className="mx-auto mt-4 max-w-lg text-base leading-relaxed text-gray-600 dark:text-gray-400 md:text-lg">
-              Start free. Upgrade when you need longer documents, saved presets, and priority support.
+              Every plan includes equal generated and scanned words each month. Upgrade for more of both, longer documents, and saved presets.
             </p>
           </div>
 

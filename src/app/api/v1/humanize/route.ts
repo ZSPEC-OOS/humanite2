@@ -10,7 +10,7 @@ import { chunkFactLockedText } from '@/lib/chunk'
 import { humanizeChunk, ChunkResult, joinChunkResults } from '@/lib/humanizePipeline'
 import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
 import { buildOutput, tryClassifyOutput } from '@/lib/humanizeOutput'
-import { checkAndRecordUsage } from '@/lib/usageLimits'
+import { checkAndRecordGenerationUsage } from '@/lib/usageLimits'
 import { getUserApiConfig } from '@/lib/userApiConfig'
 import { resolveProvider } from '@/lib/providerResolution'
 import { saveTransformation } from '@/lib/transformations'
@@ -52,6 +52,7 @@ async function processHumanizeJobAsync(
   settings: HumanizeSettings,
   userConfig: StoredApiConfig | null,
   userId: string,
+  tier: string,
   originalText: string,
 ) {
   try {
@@ -89,7 +90,7 @@ async function processHumanizeJobAsync(
     const postText = joinChunkResults(results, chunks)
     const modelUsed = results.at(-1)?.modelUsed ?? model
     const watermark = generateWatermark(jobId, modelUsed)
-    const detection = await tryClassifyOutput(postText, userConfig?.gptzeroApiKey || undefined)
+    const detection = await tryClassifyOutput(postText, userId, tier, userConfig?.gptzeroApiKey || undefined)
     const output = buildOutput(postText, results, watermark, detection)
     const durationMs = Date.now() - start
 
@@ -179,7 +180,7 @@ export async function POST(req: NextRequest) {
   // quota exists to protect this deployment's own paid OPENAI_API_KEY, not
   // to restrict usage of a key that isn't this deployment's to pay for.
   if (!userConfig?.apiKey) {
-    const usage = await checkAndRecordUsage(auth.claims.sub, auth.claims.tier, prep.word_count)
+    const usage = await checkAndRecordGenerationUsage(auth.claims.sub, auth.claims.tier, prep.word_count)
     if (!usage.allowed) {
       return NextResponse.json(
         { error: { code: usage.code === 'UNAVAILABLE' ? 'USAGE_TRACKING_UNAVAILABLE' : 'USAGE_LIMIT_EXCEEDED', message: usage.reason } },
@@ -220,7 +221,7 @@ export async function POST(req: NextRequest) {
         { status: 503 },
       )
     }
-    waitUntil(processHumanizeJobAsync(jobId, prep.sanitized_text, prep.fact_locks, settings, userConfig, auth.claims.sub, text))
+    waitUntil(processHumanizeJobAsync(jobId, prep.sanitized_text, prep.fact_locks, settings, userConfig, auth.claims.sub, auth.claims.tier, text))
     return NextResponse.json({
       job_id: jobId,
       status: 'pending',
@@ -251,7 +252,7 @@ export async function POST(req: NextRequest) {
     const durationMs = Date.now() - start
 
     const watermark = generateWatermark(jobId, result.modelUsed)
-    const detection = await tryClassifyOutput(result.text, userConfig?.gptzeroApiKey || undefined)
+    const detection = await tryClassifyOutput(result.text, auth.claims.sub, auth.claims.tier, userConfig?.gptzeroApiKey || undefined)
     const output = buildOutput(result.text, [result], watermark, detection)
 
     await saveTransformation({ jobId, userId: auth.claims.sub, inputText: text, output, modelUsed: result.modelUsed })

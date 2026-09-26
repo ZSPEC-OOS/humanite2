@@ -2,6 +2,7 @@ import { DetectionOptions, DetectionProviderError, DetectionResult } from './con
 import { calculateLocalDiagnostics } from './diagnostics'
 import { DetectionProvider } from './providers/provider'
 import { GPTZeroProvider } from './providers/gptzero'
+import { SaplingProvider } from './providers/sapling'
 import { MockDetectionProvider, MockFixtureName } from './providers/mock'
 
 // Below this word count, a detector's classification is generally less
@@ -58,9 +59,14 @@ function buildProvider(apiKeyOverride?: string): DetectionProvider {
   // Model settings panel) always wins — same precedence as the humanizer's
   // own api_config.api_key overriding the server's OPENAI_API_KEY. Explicitly
   // providing a key is the user opting in to a live call regardless of how
-  // this deployment's DETECTION_PROVIDER is set.
+  // this deployment's DETECTION_PROVIDER is set. The BYOK path is GPTZero-
+  // specific for now — it predates Sapling support, and the settings panel
+  // has no separate "bring your own Sapling key" field yet.
   if (apiKeyOverride) return new GPTZeroProvider(apiKeyOverride)
 
+  if (process.env.DETECTION_PROVIDER === 'sapling') {
+    return new SaplingProvider()
+  }
   if (process.env.DETECTION_PROVIDER === 'gptzero') {
     return new GPTZeroProvider()
   }
@@ -73,7 +79,7 @@ function buildProvider(apiKeyOverride?: string): DetectionProvider {
   if (process.env.NODE_ENV === 'production' && process.env.ALLOW_MOCK_DETECTION !== 'true') {
     throw new DetectionProviderError(
       'PROVIDER_UNAVAILABLE',
-      'AI detection is not configured for production — DETECTION_PROVIDER must be "gptzero". ' +
+      'AI detection is not configured for production — DETECTION_PROVIDER must be "sapling" or "gptzero". ' +
         'Set ALLOW_MOCK_DETECTION=true to intentionally run the mock provider instead.',
     )
   }

@@ -19,11 +19,21 @@ import { ThemeToggle }      from '@/components/theme/ThemeToggle'
 import { useTheme }         from '@/components/theme/ThemeProvider'
 import { restoreSession }   from '@/lib/api'
 import { ASYNC_MAX_CHARS, SYNC_MAX_CHARS } from '@/lib/limits'
+import { PRICING_TIERS } from '@/lib/pricing'
 
 const MAX_CHARS = ASYNC_MAX_CHARS
 
 function wordCount(s: string) {
   return s.trim() ? s.trim().split(/\s+/).length : 0
+}
+
+// Capitalizing the internal tier id directly (free/pro/enterprise) used to
+// coincidentally match its display name — it no longer does now that the
+// pricing page shows Starter/Pro/Max, so this resolves through the same
+// PRICING_TIERS list the pricing page itself renders from.
+function tierDisplayName(tier: string | null | undefined): string {
+  const match = PRICING_TIERS.find(t => t.id === tier)
+  return match?.name ?? 'Starter'
 }
 
 function CircularScore({ pct, isDark }: { pct: number; isDark: boolean }) {
@@ -315,7 +325,7 @@ export default function Dashboard() {
             <span className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full
                              border border-gray-200 bg-gray-100 text-gray-600
                              dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
-              {(tier ?? 'free').charAt(0).toUpperCase() + (tier ?? 'free').slice(1)} Plan
+              {tierDisplayName(tier)} Plan
             </span>
             <button onClick={handleClear}
               className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300 transition-colors">Clear</button>
@@ -514,7 +524,7 @@ export default function Dashboard() {
                              px-3 py-1.5 rounded-full border border-gray-200
                              bg-gray-100 text-gray-600
                              dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
-              {(tier ?? 'free').charAt(0).toUpperCase() + (tier ?? 'free').slice(1)} Plan
+              {tierDisplayName(tier)} Plan
             </span>
           </div>
 

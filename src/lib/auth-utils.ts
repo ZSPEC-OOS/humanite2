@@ -12,8 +12,13 @@ function jwtSecret(): Uint8Array {
 
 function scopesForTier(tier: string): string[] {
   const base = ['humanize:write', 'scan:write']
+  // 'enterprise' is now just the top-priced self-serve consumer tier ($15/mo
+  // — see pricing.ts), not an org/admin account, so it earns no scope beyond
+  // what 'pro' already gets. admin:read was previously auto-granted here,
+  // which would have handed admin visibility to anyone who simply pays for
+  // the highest tier — removed rather than carried forward into this pricing
+  // model.
   if (tier === 'pro' || tier === 'enterprise') base.push('user:read')
-  if (tier === 'enterprise') base.push('admin:read')
   return base
 }
 

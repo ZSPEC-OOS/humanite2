@@ -1,0 +1,9 @@
+{
+  "status": 200,
+  "body": {
+    "score": 0.5,
+    "sentence_scores": [
+      { "sentence": "Short.", "score": 0.5 }
+    ]
+  }
+}

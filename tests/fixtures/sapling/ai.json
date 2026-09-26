@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "body": {
+    "score": 0.95,
+    "sentence_scores": [
+      { "sentence": "In today's rapidly evolving digital landscape, it is imperative to leverage cutting-edge solutions.", "score": 0.97 },
+      { "sentence": "This comprehensive approach facilitates seamless integration across multiple stakeholder touchpoints.", "score": 0.94 }
+    ]
+  }
+}

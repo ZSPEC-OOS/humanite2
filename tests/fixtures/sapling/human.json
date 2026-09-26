@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "body": {
+    "score": 0.04,
+    "sentence_scores": [
+      { "sentence": "I spent most of the afternoon trying to fix a leak under the kitchen sink.", "score": 0.03 },
+      { "sentence": "Turns out it was just a loose washer, so at least it was an easy fix.", "score": 0.05 }
+    ]
+  }
+}
