@@ -12,6 +12,7 @@ import { repairChunk, type RepairStrategy } from './evaluation/repair'
 import { verifyClaims, restoreRelations, type ClaimVerificationResult, type RelationRepairStrategy } from './claims'
 import { runStructuredJudge, type StructuredJudgeResult } from './evaluation/judge'
 import { candidateCountForIntensity, buildRewritePlan, buildPlanSection, computeScore, type RewritePlan } from './selection'
+import { resolveCapabilities } from './providers'
 
 export const SYSTEM_PROMPT = `You are a professional editor. Your only job is to rewrite the provided text \
 so it reads as natural, fluent human prose. You must:
@@ -88,8 +89,19 @@ export function maxTokensForIntensity(intensity: number): number {
 // truncating from requesting an ever-growing completion size across retries.
 const MAX_TOKENS_CEILING = 16384
 
-function boostedMaxTokens(current: number): number {
-  return Math.min(MAX_TOKENS_CEILING, Math.round(current * 1.5))
+// Phase 9: "gates choose infrastructure by capability" — the intensity-
+// driven budget above is a request, not a guarantee the endpoint will
+// actually honor; capped by the provider's own documented max_tokens
+// ceiling (see providers/types.ts) so a request never asks for more
+// completion length than the endpoint is known to support. `client.baseURL`
+// is always concrete on a real SDK client; undefined only for a bare mock
+// object in a test, which resolves as "no override" (full capabilities).
+function resolveMaxTokens(client: OpenAI, intensity: number): number {
+  return Math.min(maxTokensForIntensity(intensity), resolveCapabilities(client.baseURL).maxOutputTokens)
+}
+
+function boostedMaxTokens(client: OpenAI, current: number): number {
+  return Math.min(MAX_TOKENS_CEILING, resolveCapabilities(client.baseURL).maxOutputTokens, Math.round(current * 1.5))
 }
 
 function buildRetryAddendum(gate: QualityScores): string {
@@ -211,7 +223,7 @@ async function generateCandidates(
   userPrompt: string,
   count: number,
 ): Promise<CandidateAttempt[]> {
-  const maxTokens = maxTokensForIntensity(intensity)
+  const maxTokens = resolveMaxTokens(client, intensity)
   const completions = await Promise.all(
     Array.from({ length: count }, () => client.chat.completions.create({
       model,
@@ -318,23 +330,32 @@ async function selectBestCandidate(
     return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage1, 'entity_preservation', lastAttempt)
   }
 
+  // Phase 9: gates choose infrastructure by capability — resolved once for
+  // the whole funnel, since generation and judging share the same client
+  // (and so the same endpoint) within a single humanizeChunk call.
+  const capabilities = resolveCapabilities(client.baseURL)
+
   // Stage 2: embedding similarity (cheap) — ONE batched call across every
-  // stage-1 survivor plus the source, not one call per candidate.
+  // stage-1 survivor plus the source, not one call per candidate. Skipped
+  // entirely, not attempted-and-caught, when the provider has no
+  // embeddings capability at all.
   const similarityByCandidate = new Map<CandidateWithEntity, number>()
-  let similarityAvailable = true
-  try {
-    const resp = await client.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: [sanitizedText, ...stage1Survivors.map(c => c.text)],
-    })
-    const embeddings = resp.data.map(d => d.embedding)
-    const sourceEmbedding = embeddings[0]!
-    stage1Survivors.forEach((c, i) => similarityByCandidate.set(c, cosineSimilarity(sourceEmbedding, embeddings[i + 1]!)))
-  } catch (err) {
-    console.warn('Batched candidate similarity unavailable, skipping the cheap filter stage', {
-      type: err instanceof Error ? err.constructor.name : typeof err,
-    })
-    similarityAvailable = false
+  let similarityAvailable = false
+  if (capabilities.embeddings) {
+    try {
+      const resp = await client.embeddings.create({
+        model: capabilities.embeddingModel!,
+        input: [sanitizedText, ...stage1Survivors.map(c => c.text)],
+      })
+      const embeddings = resp.data.map(d => d.embedding)
+      const sourceEmbedding = embeddings[0]!
+      stage1Survivors.forEach((c, i) => similarityByCandidate.set(c, cosineSimilarity(sourceEmbedding, embeddings[i + 1]!)))
+      similarityAvailable = true
+    } catch (err) {
+      console.warn('Batched candidate similarity unavailable, skipping the cheap filter stage', {
+        type: err instanceof Error ? err.constructor.name : typeof err,
+      })
+    }
   }
 
   const stage2Survivors = similarityAvailable
@@ -344,10 +365,14 @@ async function selectBestCandidate(
     return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage1Survivors, 'semantic_similarity', lastAttempt)
   }
 
-  // Stage 3: the combined structured judge call — survivors only.
-  const judgeResults = await Promise.allSettled(
-    stage2Survivors.map(c => runStructuredJudge(client, judgeModel, sanitizedText, c.text, tone, domain)),
-  )
+  // Stage 3: the combined structured judge call — survivors only, and
+  // never attempted at all when the provider has no jsonOutput capability
+  // (runStructuredJudge relies on response_format: json_object to parse
+  // reliably) — every candidate then falls through the SAME "no candidate
+  // could be judged" path stage3Survivors.length === 0 already handles.
+  const judgeResults = capabilities.jsonOutput
+    ? await Promise.allSettled(stage2Survivors.map(c => runStructuredJudge(client, judgeModel, sanitizedText, c.text, tone, domain)))
+    : stage2Survivors.map(() => ({ status: 'rejected' as const, reason: new Error('structured JSON output not supported by this provider') }))
   const stage3Survivors: Array<{ candidate: CandidateWithEntity; judge: StructuredJudgeResult }> = []
   judgeResults.forEach((result, i) => {
     if (result.status === 'fulfilled' && result.value.entailment_probability >= DEFAULT_THRESHOLDS.entailment) {
@@ -442,7 +467,7 @@ async function runSingleCandidateRetryLoop(
   let userPrompt = basePrompt
   let retryCount = 0
   let gatesUnavailable = false
-  let currentMaxTokens = maxTokensForIntensity(intensity)
+  let currentMaxTokens = resolveMaxTokens(client, intensity)
 
   // Tracks the best-scoring attempt seen so far, not just the most recent
   // one — a later retry can regress relative to an earlier failing attempt
@@ -502,7 +527,7 @@ async function runSingleCandidateRetryLoop(
 
     if (gateResult.passed || attempt === maxRetries) break
     userPrompt = `${basePrompt}\n\n${buildRetryAddendum(gateResult)}`
-    if (truncated) currentMaxTokens = boostedMaxTokens(currentMaxTokens)
+    if (truncated) currentMaxTokens = boostedMaxTokens(client, currentMaxTokens)
   }
 
   return { best, lastAttempt, retryCount, gatesUnavailable }
