@@ -1,5 +1,6 @@
 import type OpenAI from 'openai'
 import type { FactLock, FactLockType } from './preprocess'
+import { runStructuredJudge, type StructuredJudgeResult } from './evaluation/judge'
 
 export interface GateThresholds {
   entityOverlap: number
@@ -58,6 +59,17 @@ export interface QualityScores {
   missing_facts: string[]
   entailment_issues: string[]
   preservation_by_type: PreservationByType
+  // Populated only when the caller passes a styleContext (tone/domain) to
+  // runQualityGates — null/[] otherwise, the same "didn't run" convention
+  // semantic_similarity/entailment already use. Never fed into `passed`/
+  // `failed_gate`: style is measured and reported here, not yet retried —
+  // see evaluation/styleEvaluators.ts for the pass/fail interpretation
+  // humanizeOutput.ts's `style.passed` derives from these raw scores.
+  tone_alignment: number | null
+  domain_alignment: number | null
+  coherence: number | null
+  naturalness: number | null
+  style_issues: string[]
 }
 
 // ── Gate 1: entity overlap ───────────────────────────────────────────────────
@@ -188,6 +200,35 @@ ${output}`
   return { score, issues }
 }
 
+// ── Gate 4 (reported, not gated): tone/domain/coherence/naturalness ─────────
+// "Tone, domain and fidelity judging run in one structured call on a
+// separately configured model" per the plan's Phase 6 spec — when the
+// caller supplies a styleContext, the entailment judgment above is folded
+// into this SAME call (runStructuredJudge) rather than made as a second,
+// separate request, and its extra dimensions are surfaced alongside
+// entailment. Normalized to one shape here so the orchestrator below never
+// has to branch on which judge function actually ran.
+
+interface NormalizedJudgeResult {
+  entailment: { score: number; issues: string[] }
+  style: StructuredJudgeResult | null
+}
+
+async function runJudge(
+  client: OpenAI,
+  model: string,
+  original: string,
+  output: string,
+  styleContext?: { tone: string; domain: string },
+): Promise<NormalizedJudgeResult> {
+  if (styleContext) {
+    const result = await runStructuredJudge(client, model, original, output, styleContext.tone, styleContext.domain)
+    return { entailment: { score: result.entailment_probability, issues: result.entailment_issues }, style: result }
+  }
+  const result = await checkEntailment(client, model, original, output)
+  return { entailment: result, style: null }
+}
+
 // ── Orchestrator ──────────────────────────────────────────────────────────────
 // Failure priority: an exact-match fact drop is the most concrete, highest-
 // confidence defect, so it's reported first when multiple gates fail at once.
@@ -199,6 +240,12 @@ export async function runQualityGates(
   output: string,
   factLocks: FactLock[],
   thresholds: GateThresholds = DEFAULT_THRESHOLDS,
+  // Optional and additive: omitted (every existing caller), behavior is
+  // byte-for-byte identical to before this parameter existed — the judge
+  // call stays checkEntailment, and the four new QualityScores fields stay
+  // null. Only a caller that opts in (humanizePipeline.ts's humanizeChunk)
+  // gets the combined structured judge and populated style scores.
+  styleContext?: { tone: string; domain: string },
 ): Promise<QualityScores> {
   // entity_preservation has no external dependency and must never be lost just
   // because an unrelated, network-dependent gate fails — computed first,
@@ -208,9 +255,9 @@ export async function runQualityGates(
   // excluded from the pass/fail decision rather than counted as a failure.
   const entity = checkEntityOverlap(output, factLocks)
 
-  const [similarityResult, entailmentResult] = await Promise.allSettled([
+  const [similarityResult, judgeResult] = await Promise.allSettled([
     checkSemanticSimilarity(client, original, output),
-    checkEntailment(client, model, original, output),
+    runJudge(client, model, original, output, styleContext),
   ])
 
   if (similarityResult.status === 'rejected') {
@@ -218,14 +265,16 @@ export async function runQualityGates(
       type: similarityResult.reason instanceof Error ? similarityResult.reason.constructor.name : typeof similarityResult.reason,
     })
   }
-  if (entailmentResult.status === 'rejected') {
+  if (judgeResult.status === 'rejected') {
     console.warn('Entailment gate unavailable, continuing without it', {
-      type: entailmentResult.reason instanceof Error ? entailmentResult.reason.constructor.name : typeof entailmentResult.reason,
+      type: judgeResult.reason instanceof Error ? judgeResult.reason.constructor.name : typeof judgeResult.reason,
     })
   }
 
   const similarity = similarityResult.status === 'fulfilled' ? similarityResult.value : null
-  const entailment = entailmentResult.status === 'fulfilled' ? entailmentResult.value : null
+  const judge = judgeResult.status === 'fulfilled' ? judgeResult.value : null
+  const entailment = judge?.entailment ?? null
+  const style = judge?.style ?? null
 
   let failedGate: FailedGate = null
   if (entity.score < thresholds.entityOverlap) failedGate = 'entity_preservation'
@@ -240,11 +289,16 @@ export async function runQualityGates(
     failed_gate: failedGate,
     gates_available: {
       semantic_similarity: similarityResult.status === 'fulfilled',
-      entailment: entailmentResult.status === 'fulfilled',
+      entailment: judgeResult.status === 'fulfilled',
     },
     missing_facts: entity.missing,
     entailment_issues: entailment?.issues ?? [],
     preservation_by_type: entity.by_type,
+    tone_alignment: style == null ? null : round(style.tone_alignment),
+    domain_alignment: style == null ? null : round(style.domain_alignment),
+    coherence: style == null ? null : round(style.coherence),
+    naturalness: style == null ? null : round(style.naturalness),
+    style_issues: style?.style_issues ?? [],
   }
 }
 

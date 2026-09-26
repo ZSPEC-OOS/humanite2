@@ -339,4 +339,71 @@ describe('runQualityGates', () => {
     expect(result.gates_available).toEqual({ semantic_similarity: true, entailment: true })
     expect(result.passed).toBe(false)
   })
+
+  // ── styleContext: the combined structured judge (Phase 6) ─────────────────
+
+  it('leaves every style field null/empty when no styleContext is given — the pre-Phase-6 shape, unchanged', async () => {
+    const client = mockClient('{"entailment_probability": 1.0, "issues": []}', [[1, 0], [1, 0]])
+    const result = await runQualityGates(client, 'gpt-4o-mini', 'orig', 'output', [])
+    expect(result.tone_alignment).toBeNull()
+    expect(result.domain_alignment).toBeNull()
+    expect(result.coherence).toBeNull()
+    expect(result.naturalness).toBeNull()
+    expect(result.style_issues).toEqual([])
+  })
+
+  it('uses the combined structured judge (one call, not two) and populates style fields when styleContext is given', async () => {
+    const chatCreate = vi.fn().mockResolvedValue({
+      model: 'gpt-4o-mini',
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            entailment_probability: 1.0,
+            entailment_issues: [],
+            tone_alignment: 0.8,
+            domain_alignment: 0.7,
+            coherence: 0.9,
+            naturalness: 0.6,
+            style_issues: ['slightly stiff'],
+          }),
+        },
+      }],
+    })
+    const embedCreate = vi.fn().mockResolvedValue({ data: [{ embedding: [1, 0] }, { embedding: [1, 0] }] })
+    const client = { chat: { completions: { create: chatCreate } }, embeddings: { create: embedCreate } } as unknown as OpenAI
+
+    const result = await runQualityGates(client, 'gpt-4o-mini', 'orig', 'output', [], undefined, { tone: 'casual', domain: 'general' })
+
+    expect(chatCreate).toHaveBeenCalledTimes(1)
+    expect(result.tone_alignment).toBe(0.8)
+    expect(result.domain_alignment).toBe(0.7)
+    expect(result.coherence).toBe(0.9)
+    expect(result.naturalness).toBe(0.6)
+    expect(result.style_issues).toEqual(['slightly stiff'])
+    expect(result.entailment).toBe(1)
+  })
+
+  it('a low tone/domain/naturalness score never affects passed or failed_gate — style is measured, not (yet) gated', async () => {
+    const chatCreate = vi.fn().mockResolvedValue({
+      model: 'gpt-4o-mini',
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            entailment_probability: 1.0,
+            tone_alignment: 0.1,
+            domain_alignment: 0.1,
+            coherence: 0.1,
+            naturalness: 0.1,
+          }),
+        },
+      }],
+    })
+    const embedCreate = vi.fn().mockResolvedValue({ data: [{ embedding: [1, 0] }, { embedding: [1, 0] }] })
+    const client = { chat: { completions: { create: chatCreate } }, embeddings: { create: embedCreate } } as unknown as OpenAI
+
+    const result = await runQualityGates(client, 'gpt-4o-mini', 'orig', 'output', [], undefined, { tone: 'casual', domain: 'general' })
+
+    expect(result.passed).toBe(true)
+    expect(result.failed_gate).toBeNull()
+  })
 })

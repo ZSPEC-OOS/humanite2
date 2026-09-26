@@ -5,6 +5,7 @@ import { detectWithCache } from '@/lib/detection/dedupe'
 import { DetectionResult } from '@/lib/detection/contracts'
 import { recordScanTelemetry } from '@/lib/observability/scanTelemetry'
 import { checkAndRecordScanUsage } from '@/lib/usageLimits'
+import { evaluateStyle } from '@/lib/evaluation/styleEvaluators'
 
 // quality_scores schema v2 — replaces a single flat `passed` (which read as
 // a bare humanness verdict) with three distinct concerns: whether facts
@@ -20,6 +21,12 @@ export function buildOutput(
   detection: DetectionResult | null,
 ) {
   const agg = aggregateChunkResults(results)
+  const style = evaluateStyle(agg.tone_alignment, agg.domain_alignment, agg.naturalness, agg.intensity_alignment)
+  // Combines both concerns once both are actually measured — falls back to
+  // fidelity alone (never stricter than what was checked) only when style
+  // couldn't be evaluated at all, e.g. every chunk's gates were unavailable.
+  const validated = agg.passed == null ? null : style.passed == null ? agg.passed : agg.passed && style.passed
+
   return {
     text: postText,
     quality_scores: {
@@ -37,21 +44,26 @@ export function buildOutput(
         entailment_issues: agg.entailment_issues,
         preservation_by_type: agg.preservation_by_type,
       },
-      // Every field stays null until Phase 6 ships real style/tone/domain/
-      // intensity evaluators — exposing a fabricated number here would
-      // violate "expose only what can be measured."
       style: {
-        naturalness: null,
-        tone_alignment: null,
-        domain_alignment: null,
-        intensity_alignment: null,
-        passed: null,
+        naturalness: style.naturalness,
+        tone_alignment: style.tone_alignment,
+        domain_alignment: style.domain_alignment,
+        intensity_alignment: style.intensity_alignment,
+        passed: style.passed,
+        issues: agg.style_issues,
       },
       overall: {
-        // Style is unmeasured, so the combined verdict is fidelity's alone
-        // for now — never stricter than what was actually checked.
-        validated: agg.passed,
+        validated,
         degraded: agg.degraded,
+      },
+      // Phase 5's deterministic fact ledger, run as a targeted repair
+      // rather than a whole-document verdict — see evaluation/repair.ts.
+      // `attempted: false` means no sentence-localized fact failure was
+      // ever found (the common case), not that repair itself failed.
+      repair: {
+        attempted: agg.repair.attempted,
+        succeeded: agg.repair.succeeded,
+        sentences_repaired: agg.repair.sentences_repaired,
       },
     },
     detection,
