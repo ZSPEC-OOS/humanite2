@@ -1,6 +1,7 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { randomBytes, createHash } from 'crypto'
 import bcrypt from 'bcryptjs'
+import { isGoldTier } from './accountTier'
 
 const ACCESS_EXPIRE_MINUTES = 15
 
@@ -18,7 +19,7 @@ function scopesForTier(tier: string): string[] {
   // which would have handed admin visibility to anyone who simply pays for
   // the highest tier — removed rather than carried forward into this pricing
   // model.
-  if (tier === 'pro' || tier === 'enterprise') base.push('user:read')
+  if (tier === 'pro' || tier === 'enterprise' || isGoldTier(tier)) base.push('user:read')
   return base
 }
 

@@ -222,3 +222,62 @@ describe('checkAndRecordScanUsage', () => {
     expect(result.code).toBe('UNAVAILABLE')
   })
 })
+
+describe('gold tier — unrestricted access (no daily limits, no quotas, no feature gates)', () => {
+  it('is never blocked by the daily generation request limit, however low', async () => {
+    process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_DAY = '1'
+    for (let i = 0; i < 5; i++) {
+      expect((await checkAndRecordGenerationUsage('gold-user', 'gold', 10)).allowed).toBe(true)
+    }
+  })
+
+  it('is never blocked by the daily generation word limit, even for a huge submission', async () => {
+    process.env.FREE_TIER_GENERATION_WORDS_PER_DAY = '1'
+    const result = await checkAndRecordGenerationUsage('gold-user', 'gold', 10_000_000)
+    expect(result.allowed).toBe(true)
+  })
+
+  it('is never blocked by the daily scan request or word limit', async () => {
+    process.env.FREE_TIER_SCAN_REQUESTS_PER_DAY = '1'
+    process.env.FREE_TIER_SCAN_WORDS_PER_DAY = '1'
+    for (let i = 0; i < 5; i++) {
+      expect((await checkAndRecordScanUsage('gold-user', 'gold', 10_000)).allowed).toBe(true)
+    }
+  })
+
+  it('bypasses even a zero-quota feature gate — scanning stays available where a Free-tier plan would have it disabled entirely', async () => {
+    process.env.FREE_TIER_SCAN_REQUESTS_PER_DAY = '0'
+    process.env.FREE_TIER_SCAN_WORDS_PER_DAY = '0'
+    // A Free-tier account is correctly gated out (regression guard for the
+    // behavior this test is contrasting against).
+    const free = await checkAndRecordScanUsage('free-user', 'free', 10)
+    expect(free.allowed).toBe(false)
+    expect(free.reason).toMatch(/isn.t included in your plan/i)
+
+    const gold = await checkAndRecordScanUsage('gold-user', 'gold', 10)
+    expect(gold.allowed).toBe(true)
+  })
+
+  it('never touches Firestore — no usage document is written for a Gold account', async () => {
+    process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1'
+    await checkAndRecordGenerationUsage('gold-user', 'gold', 999_999)
+    await checkAndRecordScanUsage('gold-user', 'gold', 999_999)
+    expect(docStore.size).toBe(0)
+  })
+
+  it('is independent of the separate email-hash allowlist mechanism — bypass works with no email hash at all', async () => {
+    process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1'
+    const result = await checkAndRecordGenerationUsage('gold-user', 'gold', 100, '')
+    expect(result.allowed).toBe(true)
+  })
+
+  it('leaves Free-tier restrictions completely unchanged', async () => {
+    process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_DAY = '1000000'
+    expect((await checkAndRecordGenerationUsage('free-user', 'free', 10)).allowed).toBe(true)
+    const second = await checkAndRecordGenerationUsage('free-user', 'free', 10)
+    expect(second.allowed).toBe(false)
+    expect(second.code).toBe('LIMIT_EXCEEDED')
+  })
+})

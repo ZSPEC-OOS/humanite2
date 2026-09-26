@@ -1,4 +1,5 @@
 import { db } from './firestore'
+import { isGoldTier } from './accountTier'
 
 // Two independent daily quotas per authenticated user — generation
 // (humanize) and scan (AI-detection) — so one account can't run up this
@@ -120,6 +121,15 @@ async function checkAndRecordPoolUsage(
   pool: UsagePool,
   emailHash: string,
 ): Promise<UsageCheckResult> {
+  // Gold accounts skip the quota (and the Firestore write) entirely — a
+  // first-class, unrestricted account tier (see accountTier.ts), not a
+  // parallel bypass mechanism. Checked first so it also overrides the "not
+  // included in your plan" zero-quota gate below: a plan tier can legitimately
+  // not include a feature, but Gold's whole point is having no such gate.
+  if (isGoldTier(tier)) {
+    return { allowed: true }
+  }
+
   // Allowlisted accounts skip the quota (and the Firestore write) entirely —
   // checked first so it also overrides the "not included in your plan" gate
   // below.
