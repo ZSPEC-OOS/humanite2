@@ -39,6 +39,8 @@ function chunk(overrides: Partial<ChunkResult> = {}): ChunkResult {
     retryCount: 0,
     intensityAlignment: null,
     repair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
+    claimVerification: null,
+    relationRepair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
     ...overrides,
   }
 }
@@ -174,5 +176,27 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
     const output = buildOutput('Some humanized output text.', [repairedChunk], generateWatermark('job-8', 'gpt-4o-mini'), detection)
 
     expect(output.quality_scores.repair).toEqual({ attempted: true, succeeded: true, sentences_repaired: 2 })
+  })
+
+  it('surfaces claim_verification and relation_repair from Phase 7', async () => {
+    process.env.MOCK_DETECTION_FIXTURE = 'human'
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const claimCheckedChunk = chunk({
+      claimVerification: { checked: 3, failed: 1, issues: ['causal direction reversed'] },
+      relationRepair: { attempted: true, strategy: 'restore_relations', succeeded: true, sentencesRepaired: 1 },
+    })
+    const output = buildOutput('Some humanized output text.', [claimCheckedChunk], generateWatermark('job-9', 'gpt-4o-mini'), detection)
+
+    expect(output.quality_scores.fidelity.claim_verification).toEqual({ checked: 3, failed: 1, issues: ['causal direction reversed'] })
+    expect(output.quality_scores.relation_repair).toEqual({ attempted: true, succeeded: true, sentences_repaired: 1 })
+  })
+
+  it('reports claim_verification as all-zero when the check never ran for any chunk', async () => {
+    process.env.MOCK_DETECTION_FIXTURE = 'human'
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const output = buildOutput('Some humanized output text.', [chunk()], generateWatermark('job-10', 'gpt-4o-mini'), detection)
+
+    expect(output.quality_scores.fidelity.claim_verification).toEqual({ checked: 0, failed: 0, issues: [] })
+    expect(output.quality_scores.relation_repair).toEqual({ attempted: false, succeeded: false, sentences_repaired: 0 })
   })
 })

@@ -5,10 +5,11 @@ import { postprocess } from './postprocess'
 import { runQualityGates, QualityScores, PreservationByType, GateAvailability } from './qualityGates'
 import { compileStyle, buildStyleSection, toValidTone, toValidDomain } from './style'
 import { buildIntensityGuide } from './intensity'
-import { validateFactLedger } from './fidelity'
+import { validateFactLedger, buildFactLedger } from './fidelity'
 import { measureIntensity } from './evaluation/intensity'
 import { evaluateIntensityAlignment } from './evaluation/styleEvaluators'
 import { repairChunk, type RepairStrategy } from './evaluation/repair'
+import { verifyClaims, restoreRelations, type ClaimVerificationResult, type RelationRepairStrategy } from './claims'
 
 export const SYSTEM_PROMPT = `You are a professional editor. Your only job is to rewrite the provided text \
 so it reads as natural, fluent human prose. You must:
@@ -126,6 +127,28 @@ export interface RepairSummary {
   sentencesRepaired: number
 }
 
+// Same shape as RepairSummary, for the "restore-relations" strategy Phase
+// 7's model-based claim verifier feeds (see claims/repair.ts) — kept as a
+// separate field rather than folded into `repair` above, since both
+// mechanisms can fire independently on the same chunk (a fact-level swap
+// AND a relation-level one) and conflating their bookkeeping would lose
+// which one actually ran.
+export interface RelationRepairSummary {
+  attempted: boolean
+  strategy: RelationRepairStrategy
+  succeeded: boolean
+  sentencesRepaired: number
+}
+
+// Simplified view of ClaimVerificationResult (see src/lib/claims/types.ts)
+// — the full AtomicClaim breakdown isn't needed past this point, only
+// enough to report and aggregate.
+export interface ClaimVerificationSummary {
+  checked: number
+  failed: number
+  issues: string[]
+}
+
 export interface ChunkResult {
   text: string
   substitutions: number
@@ -144,6 +167,11 @@ export interface ChunkResult {
   // this is always computed, even when gatesUnavailable.
   intensityAlignment: number | null
   repair: RepairSummary
+  // null only when the claim-verification call itself failed to run (e.g.
+  // gatesUnavailable already broke earlier, or the call errored) — never a
+  // fabricated "0 claims checked" standing in for "didn't run".
+  claimVerification: ClaimVerificationSummary | null
+  relationRepair: RelationRepairSummary
 }
 
 // Runs the generate → postprocess → gate-check → (retry on failure) loop for
@@ -245,6 +273,8 @@ export async function humanizeChunk(
       retryCount,
       intensityAlignment,
       repair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
+      claimVerification: null,
+      relationRepair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
     }
   }
 
@@ -287,6 +317,68 @@ export async function humanizeChunk(
     }
   }
 
+  // Phase 7: model-based claim verification, covering relation and
+  // attribution errors the deterministic fact ledger above cannot see (a
+  // reversed causal direction, a statement reattributed to a different
+  // speaker, a dropped scope qualifier) — both individually-correct values
+  // can survive entity_preservation AND validateFactLedger while the
+  // relation between them is wrong. Budgeted at exactly one call
+  // (verifyClaims), regardless of outcome; a "restore-relations" repair
+  // (the strategy Phase 6 named ahead of time) only escalates to two more
+  // calls when verification actually finds a localized failure.
+  let claimVerification: ClaimVerificationSummary | null = null
+  let relationRepair: RelationRepairSummary = { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 }
+  if (best) {
+    try {
+      const coveredFacts = buildFactLedger(sanitizedText).map(f => f.text)
+      let verification: ClaimVerificationResult = await verifyClaims(client, judgeModel, sanitizedText, best.text, coveredFacts)
+
+      if (!verification.passed) {
+        const relationAttempt = await restoreRelations(client, model, sanitizedText, best.text, verification.failures, tone, domain)
+        if (relationAttempt.attempted && relationAttempt.succeeded) {
+          // No free re-check exists for a relation fix the way
+          // validateFactLedger re-checks a fact fix — verifyClaims itself
+          // is the only way to confirm it, so this spends one more call
+          // rather than adopting on faith. A free deterministic guard
+          // still runs first, since a relation rewrite could otherwise
+          // silently drop a fact the earlier repair step already restored.
+          const stillHasFacts = validateFactLedger(sanitizedText, relationAttempt.text).passed
+          if (stillHasFacts) {
+            try {
+              const reVerification = await verifyClaims(client, judgeModel, sanitizedText, relationAttempt.text, coveredFacts)
+              if (reVerification.passed || reVerification.failures.length < verification.failures.length) {
+                best = { ...best, text: relationAttempt.text }
+                verification = reVerification
+                relationRepair = { attempted: true, strategy: relationAttempt.strategy, succeeded: reVerification.passed, sentencesRepaired: relationAttempt.sentencesRepaired }
+              } else {
+                relationRepair = { attempted: true, strategy: relationAttempt.strategy, succeeded: false, sentencesRepaired: 0 }
+              }
+            } catch (err) {
+              console.warn('Could not re-verify a relation repair, shipping the pre-repair claim verdict instead', {
+                type: err instanceof Error ? err.constructor.name : typeof err,
+              })
+              relationRepair = { attempted: true, strategy: relationAttempt.strategy, succeeded: false, sentencesRepaired: 0 }
+            }
+          } else {
+            relationRepair = { attempted: true, strategy: relationAttempt.strategy, succeeded: false, sentencesRepaired: 0 }
+          }
+        } else {
+          relationRepair = { attempted: relationAttempt.attempted, strategy: relationAttempt.strategy, succeeded: false, sentencesRepaired: 0 }
+        }
+      }
+
+      claimVerification = {
+        checked: verification.claimCount,
+        failed: verification.failures.length,
+        issues: verification.failures.map(f => f.reason ?? 'claim not entailed'),
+      }
+    } catch (err) {
+      console.warn('Claim verification unavailable, continuing without it', {
+        type: err instanceof Error ? err.constructor.name : typeof err,
+      })
+    }
+  }
+
   const shippedText = best?.text ?? lastAttempt.text
   const intensityAlignment = intensityAlignmentScore(sanitizedText, shippedText, factLocks, intensity)
 
@@ -297,6 +389,8 @@ export async function humanizeChunk(
     gate: best?.gate ?? null,
     gatesUnavailable: false,
     truncated: best?.truncated ?? lastAttempt.truncated,
+    claimVerification,
+    relationRepair,
     retryCount,
     intensityAlignment,
     repair,
@@ -364,6 +458,18 @@ export interface AggregatedQuality {
     succeeded: boolean
     sentences_repaired: number
   }
+  // Phase 7's model-based claim verification — summed/concatenated across
+  // ALL chunks, never gated on `scored`, since claim verification runs in
+  // its own try/catch independent of the main quality-gate call (see
+  // humanizeChunk) rather than being tied to whether that gate succeeded.
+  claims_checked: number
+  claims_failed: number
+  claim_issues: string[]
+  relation_repair: {
+    attempted: boolean
+    succeeded: boolean
+    sentences_repaired: number
+  }
 }
 
 // Sums each category's total/preserved counts and concatenates its missing
@@ -413,6 +519,16 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
     sentences_repaired: results.reduce((sum, r) => sum + r.repair.sentencesRepaired, 0),
   }
 
+  const claimsChecked = results.reduce((sum, r) => sum + (r.claimVerification?.checked ?? 0), 0)
+  const claimsFailed = results.reduce((sum, r) => sum + (r.claimVerification?.failed ?? 0), 0)
+  const claimIssues = results.flatMap(r => r.claimVerification?.issues ?? [])
+  const relationRepairAttempted = results.filter(r => r.relationRepair.attempted)
+  const relationRepair = {
+    attempted: relationRepairAttempted.length > 0,
+    succeeded: relationRepairAttempted.length > 0 && relationRepairAttempted.every(r => r.relationRepair.succeeded),
+    sentences_repaired: results.reduce((sum, r) => sum + r.relationRepair.sentencesRepaired, 0),
+  }
+
   if (scored.length === 0) {
     return {
       semantic_similarity: null,
@@ -433,6 +549,10 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
       style_issues: styleIssues,
       intensity_alignment: intensityAlignment,
       repair,
+      claims_checked: claimsChecked,
+      claims_failed: claimsFailed,
+      claim_issues: claimIssues,
+      relation_repair: relationRepair,
     }
   }
 
@@ -474,6 +594,10 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
     style_issues: styleIssues,
     intensity_alignment: intensityAlignment,
     repair,
+    claims_checked: claimsChecked,
+    claims_failed: claimsFailed,
+    claim_issues: claimIssues,
+    relation_repair: relationRepair,
   }
 }
 

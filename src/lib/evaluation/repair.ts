@@ -3,6 +3,7 @@ import { splitSentences } from '@/lib/detection/diagnostics/tokenize'
 import { alignSentences } from '@/lib/textAlign'
 import { validateFactLedger } from '@/lib/fidelity'
 import type { FidelityFailure } from '@/lib/fidelity'
+import { locateSentenceSpans, spliceSentences } from '@/lib/textSplice'
 
 // Diagnose -> classify -> repair, reserved for fact/relation failures Phase
 // 5's deterministic fact ledger catches that the whole-document
@@ -69,40 +70,6 @@ ${requiredFacts}`
 
   const text = completion.choices[0]?.message?.content?.trim()
   return text || null
-}
-
-// Finds each output sentence's exact character span in `text` by searching
-// forward from the end of the previous span — sentences come from
-// splitSentences(text), so each is a verbatim (trim-only) substring of
-// `text` in order, letting a repaired sentence be spliced back in without
-// disturbing whitespace/formatting the split step itself discarded.
-function locateSentenceSpans(text: string, sentences: string[]): Array<{ start: number; end: number }> {
-  const spans: Array<{ start: number; end: number }> = []
-  let searchFrom = 0
-  for (const sentence of sentences) {
-    const start = text.indexOf(sentence, searchFrom)
-    if (start === -1) {
-      spans.push({ start: searchFrom, end: searchFrom })
-      continue
-    }
-    const end = start + sentence.length
-    spans.push({ start, end })
-    searchFrom = end
-  }
-  return spans
-}
-
-function spliceSentences(text: string, spans: Array<{ start: number; end: number }>, replacements: Map<number, string>): string {
-  let result = ''
-  let cursor = 0
-  spans.forEach((span, index) => {
-    const replacement = replacements.get(index)
-    if (replacement == null) return
-    result += text.slice(cursor, span.start) + replacement
-    cursor = span.end
-  })
-  result += text.slice(cursor)
-  return result
 }
 
 export async function repairChunk(
