@@ -3,6 +3,7 @@ import type { FactLock } from './preprocess'
 import type { TextChunk } from './chunk'
 import { postprocess } from './postprocess'
 import { runQualityGates, QualityScores, PreservationByType, GateAvailability } from './qualityGates'
+import { compileStyle, buildStyleSection, toValidTone, toValidDomain } from './style'
 
 export const SYSTEM_PROMPT = `You are a professional editor. Your only job is to rewrite the provided text \
 so it reads as natural, fluent human prose. You must:
@@ -35,13 +36,16 @@ export function buildUserPrompt(
       'Apply thorough rewriting — diversify sentence lengths aggressively (mix 6-word fragments with 28-word sentences), add natural register markers (parentheticals, em-dashes, rhetorical questions where appropriate), replace all AI-typical openers and vocabulary. Preserve paragraph structure.'
   }
 
+  const compiledStyle = compileStyle(toValidTone(tone), toValidDomain(domain))
+  const styleSection = buildStyleSection(compiledStyle)
+
   return `## HARD CONSTRAINTS — DO NOT ALTER THESE EXACT STRINGS
 The following spans must appear in your output verbatim:
 ${lockLines}
 
 ## STYLE PARAMETERS
-Tone: ${tone}
-Domain: ${domain}
+${styleSection}
+
 Intensity: ${intensity}/10
 ${intensityGuide}
 

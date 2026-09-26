@@ -25,6 +25,31 @@ describe('buildUserPrompt — vocabulary guidance', () => {
   })
 })
 
+describe('buildUserPrompt — style compiler integration', () => {
+  it('compiles the casual tone into explicit contraction guidance for a domain with no override', () => {
+    const prompt = buildUserPrompt('some text', [], 5, 'casual', 'general')
+    expect(prompt).toContain('Tone: casual')
+    expect(prompt).toContain('Domain: general')
+    expect(prompt).toMatch(/use contractions freely/i)
+  })
+
+  it('lets the legal domain override the casual tone\'s contraction guidance', () => {
+    const prompt = buildUserPrompt('some text', [], 5, 'casual', 'legal')
+    expect(prompt).toMatch(/never use contractions, regardless of the selected tone/i)
+    expect(prompt).not.toMatch(/use contractions freely/i)
+    // Legal's other domain constraints (defined terms, modality, conditions)
+    // are present too, not just the contraction override.
+    expect(prompt).toMatch(/preserve every defined term/i)
+    expect(prompt).toMatch(/"shall" must not become/i)
+  })
+
+  it('falls back to balanced/general rather than throwing on an unrecognized tone or domain', () => {
+    const prompt = buildUserPrompt('some text', [], 5, 'not-a-real-tone', 'not-a-real-domain')
+    expect(prompt).toContain('Tone: balanced')
+    expect(prompt).toContain('Domain: general')
+  })
+})
+
 function gate(overrides: Partial<QualityScores> = {}): QualityScores {
   return {
     semantic_similarity: 0.9,
