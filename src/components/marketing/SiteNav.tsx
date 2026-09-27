@@ -1,13 +1,15 @@
 import Link from 'next/link'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
 import { Logo } from '@/components/ui/Logo'
+import { MobileNav } from './MobileNav'
 
 const NAV_LINKS = [
-  { label: 'Product', href: '/product' },
-  { label: 'Use Cases', href: '/use-cases' },
+  { label: 'Solutions', href: '/solutions' },
   { label: 'Pricing', href: '/pricing' },
   { label: 'About', href: '/about' },
 ]
+
+const LOG_IN_LINK = { label: 'Log in', href: '/auth/login' }
 
 export function SiteNav() {
   return (
@@ -24,11 +26,12 @@ export function SiteNav() {
         ))}
       </nav>
 
-      <div className="flex items-center gap-4">
-        <Link href="/auth/login" className="hidden text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100 sm:block">
-          Log in
+      <div className="flex items-center gap-2 md:gap-4">
+        <Link href={LOG_IN_LINK.href} className="hidden text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100 sm:block">
+          {LOG_IN_LINK.label}
         </Link>
         <ThemeToggle />
+        <MobileNav links={[...NAV_LINKS, LOG_IN_LINK]} />
       </div>
     </header>
   )

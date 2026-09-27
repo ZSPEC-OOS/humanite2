@@ -2,10 +2,9 @@ import Link from 'next/link'
 import { Logo } from '@/components/ui/Logo'
 
 const FOOTER_LINKS = [
-  { label: 'Product', href: '/product' },
-  { label: 'Use Cases', href: '/use-cases' },
-  { label: 'Pricing', href: '/pricing' },
-  { label: 'About', href: '/about' },
+  { label: 'Contact', href: '/contact' },
+  { label: 'Privacy', href: '/privacy' },
+  { label: 'Terms', href: '/terms' },
 ]
 
 export function SiteFooter() {
