@@ -63,8 +63,8 @@ export default function LandingPage() {
           </p>
 
           <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-[rgba(10,22,43,0.84)] dark:text-[rgba(255,255,255,0.82)] md:text-lg">
-            Humanite converts AI-generated text into natural, human-sounding writing
-            — so your ideas feel real, relatable, and uniquely yours.
+            Humanite rewrites AI-assisted text into natural, human writing
+            — while preserving the meaning, facts, and ideas that matter.
           </p>
 
           <Link
