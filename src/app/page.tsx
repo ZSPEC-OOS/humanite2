@@ -27,10 +27,10 @@ const AI_TEXT = `Artificial intelligence is transforming the way we work, learn,
 const HUMAN_TEXT = `AI is changing how we work, learn, and connect. It helps us get more done, takes care of the repetitive stuff, and opens the door to new opportunities across all kinds of industries.`
 
 const FEATURES = [
-  'More human writing',
-  'For creators, students & teams',
-  'Real ideas. Real impact.',
-  'A kinder internet',
+  'Preserve facts & meaning',
+  'Control tone & intensity',
+  'Repair risky rewrites',
+  'Keep long documents consistent',
 ]
 
 export default function LandingPage() {
