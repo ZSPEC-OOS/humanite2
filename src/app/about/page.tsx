@@ -16,7 +16,7 @@ export default function AboutPage() {
               About
             </p>
             <h1 className="mt-4 font-display text-4xl font-bold text-gray-900 dark:text-gray-100 md:text-6xl">
-              More human ideas
+              The Human Presence in the Sentence
             </h1>
           </div>
 
