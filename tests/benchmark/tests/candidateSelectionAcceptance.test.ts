@@ -99,6 +99,15 @@ describe.skipIf(!LIVE)('candidate selection acceptance (Phase 8)', () => {
       const baselineScores: number[] = []
       const selectedScores: number[] = []
       const callCounts: number[] = []
+      // Visibility into how often this specific live run's candidate-search
+      // funnel disqualifies every candidate it generates — the same
+      // telemetry a full benchmark report now carries (see
+      // AggregatedQuality.candidate_selection in humanizePipeline.ts and
+      // BenchmarkReport.summary.candidateDisqualificationRate), surfaced
+      // here too so a "the selected candidate barely beat baseline" result
+      // can be cross-checked against "how many chunks had to fall back to
+      // the least-bad candidate" rather than treated as a mystery.
+      let chunksAllDisqualified = 0
 
       for (const item of items) {
         const prep = preprocess(item.input)
@@ -117,6 +126,7 @@ describe.skipIf(!LIVE)('candidate selection acceptance (Phase 8)', () => {
         const selected = scoreChunkResult(result)
         if (selected != null) selectedScores.push(selected)
         callCounts.push(usage.callCount)
+        if (result.candidateSelection.disqualifiedAt != null) chunksAllDisqualified++
       }
 
       const mean = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length
@@ -124,6 +134,7 @@ describe.skipIf(!LIVE)('candidate selection acceptance (Phase 8)', () => {
       console.log('baseline scores:', baselineScores)
       console.log('selected scores:', selectedScores)
       console.log('call counts per chunk:', callCounts)
+      console.log(`chunks where every candidate was disqualified: ${chunksAllDisqualified}/${items.length}`)
 
       expect(baselineScores.length, 'at least some baseline generations must have scored successfully').toBeGreaterThan(0)
       expect(selectedScores.length, 'at least some selected outputs must have scored successfully').toBeGreaterThan(0)

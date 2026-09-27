@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { dirname } from 'path'
 import type OpenAI from 'openai'
 import { preprocess } from '@/lib/preprocess'
 import { chunkFactLockedText } from '@/lib/chunk'
@@ -91,6 +93,20 @@ export interface RunBenchmarkOptions {
   // below is what actually varies these across a grid.
   tone?: string
   intensity?: number
+  // A 300-item run at up to 9 model calls per chunk can run for hours —
+  // long enough to hit a CI job's own timeout before finishing, which is
+  // exactly what the live baseline run did. When set, the partial results
+  // array is written to this path (as plain BenchmarkItemResult[] JSON)
+  // after every single item completes, so a run killed partway through
+  // still leaves everything already measured (and paid for) on disk
+  // instead of losing the whole run.
+  checkpointPath?: string
+  // When true, and checkpointPath already holds results from an earlier
+  // run over (some of) the same items, those items are loaded from it and
+  // skipped rather than re-run and re-billed. False by default so an
+  // existing checkpoint file is never silently reused unless the caller
+  // opts in.
+  resumeFromCheckpoint?: boolean
 }
 
 async function runOneItem(
@@ -154,6 +170,12 @@ async function runOneItem(
       missingFacts: agg.missing_facts,
       prohibitedChangesFound,
       detectors: detectorSamples,
+      candidateSelection: {
+        chunksWithCandidateSearch: agg.candidate_selection.chunks_with_candidate_search,
+        chunksAllDisqualified: agg.candidate_selection.chunks_all_disqualified,
+        disqualifiedByStage: agg.candidate_selection.disqualified_by_stage,
+        totalCandidatesGenerated: agg.candidate_selection.total_candidates_generated,
+      },
     }
   } catch (err) {
     return {
@@ -169,6 +191,7 @@ async function runOneItem(
       missingFacts: [],
       prohibitedChangesFound: [],
       detectors: [],
+      candidateSelection: { chunksWithCandidateSearch: 0, chunksAllDisqualified: 0, disqualifiedByStage: {}, totalCandidatesGenerated: 0 },
       error: err instanceof Error ? err.message : String(err),
     }
   }
@@ -216,8 +239,29 @@ export async function runBenchmark(options: RunBenchmarkOptions): Promise<Benchm
   const intensity = options.intensity ?? DEFAULT_INTENSITY
 
   const results: BenchmarkItemResult[] = []
+  const completedIds = new Set<string>()
+
+  if (options.resumeFromCheckpoint && options.checkpointPath && existsSync(options.checkpointPath)) {
+    const saved = JSON.parse(readFileSync(options.checkpointPath, 'utf8')) as BenchmarkItemResult[]
+    const itemIds = new Set(items.map(i => i.id))
+    for (const r of saved) {
+      if (itemIds.has(r.id) && !completedIds.has(r.id)) {
+        results.push(r)
+        completedIds.add(r.id)
+      }
+    }
+  }
+
+  const writeCheckpoint = () => {
+    if (!options.checkpointPath) return
+    mkdirSync(dirname(options.checkpointPath), { recursive: true })
+    writeFileSync(options.checkpointPath, JSON.stringify(results, null, 2))
+  }
+
   for (const item of items) {
+    if (completedIds.has(item.id)) continue
     results.push(await runOneItem(item, options.client, options.model, detectors, tone, intensity))
+    writeCheckpoint()
   }
 
   const domains = items.map(i => i.domain)
@@ -238,7 +282,11 @@ export async function runBenchmark(options: RunBenchmarkOptions): Promise<Benchm
   return buildReport(options.model, results, detectorAiRateAtFixedFpr)
 }
 
-function buildReport(
+// Exported so aggregateShards.ts can recompute a combined report's summary
+// from the FULL concatenated results array of every shard — the exact same
+// formulas a single monolithic run would have used — rather than
+// re-deriving (and risking drift from) an independent copy of this math.
+export function buildReport(
   model: string,
   results: BenchmarkItemResult[],
   detectorAiRateAtFixedFpr: Record<string, number | null>,
@@ -249,6 +297,16 @@ function buildReport(
     return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null
   }
   const withPassedKnown = scored.filter(r => r.fidelityPassed != null)
+
+  const totalChunksWithCandidateSearch = results.reduce((sum, r) => sum + r.candidateSelection.chunksWithCandidateSearch, 0)
+  const totalChunksAllDisqualified = results.reduce((sum, r) => sum + r.candidateSelection.chunksAllDisqualified, 0)
+  const candidateDisqualifiedByStage: Partial<Record<'entity_preservation' | 'semantic_similarity' | 'entailment', number>> = {}
+  for (const r of results) {
+    for (const [stage, count] of Object.entries(r.candidateSelection.disqualifiedByStage)) {
+      const key = stage as 'entity_preservation' | 'semantic_similarity' | 'entailment'
+      candidateDisqualifiedByStage[key] = (candidateDisqualifiedByStage[key] ?? 0) + (count ?? 0)
+    }
+  }
 
   return {
     generatedAt: new Date().toISOString(),
@@ -267,6 +325,8 @@ function buildReport(
       totalEstimatedCostUsd: results.reduce((sum, r) => sum + r.estimatedCostUsd, 0),
       detectorAiRateAtFixedFpr,
       prohibitedChangeViolations: results.reduce((sum, r) => sum + r.prohibitedChangesFound.length, 0),
+      candidateDisqualificationRate: totalChunksWithCandidateSearch === 0 ? null : totalChunksAllDisqualified / totalChunksWithCandidateSearch,
+      candidateDisqualifiedByStage,
     },
   }
 }

@@ -27,10 +27,17 @@ export function buildIntensityGuide(level: number): string {
     lines.push('- Keep every paragraph break exactly where the source has it.')
   }
 
-  if (target.discourse >= 0.3) {
-    lines.push('- Sentence order within a paragraph may be reorganized where it improves the flow of ideas.')
-  } else if (target.discourse > 0) {
-    lines.push('- Sentence order should mostly follow the source; only reorder where clearly beneficial.')
+  if (target.discourse > 0) {
+    // A flat two-way (or old three-way) bucket collapsed several adjacent
+    // levels onto byte-identical wording here (levels 3-6 all read "mostly
+    // follow the source; only reorder where clearly beneficial", with
+    // nothing in the sentence itself distinguishing how much more
+    // reordering level 6 asks for than level 3) — the one dimension in this
+    // guide that wasn't driven by its own numeric target. Embedding the
+    // actual per-level percentage, the same way the lexical/sentence lines
+    // already do, gives every level a genuinely distinct discourse
+    // instruction instead of sharing one with its neighbors.
+    lines.push(`- Sentence order within a paragraph may be reorganized for roughly ${pct(target.discourse)} of paragraphs where it improves the flow of ideas — more reordering at higher intensity, minimal at lower.`)
   } else {
     lines.push('- Keep sentences in their original order.')
   }

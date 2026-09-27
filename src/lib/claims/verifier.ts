@@ -31,9 +31,18 @@ An atomic claim has this shape: {"subject": "...", "predicate": "...", "object":
 Do NOT extract a claim that is ONLY about one of these exact spans — they are already verified separately and re-checking them wastes effort:
 ${coveredList}
 
-For each claim, decide whether the REWRITE still entails it: does the REWRITE, read on its own, support exactly this subject/predicate/object/qualifiers/polarity/modality combination? A claim is NOT entailed if the rewrite reverses a relation, reassigns who said or did something, drops or alters a qualifier that narrows the claim's scope, or otherwise changes what is actually being asserted — reordering or rephrasing alone is fine and does not count against it.
+For each claim, decide whether the REWRITE still entails it: does the REWRITE, read on its own, support exactly this subject/predicate/object/qualifiers/polarity/modality combination? A claim is NOT entailed only if the rewrite reverses a relation (who did what to whom, or which side of a comparison is greater), reassigns WHICH ENTITY something is attributed or credited to, drops or narrows/widens a qualifier's actual scope, or otherwise changes what is actually being asserted.
+
+The following are NOT violations by themselves, no matter how unusual the sentence sounds — judge only whether the underlying relation, attribution, and scope survive, not how the sentence is built:
+- Voice changes (active/passive), cleft constructions ("it was X who...", "it is only in X that..."), and clauses moved or interpolated with commas/dashes (e.g. "X, Y said, Z" vs "Y said that X Z").
+- A different reporting verb for the SAME attributed entity (said/reported/stated/found/attributed/according to) — this is only a violation if the entity CREDITED with the statement changes, not if the verb describing the reporting changes.
+- Reordering a qualifier, or rephrasing its wording, as long as the same condition still narrows the same claim (e.g. "only during the first week of treatment" and "only in treatment's first week" scope the claim identically).
 
 The REWRITE's sentences are numbered below. When a claim is not entailed, report the number of the ONE sentence where the problem shows up, or null if it isn't localized to a single sentence (e.g. the claim is simply missing rather than misstated somewhere specific).
+
+Two calibration examples:
+- NOT a violation: source "According to the safety board, the outage was caused by a software update." / rewrite "The safety board found that a software update caused the outage." — same entity (the safety board) credited with the same finding; "found" vs "according to" is just a different reporting verb, and entailed must be true.
+- IS a violation: source "According to federal regulators, the drug carries a black-box warning." / rewrite "According to the manufacturer, the drug carries a black-box warning." — the credited entity changed from regulators to the manufacturer, so entailed must be false.
 
 REWRITE SENTENCES:
 ${numberedOutput || '(no sentences)'}

@@ -75,6 +75,18 @@ export interface DetectorSample {
   calibrated_ai_rate: number | null
 }
 
+// Per-item view of humanizePipeline.ts's AggregatedQuality.candidate_selection
+// — surfaced so a benchmark report can measure how often (and where) the
+// candidate-search funnel disqualifies every candidate it generates,
+// rather than that only ever being visible as scattered console.warn lines
+// in a live run's log.
+export interface CandidateSelectionTelemetry {
+  chunksWithCandidateSearch: number
+  chunksAllDisqualified: number
+  disqualifiedByStage: Partial<Record<'entity_preservation' | 'semantic_similarity' | 'entailment', number>>
+  totalCandidatesGenerated: number
+}
+
 export interface BenchmarkItemResult {
   id: string
   domain: Domain
@@ -88,6 +100,7 @@ export interface BenchmarkItemResult {
   missingFacts: string[]
   prohibitedChangesFound: string[]
   detectors: DetectorSample[]
+  candidateSelection: CandidateSelectionTelemetry
   error?: string
 }
 
@@ -110,5 +123,12 @@ export interface BenchmarkReport {
     // fixed-FPR number derived from too little (or placeholder) data.
     detectorAiRateAtFixedFpr: Record<string, number | null>
     prohibitedChangeViolations: number
+    // Corpus-wide view of CandidateSelectionTelemetry — null when no scored
+    // item ran candidate search at all (every item's intensity used the
+    // single-candidate retry loop). A rising rate here is a signal to
+    // strengthen prompt construction, never a reason to loosen the gate
+    // that catches the disqualification.
+    candidateDisqualificationRate: number | null
+    candidateDisqualifiedByStage: Partial<Record<'entity_preservation' | 'semantic_similarity' | 'entailment', number>>
   }
 }

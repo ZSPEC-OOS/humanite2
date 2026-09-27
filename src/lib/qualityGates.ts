@@ -238,9 +238,37 @@ async function runJudge(
 // "a missing capability marks that metric unavailable instead of failing a
 // call" (Phase 9) — but still flows through the SAME Promise.allSettled and
 // gates_available bookkeeping a genuine network failure already used, via
-// a pre-rejected promise instead of a real request.
+// a pre-rejected promise instead of a real request. Tagged with its own
+// error class (rather than a bare Error) so the logging below can tell
+// "this provider was never going to support this gate" — known and static
+// for the life of the run — apart from an actual transient failure of a
+// call that WAS attempted.
+class CapabilityUnsupportedError extends Error {}
+
 function unsupported(reason: string): Promise<never> {
-  return Promise.reject(new Error(reason))
+  return Promise.reject(new CapabilityUnsupportedError(reason))
+}
+
+// A capability gap is the same fact on every single chunk/candidate for a
+// given provider — logging it at warn level on every call (a 300-item
+// live run against a provider with no embeddings support means thousands
+// of repeats of the exact same line) drowns out everything else in the
+// log without adding information after the first occurrence. A genuine
+// failure of a call that WAS attempted has no such guarantee of repeating
+// identically, so it stays logged every time it happens.
+const loggedCapabilityGaps = new Set<string>()
+
+function warnGateUnavailable(gateName: string, baseURL: string | null | undefined, reason: unknown): void {
+  if (reason instanceof CapabilityUnsupportedError) {
+    const key = `${gateName}:${baseURL ?? '(default)'}`
+    if (loggedCapabilityGaps.has(key)) return
+    loggedCapabilityGaps.add(key)
+    console.info(`${gateName} gate unavailable for this provider (capability not supported) — will not repeat this message for the same provider`, { baseURL })
+    return
+  }
+  console.warn(`${gateName} gate unavailable, continuing without it`, {
+    type: reason instanceof Error ? reason.constructor.name : typeof reason,
+  })
 }
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -285,14 +313,10 @@ export async function runQualityGates(
   ])
 
   if (similarityResult.status === 'rejected') {
-    console.warn('Semantic similarity gate unavailable, continuing without it', {
-      type: similarityResult.reason instanceof Error ? similarityResult.reason.constructor.name : typeof similarityResult.reason,
-    })
+    warnGateUnavailable('Semantic similarity', client.baseURL, similarityResult.reason)
   }
   if (judgeResult.status === 'rejected') {
-    console.warn('Entailment gate unavailable, continuing without it', {
-      type: judgeResult.reason instanceof Error ? judgeResult.reason.constructor.name : typeof judgeResult.reason,
-    })
+    warnGateUnavailable('Entailment', client.baseURL, judgeResult.reason)
   }
 
   const similarity = similarityResult.status === 'fulfilled' ? similarityResult.value : null

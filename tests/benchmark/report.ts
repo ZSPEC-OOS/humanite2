@@ -36,6 +36,11 @@ export function formatSummary(report: BenchmarkReport): string {
     `Total tokens: ${s.totalTokens.toLocaleString()}`,
     `Estimated cost: $${s.totalEstimatedCostUsd.toFixed(4)}`,
     `Prohibited-change violations: ${s.prohibitedChangeViolations}`,
+    `Candidate disqualification rate: ${pct(s.candidateDisqualificationRate)}${
+      Object.keys(s.candidateDisqualifiedByStage).length
+        ? ' (' + Object.entries(s.candidateDisqualifiedByStage).map(([stage, count]) => `${stage}: ${count}`).join(', ') + ')'
+        : ''
+    }`,
     '',
     'Detector AI-rate at fixed false-positive rate:',
     ...Object.entries(s.detectorAiRateAtFixedFpr).map(([id, rate]) =>

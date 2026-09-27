@@ -87,6 +87,19 @@ export interface StyleRule {
   text: string
 }
 
+// Which layer of the domain > genre > audience > tone chain a compiled
+// rule actually came from — attached by compileStyle (never present on a
+// raw profile's own static StyleRule[]) so promptBuilder can render
+// override rules (domain/genre/audience — anything that outranks tone) as
+// non-negotiable constraints, distinct from tone's own softer guidance.
+// This is purely a rendering concern: precedence itself is already fully
+// resolved by the time compileStyle returns `rules`.
+export type StyleRuleSource = 'domain' | 'genre' | 'audience' | 'tone'
+
+export interface CompiledStyleRule extends StyleRule {
+  source: StyleRuleSource
+}
+
 // A short excerpt illustrating a profile's register. Populated directly on
 // each profile as static data (never fetched at runtime from
 // tests/benchmark/reference/ — production code must not depend on test
@@ -142,6 +155,6 @@ export interface CompiledStyle {
   domain: Domain
   genre: Genre | null
   audience: Audience | null
-  rules: StyleRule[]
+  rules: CompiledStyleRule[]
   examples: StyleExample[]
 }

@@ -41,6 +41,7 @@ function chunk(overrides: Partial<ChunkResult> = {}): ChunkResult {
     repair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
     claimVerification: null,
     relationRepair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
+    candidateSelection: { ranCandidateSearch: false, candidateCount: 1, disqualifiedAt: null },
     ...overrides,
   }
 }

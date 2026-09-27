@@ -27,11 +27,23 @@ env:
   DEEPSEEK_MODEL: ${{ secrets.OPENAI_MODEL }}
 
 jobs:
+  # 300 items at up to 9 model calls per chunk, in one job, ran long enough
+  # to hit this job's own timeout before finishing — split into one 50-item
+  # shard per domain instead, each with its own smaller timeout and its own
+  # checkpoint (BENCHMARK_CHECKPOINT_PATH, written after every item — see
+  # liveBenchmark.test.ts), so a single slow/unlucky domain can no longer
+  # sink the whole baseline run. baseline-aggregate below recombines all 6
+  # shards into one report with the same shape a single 300-item run would
+  # have produced.
   baseline:
     if: ${{ inputs.suite == 'launch-readiness' || inputs.suite == 'baseline-300' }}
-    name: 300-item baseline
+    name: Baseline shard - ${{ matrix.domain }}
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        domain: [general, academic, business, technical, medical, legal]
 
     steps:
       - uses: actions/checkout@v4
@@ -48,20 +60,79 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run 300-item live benchmark
+      - name: Run 50-item baseline shard (${{ matrix.domain }})
         shell: bash
+        env:
+          BENCHMARK_DOMAIN: ${{ matrix.domain }}
         run: |
           set -o pipefail
-          pnpm benchmark 2>&1 | tee benchmark-baseline.log
+          pnpm benchmark 2>&1 | tee "benchmark-baseline-${{ matrix.domain }}.log"
 
-      - name: Save benchmark results
+      - name: Save shard results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: humanite-baseline-results
+          name: humanite-baseline-results-${{ matrix.domain }}
           path: |
             tests/benchmark/results/
-            benchmark-baseline.log
+            benchmark-baseline-${{ matrix.domain }}.log
+          if-no-files-found: warn
+
+  baseline-aggregate:
+    name: Aggregate baseline shards
+    needs: baseline
+    # Runs whenever the baseline matrix actually executed (success, partial
+    # failure, or a mix) so one slow/failed domain doesn't also block
+    # combining the shards that DID finish — but not when a different
+    # `suite` was selected and baseline itself never ran.
+    if: ${{ always() && needs.baseline.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download all baseline shard artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: humanite-baseline-results-*
+          path: shard-artifacts
+
+      - name: Collect shard reports into one directory
+        shell: bash
+        run: |
+          mkdir -p combined-shards
+          find shard-artifacts -path "*/results/shard-*.json" -exec cp {} combined-shards/ \;
+          ls -la combined-shards
+
+      - name: Aggregate shards into one combined report
+        shell: bash
+        env:
+          BENCHMARK_SHARD_DIR: ${{ github.workspace }}/combined-shards
+        run: |
+          set -o pipefail
+          pnpm benchmark:aggregate 2>&1 | tee benchmark-aggregate.log
+
+      - name: Save combined report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: humanite-baseline-combined
+          path: |
+            tests/benchmark/results/combined.json
+            benchmark-aggregate.log
           if-no-files-found: warn
 
   acceptance:

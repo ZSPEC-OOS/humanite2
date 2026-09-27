@@ -17,8 +17,14 @@ import { CORPUS } from '../corpus'
 const LIVE = process.env.RUN_LIVE_BENCHMARK === 'true'
 const CHUNK_MAX_CHARS = 24_000
 const MAX_GATE_RETRIES = 2
-const SAMPLE_SIZE = 8
+// n=8 made a ">= 90%" requirement effectively ">= 100%" (ceil(8*0.9) = 8),
+// which is not what "90% of benchmark items" means and made the test fail
+// on a single stochastic model miss. 20 is small enough to run in the live
+// benchmark's time budget but large enough that ceil(20*0.9) = 18 actually
+// tolerates up to 2 misses — the acceptance criterion's real intent.
+const SAMPLE_SIZE = 20
 const PASS_THRESHOLD = 0.9
+const passThreshold = (n: number) => Math.ceil(n * PASS_THRESHOLD)
 
 async function humanizeWithSettings(
   client: OpenAI,
@@ -63,12 +69,12 @@ describe.skipIf(!LIVE)('style compiler acceptance — tone/domain changes produc
         if (c.hedge_density < a.hedge_density) hedgeLower++
       }
 
-      const threshold = Math.ceil(items.length * PASS_THRESHOLD)
+      const threshold = passThreshold(items.length)
       expect(contractionUp, 'contraction rate should rise from academic to casual').toBeGreaterThanOrEqual(threshold)
       expect(sentenceShorter, 'sentence length should fall from academic to casual').toBeGreaterThanOrEqual(threshold)
       expect(hedgeLower, 'hedge density should fall from academic to casual').toBeGreaterThanOrEqual(threshold)
     },
-    { timeout: 20 * 60 * 1000 },
+    { timeout: 45 * 60 * 1000 },
   )
 
   it(
@@ -103,9 +109,9 @@ describe.skipIf(!LIVE)('style compiler acceptance — tone/domain changes produc
         if (legalDiag.contraction_rate < generalDiag.contraction_rate) contractionDown++
       }
 
-      const threshold = Math.ceil(n * PASS_THRESHOLD)
+      const threshold = passThreshold(n)
       expect(contractionDown, 'contraction rate should be lower under the legal domain than the general domain').toBeGreaterThanOrEqual(threshold)
     },
-    { timeout: 20 * 60 * 1000 },
+    { timeout: 45 * 60 * 1000 },
   )
 })
