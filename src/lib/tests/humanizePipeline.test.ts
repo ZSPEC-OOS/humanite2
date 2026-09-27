@@ -133,6 +133,7 @@ function chunk(overrides: Partial<ChunkResult> = {}): ChunkResult {
     repair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
     claimVerification: { checked: 0, failed: 0, issues: [] },
     relationRepair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
+    candidateSelection: { ranCandidateSearch: false, candidateCount: 1, disqualifiedAt: null },
     ...overrides,
   }
 }
@@ -322,6 +323,37 @@ describe('aggregateChunkResults — truncation', () => {
     // (see humanizeChunk) — the aggregate reflects that without any special
     // casing here.
     expect(agg.passed).toBe(false)
+  })
+})
+
+describe('aggregateChunkResults — candidate selection telemetry', () => {
+  it('reports a null disqualification_rate when no chunk ran candidate search (every chunk used the single-candidate retry loop)', () => {
+    const agg = aggregateChunkResults([chunk(), chunk()])
+    expect(agg.candidate_selection).toEqual({
+      chunks_with_candidate_search: 0,
+      chunks_all_disqualified: 0,
+      disqualification_rate: null,
+      disqualified_by_stage: {},
+      total_candidates_generated: 2,
+    })
+  })
+
+  it('computes the disqualification rate and per-stage breakdown across chunks that ran candidate search', () => {
+    const results = [
+      chunk({ candidateSelection: { ranCandidateSearch: true, candidateCount: 3, disqualifiedAt: null } }),
+      chunk({ candidateSelection: { ranCandidateSearch: true, candidateCount: 3, disqualifiedAt: 'entity_preservation' } }),
+      chunk({ candidateSelection: { ranCandidateSearch: true, candidateCount: 3, disqualifiedAt: 'semantic_similarity' } }),
+      // Not part of the candidate-search funnel at all — must not dilute the rate.
+      chunk({ candidateSelection: { ranCandidateSearch: false, candidateCount: 1, disqualifiedAt: null } }),
+    ]
+    const agg = aggregateChunkResults(results)
+    expect(agg.candidate_selection).toEqual({
+      chunks_with_candidate_search: 3,
+      chunks_all_disqualified: 2,
+      disqualification_rate: 0.6667,
+      disqualified_by_stage: { entity_preservation: 1, semantic_similarity: 1 },
+      total_candidates_generated: 10,
+    })
   })
 })
 
@@ -581,6 +613,8 @@ describe('humanizeChunk — Phase 8 candidate generation and selection', () => {
     expect(result.gate?.passed).toBe(true)
     expect(result.gate?.tone_alignment).toBe(0.9)
     expect(result.retryCount).toBe(0)
+    // A genuine winner emerged — never disqualified at any stage.
+    expect(result.candidateSelection).toEqual({ ranCandidateSearch: true, candidateCount: 2, disqualifiedAt: null })
     // 2 generations + 2 judges + 1 claim verification — no retry-loop calls
     // were spent, and the embedding call is separate (batched, one call).
     expect(chatCreate).toHaveBeenCalledTimes(5)
@@ -638,6 +672,10 @@ describe('humanizeChunk — Phase 8 candidate generation and selection', () => {
     // 2 generations (no stage-1 survivor, so no batched similarity call) +
     // 1 fallback judge + 1 claim verification.
     expect(chatCreate).toHaveBeenCalledTimes(4)
+    // Telemetry: every candidate was disqualified, and at which stage —
+    // the exact visibility a benchmark run needs to tell "every candidate
+    // was disqualified" apart as a rare edge case or a routine occurrence.
+    expect(result.candidateSelection).toEqual({ ranCandidateSearch: true, candidateCount: 2, disqualifiedAt: 'entity_preservation' })
   })
 
   it('never falls back to the single-candidate retry loop\'s corrective addendum at intensity >= 4', async () => {

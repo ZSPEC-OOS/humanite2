@@ -182,6 +182,32 @@ export interface ClaimVerificationSummary {
   issues: string[]
 }
 
+// The specific funnel stage (see selectBestCandidate) where EVERY candidate
+// was disqualified, forcing fallbackToScoredCandidate to ship the
+// least-bad one instead of a genuine winner — null when a candidate
+// actually won cleanly, or when the single-candidate retry loop ran
+// instead (there was never more than one candidate to disqualify from).
+export type CandidateDisqualificationStage = 'entity_preservation' | 'semantic_similarity' | 'entailment' | null
+
+// Visibility into Phase 8's candidate-search funnel, surfaced per chunk so
+// a benchmark run can measure how often (and at which stage) every
+// candidate gets disqualified — rather than that only being visible as an
+// ephemeral console.warn during a live run. Investigating a high
+// disqualification rate is meant to prompt strengthening prompt
+// construction (the model is routinely violating a locked span, or
+// drifting semantically) rather than loosening the gate that catches it.
+export interface CandidateSelectionSummary {
+  // False for the single-candidate retry loop path (candidateCountForIntensity
+  // returns 1, at intensity 1-3) — that path never generates more than one
+  // candidate to disqualify anything from.
+  ranCandidateSearch: boolean
+  // How many independent candidates were generated for this chunk (1 for
+  // the single-candidate retry loop, candidateCountForIntensity(intensity)
+  // otherwise).
+  candidateCount: number
+  disqualifiedAt: CandidateDisqualificationStage
+}
+
 export interface ChunkResult {
   text: string
   substitutions: number
@@ -205,6 +231,7 @@ export interface ChunkResult {
   // fabricated "0 claims checked" standing in for "didn't run".
   claimVerification: ClaimVerificationSummary | null
   relationRepair: RelationRepairSummary
+  candidateSelection: CandidateSelectionSummary
 }
 
 // ── Phase 8: candidate generation and selection ──────────────────────────────
@@ -260,6 +287,7 @@ interface SelectionOutcome {
   best: { text: string; substitutions: number; modelUsed: string; gate: QualityScores; truncated: boolean } | null
   lastAttempt: CandidateAttempt
   gatesUnavailable: boolean
+  candidateSelection: CandidateSelectionSummary
 }
 
 type CandidateWithEntity = CandidateAttempt & { entity: ReturnType<typeof checkEntityOverlap> }
@@ -278,13 +306,15 @@ async function fallbackToScoredCandidate(
   tone: string,
   domain: string,
   candidates: CandidateWithEntity[],
-  disqualifiedAt: string,
+  disqualifiedAt: CandidateDisqualificationStage,
   lastAttempt: CandidateAttempt,
+  originalCandidateCount: number,
 ): Promise<SelectionOutcome> {
   const chosen = candidates.reduce((a, b) => (b.entity.score > a.entity.score ? b : a))
   console.warn(`Candidate selection: every candidate was disqualified at the ${disqualifiedAt} stage — shipping the least-bad one for repair to work on`, {
     candidateCount: candidates.length,
   })
+  const candidateSelection: CandidateSelectionSummary = { ranCandidateSearch: true, candidateCount: originalCandidateCount, disqualifiedAt }
 
   try {
     const gate = await runQualityGates(client, judgeModel, sanitizedText, chosen.text, factLocks, undefined, { tone, domain })
@@ -292,12 +322,13 @@ async function fallbackToScoredCandidate(
       best: { text: chosen.text, substitutions: chosen.substitutions, modelUsed: chosen.modelUsed, gate, truncated: chosen.truncated },
       lastAttempt,
       gatesUnavailable: false,
+      candidateSelection,
     }
   } catch (err) {
     console.warn('Quality gates unavailable for the fallback candidate, shipping unscored output', {
       type: err instanceof Error ? err.constructor.name : typeof err,
     })
-    return { best: null, lastAttempt: chosen, gatesUnavailable: true }
+    return { best: null, lastAttempt: chosen, gatesUnavailable: true, candidateSelection }
   }
 }
 
@@ -342,7 +373,7 @@ async function selectBestCandidate(
     !c.truncated && c.entity.score >= DEFAULT_THRESHOLDS.entityOverlap && validateFactLedger(sanitizedText, c.text).passed,
   )
   if (stage1Survivors.length === 0) {
-    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage1, 'entity_preservation', lastAttempt)
+    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage1, 'entity_preservation', lastAttempt, candidateCount)
   }
 
   // Phase 9: gates choose infrastructure by capability — resolved once for
@@ -377,7 +408,7 @@ async function selectBestCandidate(
     ? stage1Survivors.filter(c => similarityByCandidate.get(c)! >= DEFAULT_THRESHOLDS.semanticSimilarity)
     : stage1Survivors
   if (stage2Survivors.length === 0) {
-    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage1Survivors, 'semantic_similarity', lastAttempt)
+    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage1Survivors, 'semantic_similarity', lastAttempt, candidateCount)
   }
 
   // Stage 3: the combined structured judge call — survivors only, and
@@ -401,9 +432,9 @@ async function selectBestCandidate(
       // The judge is unavailable entirely, not merely failing individual
       // candidates on entailment — matches the single-candidate path's own
       // gatesUnavailable convention rather than silently shipping unjudged.
-      return { best: null, lastAttempt, gatesUnavailable: true }
+      return { best: null, lastAttempt, gatesUnavailable: true, candidateSelection: { ranCandidateSearch: true, candidateCount, disqualifiedAt: null } }
     }
-    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage2Survivors, 'entailment', lastAttempt)
+    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage2Survivors, 'entailment', lastAttempt, candidateCount)
   }
 
   // Rank survivors by the plan's weighted formula
@@ -451,6 +482,7 @@ async function selectBestCandidate(
     best: { text: candidate.text, substitutions: candidate.substitutions, modelUsed: candidate.modelUsed, gate, truncated: candidate.truncated },
     lastAttempt,
     gatesUnavailable: false,
+    candidateSelection: { ranCandidateSearch: true, candidateCount, disqualifiedAt: null },
   }
 }
 
@@ -584,6 +616,7 @@ export async function humanizeChunk(
   let lastAttempt: { text: string; substitutions: number; modelUsed: string; truncated: boolean }
   let retryCount = 0
   let gatesUnavailable = false
+  let candidateSelection: CandidateSelectionSummary
 
   if (candidateCount > 1) {
     // Phase 8: generate several independent candidates and select the best
@@ -593,6 +626,7 @@ export async function humanizeChunk(
     best = selection.best
     lastAttempt = selection.lastAttempt
     gatesUnavailable = selection.gatesUnavailable
+    candidateSelection = selection.candidateSelection
   } else {
     const retryLoop = await runSingleCandidateRetryLoop(
       client, model, judgeModel, fallbackText, sanitizedText, factLocks, intensity, tone, domain, maxRetries, genre, audience, documentContext,
@@ -601,6 +635,7 @@ export async function humanizeChunk(
     lastAttempt = retryLoop.lastAttempt
     retryCount = retryLoop.retryCount
     gatesUnavailable = retryLoop.gatesUnavailable
+    candidateSelection = { ranCandidateSearch: false, candidateCount: 1, disqualifiedAt: null }
   }
 
   if (gatesUnavailable) {
@@ -617,6 +652,7 @@ export async function humanizeChunk(
       repair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
       claimVerification: null,
       relationRepair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
+      candidateSelection,
     }
   }
 
@@ -736,6 +772,7 @@ export async function humanizeChunk(
     retryCount,
     intensityAlignment,
     repair,
+    candidateSelection,
   }
 }
 
@@ -812,6 +849,25 @@ export interface AggregatedQuality {
     succeeded: boolean
     sentences_repaired: number
   }
+  // Visibility into how often, and where, Phase 8's candidate-search
+  // funnel disqualifies every candidate it generates — see
+  // CandidateSelectionSummary. Meant to answer "is the frequently-logged
+  // 'every candidate was disqualified' warning a rare edge case or a
+  // routine occurrence" from a benchmark run's report, rather than only
+  // ever being visible as scattered console.warn lines in a live run's
+  // log. A rising disqualification_rate at entity_preservation is a signal
+  // to strengthen prompt construction (the model is routinely violating a
+  // locked span) — never a reason to loosen the gate that catches it.
+  candidate_selection: {
+    chunks_with_candidate_search: number
+    chunks_all_disqualified: number
+    // null when candidate search never ran for any chunk in this result
+    // set (every chunk used the single-candidate retry loop) — never a
+    // fabricated 0 standing in for "not applicable".
+    disqualification_rate: number | null
+    disqualified_by_stage: Partial<Record<Exclude<CandidateDisqualificationStage, null>, number>>
+    total_candidates_generated: number
+  }
 }
 
 // Sums each category's total/preserved counts and concatenates its missing
@@ -871,6 +927,21 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
     sentences_repaired: results.reduce((sum, r) => sum + r.relationRepair.sentencesRepaired, 0),
   }
 
+  const candidateSearchChunks = results.filter(r => r.candidateSelection.ranCandidateSearch)
+  const allDisqualifiedChunks = candidateSearchChunks.filter(r => r.candidateSelection.disqualifiedAt != null)
+  const disqualifiedByStage: Partial<Record<Exclude<CandidateDisqualificationStage, null>, number>> = {}
+  for (const r of allDisqualifiedChunks) {
+    const stage = r.candidateSelection.disqualifiedAt!
+    disqualifiedByStage[stage] = (disqualifiedByStage[stage] ?? 0) + 1
+  }
+  const candidateSelection = {
+    chunks_with_candidate_search: candidateSearchChunks.length,
+    chunks_all_disqualified: allDisqualifiedChunks.length,
+    disqualification_rate: candidateSearchChunks.length === 0 ? null : round(allDisqualifiedChunks.length / candidateSearchChunks.length),
+    disqualified_by_stage: disqualifiedByStage,
+    total_candidates_generated: results.reduce((sum, r) => sum + r.candidateSelection.candidateCount, 0),
+  }
+
   if (scored.length === 0) {
     return {
       semantic_similarity: null,
@@ -895,6 +966,7 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
       claims_failed: claimsFailed,
       claim_issues: claimIssues,
       relation_repair: relationRepair,
+      candidate_selection: candidateSelection,
     }
   }
 
@@ -940,6 +1012,7 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
     claims_failed: claimsFailed,
     claim_issues: claimIssues,
     relation_repair: relationRepair,
+    candidate_selection: candidateSelection,
   }
 }
 

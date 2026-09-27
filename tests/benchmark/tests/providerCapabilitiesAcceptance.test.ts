@@ -77,7 +77,12 @@ describe.skipIf(!LIVE)('provider capabilities acceptance (Phase 9)', () => {
         // pipeline itself completed and reported honestly on what did.
         expect(typeof agg.degraded).toBe('boolean')
       },
-      60 * 1000,
+      // A live run reached DeepSeek and failed on this timeout, not the
+      // pipeline assertion — a single chunk through a third-party
+      // OpenAI-compatible endpoint can take well over 60s under load,
+      // especially with capability-probe retries in play. 3 minutes gives
+      // real headroom without masking an actually-hung call.
+      3 * 60 * 1000,
     )
   }
 

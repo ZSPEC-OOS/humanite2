@@ -50,6 +50,17 @@ resulting go/no-go call on fine-tuning.
 - `tests/liveBenchmark.test.ts` — the real run, against the full 300-item
   corpus and whichever detectors are configured. Gated behind
   `RUN_LIVE_BENCHMARK=true` (skipped otherwise) since it spends real money.
+  Supports sharding and checkpointing — see "Sharding and checkpointing" below.
+- `aggregateShards.ts` — combines several per-domain shard `BenchmarkReport`s
+  (see below) into one report with the same shape, and the same summary
+  formulas (`buildReport`, exported from `runBenchmark.ts`), a single
+  monolithic run over all their items combined would have produced.
+- `tests/aggregateShards.test.ts` — always-on unit tests for the combination
+  math itself (fixture reports, no I/O, no live calls).
+- `tests/aggregateShardsRunner.test.ts` — the I/O step that actually reads
+  shard files off disk and writes the combined report, gated behind the
+  `BENCHMARK_SHARD_DIR` env var (see below) rather than `RUN_LIVE_BENCHMARK`,
+  since it makes no live calls of its own.
 - `tests/scaleUpSweep.test.ts` — always-on smoke test proving the sweep's
   grid construction (one `runBenchmark` pass per tone x intensity cell)
   with a stubbed client, the same pattern as `runBenchmark.test.ts`.
@@ -76,6 +87,32 @@ key reports an error for that item rather than aborting the whole run.
 The report is written to `tests/benchmark/results/<timestamp>.json` and a
 human-readable summary is printed to the console.
 
+## Sharding and checkpointing
+
+A single 300-item run, at up to 9 model calls per chunk, can run for hours —
+long enough to hit a CI job's own timeout before finishing (this happened in
+practice). `tests/liveBenchmark.test.ts` supports two independent,
+backward-compatible opt-ins to address this:
+
+- **`BENCHMARK_DOMAIN=<domain>`** — runs only that domain's 50-item slice of
+  the corpus instead of the full 300, and writes its report as
+  `tests/benchmark/results/shard-<domain>.json`. Unset (the default), the
+  test runs the full 300-item corpus exactly as before.
+- **Checkpointing** — every item's result is written to a checkpoint file
+  (`tests/benchmark/results/checkpoints/<domain-or-full>.json` by default,
+  or `BENCHMARK_CHECKPOINT_PATH` to override) as soon as it completes. If the
+  job is killed partway through and re-run against the same checkpoint path,
+  already-completed items are loaded from it and skipped rather than re-run
+  and re-billed (`runBenchmark`'s `checkpointPath`/`resumeFromCheckpoint`
+  options).
+
+`.github/workflows/live-benchmark.yml`'s `baseline` job uses both: it's a
+6-way matrix (one job per domain, each with its own 45-minute timeout and its
+own checkpoint), and a follow-up `baseline-aggregate` job downloads every
+shard's artifact and runs `pnpm benchmark:aggregate`
+(`BENCHMARK_SHARD_DIR=<downloaded shards>`) to recombine them into one
+300-item report, written to `tests/benchmark/results/combined.json`.
+
 ## What's tracked
 
 Per the plan: fact preservation (`entityPreservation`), semantic fidelity
@@ -87,3 +124,15 @@ fixed-false-positive-rate figure is `null` for any detector until the human
 reference set is populated — reporting a number derived from zero or
 placeholder human passages would be exactly the kind of fabricated
 precision the plan's governing principles rule out.
+
+Also tracked: **candidate-selection telemetry**
+(`summary.candidateDisqualificationRate` and
+`summary.candidateDisqualifiedByStage`) — how often, and at which funnel
+stage (`entity_preservation`, `semantic_similarity`, or `entailment`), Phase
+8's candidate-search funnel disqualifies every candidate it generates for a
+chunk, forcing a least-bad-candidate fallback instead of a genuine winner.
+This surfaces in the report what was previously only visible as scattered
+`console.warn` lines during a live run. A high or rising rate — especially
+at `entity_preservation` — is a signal to strengthen prompt construction (the
+model is routinely violating a locked span), not a reason to loosen the
+gate that catches it.

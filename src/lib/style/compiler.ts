@@ -2,7 +2,11 @@ import { TONE_PROFILES } from './toneProfiles'
 import { DOMAIN_PROFILES } from './domainProfiles'
 import { GENRE_PROFILES } from './genreProfiles'
 import { AUDIENCE_PROFILES } from './audienceProfiles'
-import type { Audience, CompiledStyle, Domain, Genre, StyleRule, Tone } from './types'
+import type { Audience, CompiledStyle, CompiledStyleRule, Domain, Genre, StyleRule, StyleRuleSource, Tone } from './types'
+
+function tagSource(rules: StyleRule[], source: StyleRuleSource): CompiledStyleRule[] {
+  return rules.map(rule => ({ ...rule, source }))
+}
 
 // Turns a (tone, domain, genre?, audience?) combination into explicit,
 // composable rules — replacing the previous "Tone: X\nDomain: Y" flat
@@ -23,21 +27,21 @@ export function compileStyle(tone: Tone, domain: Domain, genre?: Genre | null, a
   const genreProfile = genre ? GENRE_PROFILES[genre] : null
   const audienceProfile = audience ? AUDIENCE_PROFILES[audience] : null
 
-  let rules: StyleRule[] = [...toneProfile.rules]
+  let rules: CompiledStyleRule[] = tagSource(toneProfile.rules, 'tone')
   let examples = [...toneProfile.examples]
 
   if (audienceProfile) {
     rules = rules.filter(rule => !audienceProfile.overrides.includes(rule.tag))
-    rules = [...rules, ...audienceProfile.rules]
+    rules = [...rules, ...tagSource(audienceProfile.rules, 'audience')]
     examples = [...examples, ...audienceProfile.examples]
   }
   if (genreProfile) {
     rules = rules.filter(rule => !genreProfile.overrides.includes(rule.tag))
-    rules = [...rules, ...genreProfile.rules]
+    rules = [...rules, ...tagSource(genreProfile.rules, 'genre')]
     examples = [...examples, ...genreProfile.examples]
   }
   rules = rules.filter(rule => !domainProfile.overrides.includes(rule.tag))
-  rules = [...rules, ...domainProfile.rules]
+  rules = [...rules, ...tagSource(domainProfile.rules, 'domain')]
   examples = [...examples, ...domainProfile.examples]
 
   return {
