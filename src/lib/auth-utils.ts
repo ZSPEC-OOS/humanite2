@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { randomBytes, createHash } from 'crypto'
 import bcrypt from 'bcryptjs'
-import { isGoldTier } from './accountTier'
+import { isGoldTier, isA2HAdmin } from './accountTier'
 
 const ACCESS_EXPIRE_MINUTES = 15
 
@@ -34,6 +34,7 @@ export async function issueAccessToken(
     tier,
     scopes: scopesForTier(tier),
     region,
+    a2h_admin: isA2HAdmin(email, tier),
   })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(userId)

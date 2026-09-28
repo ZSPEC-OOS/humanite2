@@ -82,11 +82,12 @@ interface JWTClaims {
   tier: string
   region: string
   scopes: string[]
+  a2h_admin?: boolean
 }
 
 function adoptSession(data: TokenResponse) {
   const claims = jwtDecode<JWTClaims>(data.access_token)
-  useUserStore.getState().setAuth(data.access_token, claims.sub, claims.tier, claims.region, claims.scopes)
+  useUserStore.getState().setAuth(data.access_token, claims.sub, claims.tier, claims.region, claims.scopes, Boolean(claims.a2h_admin))
   sessionStorage.setItem(REFRESH_TOKEN_KEY, data.refresh_token)
 }
 

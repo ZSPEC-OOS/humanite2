@@ -7,6 +7,7 @@ export type AuthClaims = {
   region: string
   scopes: string[]
   email_hash: string
+  a2h_admin: boolean
 }
 
 type AuthSuccess = { claims: AuthClaims }
@@ -35,6 +36,7 @@ export async function requireAuth(req: NextRequest): Promise<AuthSuccess | AuthF
         region: payload.region as string,
         scopes: payload.scopes as string[],
         email_hash: payload.email_hash as string,
+        a2h_admin: Boolean(payload.a2h_admin),
       },
     }
   } catch {
