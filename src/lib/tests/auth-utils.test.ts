@@ -80,4 +80,38 @@ describe('issueAccessToken / verifyAccessToken — tier and scope claims', () =>
 
     await expect(verifyAccessToken(wrongSecretToken)).rejects.toThrow()
   })
+
+  describe('a2h_admin claim', () => {
+    it('is signed true only for the Gold admin account, resolved to gold', async () => {
+      const token = await issueAccessToken('user-jd', 'jdzelazny@gmail.com', resolveEffectiveTier('jdzelazny@gmail.com', 'free'), 'us-east1')
+      const payload = await verifyAccessToken(token)
+      expect(payload.a2h_admin).toBe(true)
+    })
+
+    it('is signed false for a different account even if its stored tier is gold', async () => {
+      // Mirrors accountTier.test.ts's isA2HAdmin case: tier='gold' on its
+      // own (e.g. via scripts/setAccountTier.ts) must not grant this.
+      const token = await issueAccessToken('user-2', 'someone-else@example.com', 'gold', 'us-east1')
+      const payload = await verifyAccessToken(token)
+      expect(payload.a2h_admin).toBe(false)
+    })
+
+    it('is signed false for a non-gold account', async () => {
+      const token = await issueAccessToken('user-1', 'user@example.com', 'free', 'us-east1')
+      const payload = await verifyAccessToken(token)
+      expect(payload.a2h_admin).toBe(false)
+    })
+
+    it('rejects a token tampered client-side to forge a2h_admin: true', async () => {
+      const token = await issueAccessToken('user-1', 'user@example.com', 'free', 'us-east1')
+      const [header, payload, signature] = token.split('.')
+      const decoded = JSON.parse(Buffer.from(payload!, 'base64url').toString('utf8'))
+      expect(decoded.a2h_admin).toBe(false)
+      decoded.a2h_admin = true
+      const forgedPayload = Buffer.from(JSON.stringify(decoded)).toString('base64url')
+      const forgedToken = `${header}.${forgedPayload}.${signature}`
+
+      await expect(verifyAccessToken(forgedToken)).rejects.toThrow()
+    })
+  })
 })

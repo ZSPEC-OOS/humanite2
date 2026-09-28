@@ -21,6 +21,7 @@ import { restoreSession }   from '@/lib/api'
 import { ASYNC_MAX_CHARS, SYNC_MAX_CHARS } from '@/lib/limits'
 import { TierBadge } from '@/components/ui/TierBadge'
 import { Logo } from '@/components/ui/Logo'
+import { A2HMenuLink } from '@/components/nav/A2HMenuLink'
 
 const MAX_CHARS = ASYNC_MAX_CHARS
 
@@ -315,6 +316,7 @@ export default function Dashboard() {
               )}
             </button>
             <TierBadge tier={tier} className="flex" />
+            <A2HMenuLink className="text-xs" />
             <button onClick={handleClear}
               className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300 transition-colors">Clear</button>
             <button onClick={handleSignOut}
@@ -589,6 +591,10 @@ export default function Dashboard() {
         {/* Drawer footer actions */}
         <div className="shrink-0 px-5 py-5 border-t border-gray-200 dark:border-gray-800 space-y-1"
           style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}>
+          <A2HMenuLink
+            onClick={() => setMenuOpen(false)}
+            className="block w-full text-left py-2.5 px-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
+          />
           <button
             onClick={() => { setMenuOpen(false); handleClear() }}
             className="w-full text-left text-sm text-gray-500 hover:text-gray-800
