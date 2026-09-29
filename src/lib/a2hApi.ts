@@ -1,9 +1,10 @@
 import { apiFetch } from '@/lib/api'
 import type { BenchmarkTopic, CorpusSource } from '@/lib/a2h/types'
 import type { CreateTopicInput } from '@/lib/a2h/topics'
+import type { DetectorResult } from '@/lib/a2h/baseline'
 import type { Domain } from '@/lib/style/types'
 
-export type { BenchmarkTopic, CorpusSource, CreateTopicInput }
+export type { BenchmarkTopic, CorpusSource, CreateTopicInput, DetectorResult }
 
 export async function apiListTopics(domainId?: Domain): Promise<BenchmarkTopic[]> {
   const qs = domainId ? `?domainId=${domainId}` : ''
@@ -50,4 +51,21 @@ export async function apiFreezeSource(topicId: string, targetWords: number): Pro
     body: JSON.stringify({ topicId, targetWords }),
   })
   return data.source
+}
+
+export async function apiListBaselines(domainId?: Domain, corpusVersion?: string): Promise<Record<string, DetectorResult>> {
+  const params = new URLSearchParams()
+  if (domainId) params.set('domainId', domainId)
+  if (corpusVersion) params.set('corpusVersion', corpusVersion)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const data = await apiFetch<{ baselines: Record<string, DetectorResult> }>(`/admin/a2h/corpus/baseline${qs}`)
+  return data.baselines
+}
+
+export async function apiAcquireBaseline(topicId: string, targetWords: number, force = false): Promise<DetectorResult> {
+  const data = await apiFetch<{ baseline: DetectorResult }>('/admin/a2h/corpus/baseline', {
+    method: 'POST',
+    body: JSON.stringify({ topicId, targetWords, force }),
+  })
+  return data.baseline
 }

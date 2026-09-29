@@ -22,6 +22,17 @@ export class GPTZeroProvider implements DetectionProvider {
   ) {}
 
   async detect(text: string, _options?: DetectionOptions): Promise<DetectionProviderResult> {
+    const { result } = await this.detectWithRaw(text, _options)
+    return result
+  }
+
+  // Same call as detect(), but also returns the untouched raw provider
+  // response — needed by callers that must retain the complete raw response
+  // for auditability (the A2H benchmark's baseline/post-score acquisition;
+  // see its spec's "Immutable raw text + raw detector responses" data
+  // strategy). Ordinary product code (scan/humanize) has no use for the raw
+  // payload and should keep calling detect().
+  async detectWithRaw(text: string, _options?: DetectionOptions): Promise<{ result: DetectionProviderResult; raw: unknown }> {
     if (!this.apiKey) {
       throw new DetectionProviderError('PROVIDER_UNAUTHORIZED', 'GPTZERO_API_KEY is not configured.')
     }
@@ -62,7 +73,7 @@ export class GPTZeroProvider implements DetectionProvider {
       throw new DetectionProviderError('INVALID_PROVIDER_RESPONSE', 'GPTZero returned a response that was not valid JSON.')
     }
 
-    return normalizeGPTZero(raw, text)
+    return { result: normalizeGPTZero(raw, text), raw }
   }
 }
 
