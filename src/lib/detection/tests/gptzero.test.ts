@@ -96,4 +96,22 @@ describe('GPTZeroProvider', () => {
     const provider = new GPTZeroProvider('test-key')
     await expect(provider.detect('sample text')).rejects.toBeInstanceOf(DetectionProviderError)
   })
+
+  describe('detectWithRaw', () => {
+    it('returns both the normalized result and the untouched raw response body', async () => {
+      const body = { classification: 'ai', class_probabilities: { human: 0.05, ai: 0.9, mixed: 0.05 } }
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, body)))
+
+      const provider = new GPTZeroProvider('test-key')
+      const { result, raw } = await provider.detectWithRaw('sample text')
+      expect(result.classification).toBe('ai-generated')
+      expect(raw).toEqual(body)
+    })
+
+    it('throws the same mapped errors detect() does', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(429, { message: 'slow down' })))
+      const provider = new GPTZeroProvider('test-key')
+      await expect(provider.detectWithRaw('sample text')).rejects.toMatchObject({ code: 'PROVIDER_RATE_LIMITED' })
+    })
+  })
 })

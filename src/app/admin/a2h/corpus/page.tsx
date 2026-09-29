@@ -3,7 +3,11 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { DOMAINS, type Domain } from '@/lib/style/types'
 import { LENGTH_LADDER, DEFAULT_CORPUS_VERSION } from '@/lib/a2h/types'
-import { apiListTopics, apiListCorpus, apiGenerateSource, apiFreezeSource, type BenchmarkTopic, type CorpusSource } from '@/lib/a2hApi'
+import {
+  apiListTopics, apiListCorpus, apiGenerateSource, apiFreezeSource,
+  apiListBaselines, apiAcquireBaseline,
+  type BenchmarkTopic, type CorpusSource, type DetectorResult,
+} from '@/lib/a2hApi'
 import { Spinner } from '@/components/ui/Spinner'
 
 type CellKey = string
@@ -22,6 +26,7 @@ export default function A2HCorpusPage() {
   const [domain, setDomain] = useState<Domain>('general')
   const [topics, setTopics] = useState<BenchmarkTopic[]>([])
   const [sources, setSources] = useState<Record<CellKey, CorpusSource>>({})
+  const [baselines, setBaselines] = useState<Record<string, DetectorResult>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<{ topic: BenchmarkTopic; targetWords: number } | null>(null)
@@ -32,13 +37,14 @@ export default function A2HCorpusPage() {
     setLoading(true)
     setError(null)
     setSelected(null)
-    Promise.all([apiListTopics(domain), apiListCorpus(domain, DEFAULT_CORPUS_VERSION)])
-      .then(([topicsData, sourcesData]) => {
+    Promise.all([apiListTopics(domain), apiListCorpus(domain, DEFAULT_CORPUS_VERSION), apiListBaselines(domain, DEFAULT_CORPUS_VERSION)])
+      .then(([topicsData, sourcesData, baselinesData]) => {
         if (cancelled) return
         setTopics(topicsData)
         const map: Record<CellKey, CorpusSource> = {}
         for (const s of sourcesData) map[cellKey(s.topicId, s.targetWords)] = s
         setSources(map)
+        setBaselines(baselinesData)
       })
       .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load corpus data.') })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -46,6 +52,7 @@ export default function A2HCorpusPage() {
   }, [domain])
 
   const selectedSource = selected ? sources[cellKey(selected.topic.id, selected.targetWords)] : undefined
+  const selectedBaseline = selectedSource ? baselines[selectedSource.id] : undefined
 
   async function handleGenerate(force: boolean) {
     if (!selected) return
@@ -70,6 +77,20 @@ export default function A2HCorpusPage() {
       setSources(prev => ({ ...prev, [cellKey(source.topicId, source.targetWords)]: source }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Freeze failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleAcquireBaseline(force: boolean) {
+    if (!selected) return
+    setBusy(true)
+    setError(null)
+    try {
+      const baseline = await apiAcquireBaseline(selected.topic.id, selected.targetWords, force)
+      setBaselines(prev => ({ ...prev, [baseline.sourceId]: baseline }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Baseline acquisition failed.')
     } finally {
       setBusy(false)
     }
@@ -206,9 +227,33 @@ export default function A2HCorpusPage() {
                 {selectedSource.text}
               </div>
             )}
+
+            {selectedSource?.status === 'frozen' && (
+              <div className="border-t border-gray-200 dark:border-gray-800 pt-3 flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">GPTZero Baseline</h3>
+                  {selectedBaseline ? (
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                      {selectedBaseline.classification} · AI {formatPct(selectedBaseline.aiProbability)} · Human {formatPct(selectedBaseline.humanProbability)}
+                      {selectedBaseline.mixedProbability != null && ` · Mixed ${formatPct(selectedBaseline.mixedProbability)}`}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Not yet acquired</p>
+                  )}
+                </div>
+                <button onClick={() => handleAcquireBaseline(Boolean(selectedBaseline))} disabled={busy}
+                  className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40 shrink-0">
+                  {busy ? 'Working…' : selectedBaseline ? 'Re-acquire' : 'Acquire baseline'}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
     </div>
   )
+}
+
+function formatPct(value: number | null): string {
+  return value == null ? '—' : `${Math.round(value * 100)}%`
 }
