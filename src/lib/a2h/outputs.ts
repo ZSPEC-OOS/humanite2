@@ -14,8 +14,12 @@ const MAX_GATE_RETRIES = 2
 // A2H-11 measures separately, on its own fixture set, not this path.
 const FIXED_TONE = 'balanced'
 
-function outputDocId(sourceId: string, intensity: number): string {
-  return `${sourceId}__I${intensity}`
+// Scoped by runId, not just sourceId x intensity — two Benchmark Runs
+// against the same frozen source (a different model, a repeat for
+// statistical power) must never share or overwrite each other's outputs.
+// Enforces UNIQUE(runId, sourceId, intensity) by construction.
+function outputDocId(runId: string, sourceId: string, intensity: number): string {
+  return `${runId}__${sourceId}__${intensity}`
 }
 
 function wordCount(text: string): number {
@@ -23,14 +27,28 @@ function wordCount(text: string): number {
   return trimmed ? trimmed.split(/\s+/).length : 0
 }
 
-export async function getOutput(firestore: Firestore, sourceId: string, intensity: number): Promise<BenchmarkOutput | null> {
-  const doc = await firestore.collection(COLLECTION).doc(outputDocId(sourceId, intensity)).get()
+export async function getOutput(firestore: Firestore, runId: string, sourceId: string, intensity: number): Promise<BenchmarkOutput | null> {
+  const doc = await firestore.collection(COLLECTION).doc(outputDocId(runId, sourceId, intensity)).get()
   return doc.exists ? (doc.data() as BenchmarkOutput) : null
 }
 
-export async function listOutputsForSource(firestore: Firestore, sourceId: string): Promise<BenchmarkOutput[]> {
-  const snap = await firestore.collection(COLLECTION).where('sourceId', '==', sourceId).get()
+// An output's own id already IS its deterministic (runId, sourceId,
+// intensity) key — a caller that only holds that id (a post_gptzero or
+// test_evaluation BenchmarkJob carries outputId directly) can fetch it
+// without re-deriving the other parts.
+export async function getOutputById(firestore: Firestore, outputId: string): Promise<BenchmarkOutput | null> {
+  const doc = await firestore.collection(COLLECTION).doc(outputId).get()
+  return doc.exists ? (doc.data() as BenchmarkOutput) : null
+}
+
+export async function listOutputsForSource(firestore: Firestore, runId: string, sourceId: string): Promise<BenchmarkOutput[]> {
+  const snap = await firestore.collection(COLLECTION).where('runId', '==', runId).where('sourceId', '==', sourceId).get()
   return snap.docs.map(d => d.data() as BenchmarkOutput).sort((a, b) => a.intensity - b.intensity)
+}
+
+export async function listOutputsForRun(firestore: Firestore, runId: string): Promise<BenchmarkOutput[]> {
+  const snap = await firestore.collection(COLLECTION).where('runId', '==', runId).get()
+  return snap.docs.map(d => d.data() as BenchmarkOutput)
 }
 
 // Best-effort, matching /v1/humanize's own buildDocumentContextSafely — a
@@ -48,29 +66,38 @@ async function safeDocumentContext(client: OpenAI, model: string, text: string):
 }
 
 export interface TransformSourceParams {
+  runId: string
   source: CorpusSource
   intensity: number
   client: OpenAI
   model: string
+  modelProvider: string
 }
 
 // Runs the real Humanize pipeline (preprocess -> humanizeChunk -> document
 // consistency pass — the exact synchronous path /v1/humanize itself takes,
 // since every A2H source is well under SYNC_MAX_CHARS) against a frozen
-// source at one intensity, so this benchmark measures the actual product
-// behavior rather than a simplified stand-in. Only a frozen source
+// source at one intensity, within one Benchmark Run. Only a frozen source
 // qualifies — an un-frozen source's text isn't yet the immutable unit the
 // rest of the benchmark's comparability depends on.
 //
-// Known gap: humanizeChunk doesn't surface completion token usage, so
-// inputTokens/outputTokens/estimatedCostUsd are left null rather than
-// fabricated. Revisit when A2H-17 (Operational Efficiency) is built.
+// Idempotent by default (§26): an existing SUCCESSFUL output for this exact
+// (runId, sourceId, intensity) is returned as-is, without any new model
+// call — this is what makes a resumed run, a retried job, or a page refresh
+// safe from duplicating paid work. A FAILED output always retries freely
+// (no force needed), the same policy corpus.ts's generateSource uses for a
+// validation_failed source. forceOverwrite is reserved for an explicit
+// administrator regeneration of an already-successful output.
+//
+// Known gap: humanizeChunk doesn't surface completion token usage or a
+// distinct per-call count, so inputTokens/outputTokens/estimatedCostUsd/
+// modelCalls are left null rather than fabricated.
 export async function transformSource(
   firestore: Firestore,
   params: TransformSourceParams,
   forceOverwrite = false,
 ): Promise<BenchmarkOutput> {
-  const { source, intensity, client, model } = params
+  const { runId, source, intensity, client, model, modelProvider } = params
   if (source.status !== 'frozen') {
     throw new Error(`Cannot transform a source with status '${source.status}' — only a frozen source qualifies.`)
   }
@@ -78,16 +105,17 @@ export async function transformSource(
     throw new Error('intensity must be an integer between 1 and 10')
   }
 
-  const existing = await getOutput(firestore, source.id, intensity)
+  const existing = await getOutput(firestore, runId, source.id, intensity)
   if (existing && existing.status === 'success' && !forceOverwrite) {
-    throw new Error('An output already exists for this source/intensity — pass force to regenerate.')
+    return existing
   }
 
-  const id = outputDocId(source.id, intensity)
+  const id = outputDocId(runId, source.id, intensity)
   const prep = preprocess(source.text)
   const start = Date.now()
 
   let status: BenchmarkOutputStatus = 'success'
+  let errorCode: string | null = null
   let errorMessage: string | null = null
   let outputText = ''
   let modelUsed = model
@@ -108,12 +136,14 @@ export async function transformSource(
     candidateCount = result.candidateSelection.candidateCount
   } catch (err) {
     status = 'failed'
+    errorCode = err instanceof Error ? err.constructor.name : 'UnknownError'
     errorMessage = err instanceof Error ? err.message : 'Transformation failed.'
   }
 
   const latencyMs = Date.now() - start
   const output: BenchmarkOutput = {
     id,
+    runId,
     corpusProjectId: source.corpusProjectId,
     sourceId: source.id,
     domainId: source.domainId,
@@ -123,15 +153,18 @@ export async function transformSource(
     outputText,
     outputWords: status === 'success' ? wordCount(outputText) : 0,
     outputSha256: status === 'success' ? createHash('sha256').update(outputText).digest('hex') : '',
-    modelUsed,
+    modelProvider,
+    model: modelUsed,
     retryCount,
-    candidateCount,
+    candidateCount: status === 'success' ? candidateCount : null,
+    modelCalls: null,
     latencyMs,
     inputTokens: null,
     outputTokens: null,
     estimatedCostUsd: null,
     generatedAt: new Date().toISOString(),
     status,
+    errorCode,
     errorMessage,
   }
 
