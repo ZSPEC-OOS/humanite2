@@ -9,8 +9,10 @@ export type CreateTopicInput = Omit<BenchmarkTopic, 'id' | 'enabled' | 'createdA
 // Parses and validates a topic-outline submission from the admin form/import
 // — the human-curated content this module exists to store, never generated
 // by this codebase. Kept separate from the API route so it's testable
-// without an HTTP request or a Firestore instance.
-export function parseTopicInput(body: Record<string, unknown>): { input: CreateTopicInput } | { error: string } {
+// without an HTTP request or a Firestore instance. corpusProjectId comes
+// from the route's own resolved project (the URL/session), never from this
+// body, so it isn't validated here.
+export function parseTopicInput(body: Record<string, unknown>): { input: Omit<CreateTopicInput, 'corpusProjectId'> } | { error: string } {
   const domainId = body.domainId
   if (typeof domainId !== 'string' || !DOMAINS.includes(domainId as Domain)) {
     return { error: `domainId must be one of: ${DOMAINS.join(', ')}` }
@@ -48,8 +50,8 @@ export function parseTopicInput(body: Record<string, unknown>): { input: CreateT
   }
 }
 
-export async function listTopics(firestore: Firestore, domainId?: Domain): Promise<BenchmarkTopic[]> {
-  let query: Query<DocumentData> = firestore.collection(COLLECTION)
+export async function listTopics(firestore: Firestore, corpusProjectId: string, domainId?: Domain): Promise<BenchmarkTopic[]> {
+  let query: Query<DocumentData> = firestore.collection(COLLECTION).where('corpusProjectId', '==', corpusProjectId)
   if (domainId) query = query.where('domainId', '==', domainId)
   const snap = await query.get()
   return snap.docs
@@ -57,6 +59,10 @@ export async function listTopics(firestore: Firestore, domainId?: Domain): Promi
     .sort((a, b) => a.domainId.localeCompare(b.domainId) || a.topicNumber - b.topicNumber)
 }
 
+// Topic ids are opaque Firestore auto-ids, already globally unique, so a
+// direct get needs no project scoping to avoid cross-project collisions —
+// but every caller of this still only ever holds ids it already fetched
+// through a project-scoped listTopics/createTopic call.
 export async function getTopic(firestore: Firestore, topicId: string): Promise<BenchmarkTopic | null> {
   const doc = await firestore.collection(COLLECTION).doc(topicId).get()
   return doc.exists ? (doc.data() as BenchmarkTopic) : null
@@ -95,7 +101,7 @@ export async function updateTopic(firestore: Firestore, topicId: string, patch: 
 // Used only by outline regeneration (generateOutline's forceOverwrite path)
 // to clear a domain's roster before writing a fresh one — never exposed as
 // its own "delete all" admin action.
-export async function deleteTopicsForDomain(firestore: Firestore, domainId: Domain): Promise<void> {
-  const existing = await listTopics(firestore, domainId)
+export async function deleteTopicsForDomain(firestore: Firestore, corpusProjectId: string, domainId: Domain): Promise<void> {
+  const existing = await listTopics(firestore, corpusProjectId, domainId)
   await Promise.all(existing.map(t => firestore.collection(COLLECTION).doc(t.id).delete()))
 }

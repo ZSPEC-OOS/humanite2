@@ -1,13 +1,13 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { DOMAINS, type Domain } from '@/lib/style/types'
-import { TOPICS_PER_DOMAIN, MAX_TOPICS_PER_DOMAIN, DOMAIN_CODE, DEFAULT_GENERATION_PROMPT_VERSION } from '@/lib/a2h/types'
+import { useSearchParams } from 'next/navigation'
+import { type Domain } from '@/lib/style/types'
+import { MAX_TOPICS_PER_DOMAIN, DOMAIN_CODE, DEFAULT_GENERATION_PROMPT_VERSION } from '@/lib/a2h/types'
 import {
-  apiListTopics, apiCreateTopic, apiUpdateTopic,
-  apiGetDomainConfig, apiSaveDomainTopicCount, apiLockDomain, apiUnlockDomain,
-  apiGenerateOutline, apiExpandOutline, apiRaiseDomainTopicCount,
-  type BenchmarkTopic, type DomainOutlineConfig,
+  apiGetProject, apiListTopics, apiCreateTopic, apiUpdateTopic,
+  apiGenerateOutline, apiExpandOutline,
+  type BenchmarkTopic, type CorpusProject,
 } from '@/lib/a2hApi'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -48,86 +48,56 @@ function topicToForm(topic: BenchmarkTopic): FormState {
 }
 
 export default function A2HTopicsPage() {
-  const [domain, setDomain] = useState<Domain>('general')
+  const projectId = useSearchParams().get('project')
+
+  const [project, setProject] = useState<CorpusProject | null>(null)
+  const [domain, setDomain] = useState<Domain | null>(null)
   const [topics, setTopics] = useState<BenchmarkTopic[]>([])
-  const [domainConfig, setDomainConfig] = useState<DomainOutlineConfig | null>(null)
-  const [countInput, setCountInput] = useState(String(TOPICS_PER_DOMAIN))
-  const [raiseInput, setRaiseInput] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
-  const [countBusy, setCountBusy] = useState(false)
   const [outlineBusy, setOutlineBusy] = useState(false)
 
-  const targetCount = domainConfig?.topicCount ?? TOPICS_PER_DOMAIN
+  useEffect(() => {
+    if (!projectId) { setLoading(false); return }
+    let cancelled = false
+    apiGetProject(projectId)
+      .then(p => {
+        if (cancelled) return
+        setProject(p)
+        setDomain(p.domains[0] ?? null)
+      })
+      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load corpus project.') })
+    return () => { cancelled = true }
+  }, [projectId])
 
   useEffect(() => {
+    if (!projectId || !domain) { setLoading(false); return }
     let cancelled = false
     setLoading(true)
     setError(null)
     setEditingId(null)
-    Promise.all([apiListTopics(domain), apiGetDomainConfig(domain)])
-      .then(([topicsData, config]) => {
-        if (cancelled) return
-        setTopics(topicsData)
-        setDomainConfig(config)
-        setCountInput(String(config?.topicCount ?? TOPICS_PER_DOMAIN))
-        setRaiseInput(String((config?.topicCount ?? TOPICS_PER_DOMAIN) + 10))
-      })
+    apiListTopics(projectId, domain)
+      .then(data => { if (!cancelled) setTopics(data) })
       .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load topics.') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [domain])
+  }, [projectId, domain])
 
-  async function handleSaveCount() {
-    setCountBusy(true)
-    setError(null)
-    try {
-      const config = await apiSaveDomainTopicCount(domain, Number(countInput))
-      setDomainConfig(config)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed.')
-    } finally {
-      setCountBusy(false)
-    }
-  }
-
-  async function handleLockCount() {
-    setCountBusy(true)
-    setError(null)
-    try {
-      const config = await apiLockDomain(domain, Number(countInput))
-      setDomainConfig(config)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Lock failed.')
-    } finally {
-      setCountBusy(false)
-    }
-  }
-
-  async function handleUnlockCount() {
-    setCountBusy(true)
-    setError(null)
-    try {
-      const config = await apiUnlockDomain(domain)
-      setDomainConfig(config)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unlock failed.')
-    } finally {
-      setCountBusy(false)
-    }
-  }
+  const isDraft = project?.status === 'draft'
+  const targetCount = (domain && project?.topicCountByDomain[domain]) ?? 0
 
   async function handleGenerateOutline(force: boolean) {
+    if (!projectId || !domain) return
     if (force && !window.confirm(`Regenerate the outline for ${domain}? This replaces all ${topics.length} existing topics.`)) {
       return
     }
     setOutlineBusy(true)
     setError(null)
     try {
-      const generated = await apiGenerateOutline(domain, force)
+      const generated = await apiGenerateOutline(projectId, domain, force)
       setTopics([...generated].sort((a, b) => a.topicNumber - b.topicNumber))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Outline generation failed.')
@@ -136,32 +106,20 @@ export default function A2HTopicsPage() {
     }
   }
 
-  // Appends new topics up to the (already-raised) locked count — never
-  // touches the existing roster, unlike handleGenerateOutline(true) which
-  // wipes and rerolls everything.
+  // Appends new topics up to the project's configured count for this domain
+  // — never touches the existing roster, unlike handleGenerateOutline(true)
+  // which wipes and rerolls everything.
   async function handleExpandOutline() {
+    if (!projectId || !domain) return
     setOutlineBusy(true)
     setError(null)
     try {
-      const additional = await apiExpandOutline(domain)
+      const additional = await apiExpandOutline(projectId, domain)
       setTopics(prev => [...prev, ...additional].sort((a, b) => a.topicNumber - b.topicNumber))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Outline expansion failed.')
     } finally {
       setOutlineBusy(false)
-    }
-  }
-
-  async function handleRaiseCount() {
-    setCountBusy(true)
-    setError(null)
-    try {
-      const config = await apiRaiseDomainTopicCount(domain, Number(raiseInput))
-      setDomainConfig(config)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Raise failed.')
-    } finally {
-      setCountBusy(false)
     }
   }
 
@@ -176,12 +134,14 @@ export default function A2HTopicsPage() {
   }
 
   async function submit() {
+    if (!projectId || !domain) return
     setSaving(true)
     setError(null)
     try {
       const coreConcepts = form.coreConcepts.split(',').map(c => c.trim()).filter(Boolean)
       if (editingId === '__new__') {
         const created = await apiCreateTopic({
+          corpusProjectId: projectId,
           domainId: domain,
           topicNumber: Number(form.topicNumber),
           title: form.title.trim(),
@@ -216,134 +176,99 @@ export default function A2HTopicsPage() {
     setTopics(prev => prev.map(t => (t.id === topic.id ? updated : t)))
   }
 
+  if (!projectId) {
+    return (
+      <div className="min-h-screen bg-white dark:bg-gray-950 flex items-center justify-center p-6">
+        <div className="text-center space-y-2">
+          <p className="text-sm text-gray-500 dark:text-gray-400">No corpus project selected.</p>
+          <Link href="/admin/a2h" className="text-sm underline text-gray-500 hover:text-gray-800 dark:hover:text-gray-300">Choose a corpus project</Link>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950 p-6">
       <div className="max-w-4xl mx-auto space-y-5">
         <div className="flex items-center justify-between">
           <div>
-            <Link href="/admin/a2h" className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300">← A2H Benchmark</Link>
-            <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mt-1">Topic Outlines</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {topics.length} / {targetCount} defined for {domain}
-            </p>
+            <Link href={`/admin/a2h/corpus-design?project=${projectId}`} className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300">
+              ← {project?.name ?? 'Corpus Design'}
+            </Link>
+            <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mt-1">Topic Blueprint</h1>
+            {domain && <p className="text-sm text-gray-500 dark:text-gray-400">{topics.length} / {targetCount} defined for {domain}</p>}
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
-          {DOMAINS.map(d => (
-            <button
-              key={d}
-              onClick={() => setDomain(d)}
-              className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors capitalize ${
-                d === domain
-                  ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
-                  : 'border-gray-200 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'
-              }`}
-            >
-              {d}
-            </button>
-          ))}
-        </div>
+        {project && (
+          <div className="flex flex-wrap gap-1.5">
+            {project.domains.map(d => (
+              <button
+                key={d}
+                onClick={() => setDomain(d)}
+                className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors capitalize ${
+                  d === domain
+                    ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'
+                }`}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+        )}
 
         {error && (
           <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-2.5">{error}</div>
         )}
 
-        {/* Topic count + outline generation */}
-        <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div>
-              <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Unique topic outlines per domain</h2>
-              {domainConfig?.locked ? (
-                <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">{domainConfig.topicCount} · locked</p>
-              ) : (
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Default {TOPICS_PER_DOMAIN} — lock a count before generating an outline</p>
-              )}
-            </div>
+        {!isDraft && project && (
+          <div className="text-xs text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-900/50 rounded-xl px-4 py-2.5">
+            This project&rsquo;s blueprint is {project.status} — the topic roster is read-only.
+          </div>
+        )}
+
+        {isDraft && domain && targetCount > 0 && (
+          <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {topics.length === 0
+                ? `Generate ${targetCount} topic families for ${domain} in one call.`
+                : topics.length < targetCount
+                  ? `${topics.length} of ${targetCount} generated — ${targetCount - topics.length} additional needed.`
+                  : `${topics.length} topics generated for ${domain}.`}
+            </p>
             <div className="flex items-center gap-2">
-              {domainConfig?.locked ? (
+              {topics.length < targetCount && (
                 <button
-                  onClick={handleUnlockCount}
-                  disabled={countBusy || topics.length > 0}
-                  title={topics.length > 0 ? 'Delete this domain\'s topics before unlocking' : undefined}
+                  onClick={topics.length === 0 ? () => handleGenerateOutline(false) : handleExpandOutline}
+                  disabled={outlineBusy}
+                  className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40"
+                >
+                  {outlineBusy
+                    ? 'Generating…'
+                    : topics.length === 0
+                      ? `Generate ${targetCount} Unique Topics`
+                      : `Generate ${targetCount - topics.length} Additional Topics`}
+                </button>
+              )}
+              {topics.length > 0 && (
+                <button
+                  onClick={() => handleGenerateOutline(true)}
+                  disabled={outlineBusy}
                   className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40"
                 >
-                  {countBusy ? 'Working…' : 'Unlock'}
+                  {outlineBusy ? 'Working…' : 'Regenerate All'}
                 </button>
-              ) : (
-                <>
-                  <input
-                    type="number" min={1} max={MAX_TOPICS_PER_DOMAIN} value={countInput}
-                    onChange={e => setCountInput(e.target.value)}
-                    className="w-20 text-sm rounded-xl px-3 py-2 bg-white border border-gray-300 text-gray-700 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300 focus:outline-none focus:border-gray-900 dark:focus:border-gray-100"
-                  />
-                  <button onClick={handleSaveCount} disabled={countBusy}
-                    className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
-                    Save
-                  </button>
-                  <button onClick={handleLockCount} disabled={countBusy}
-                    className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">
-                    {countBusy ? 'Working…' : 'Lock'}
-                  </button>
-                </>
               )}
             </div>
           </div>
+        )}
 
-          {domainConfig?.locked && (
-            <div className="border-t border-gray-200 dark:border-gray-800 pt-3 space-y-3">
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  {topics.length === 0
-                    ? `Generate ${domainConfig.topicCount} topic families for ${domain} in one call.`
-                    : topics.length < domainConfig.topicCount
-                      ? `${topics.length} of ${domainConfig.topicCount} generated — ${domainConfig.topicCount - topics.length} additional needed.`
-                      : `${topics.length} topics generated for ${domain}.`}
-                </p>
-                <div className="flex items-center gap-2">
-                  {topics.length < domainConfig.topicCount && (
-                    <button
-                      onClick={topics.length === 0 ? () => handleGenerateOutline(false) : handleExpandOutline}
-                      disabled={outlineBusy}
-                      className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40"
-                    >
-                      {outlineBusy
-                        ? 'Generating…'
-                        : topics.length === 0
-                          ? `Generate ${domainConfig.topicCount} Unique Topics`
-                          : `Generate ${domainConfig.topicCount - topics.length} Additional Topics`}
-                    </button>
-                  )}
-                  {topics.length > 0 && (
-                    <button
-                      onClick={() => handleGenerateOutline(true)}
-                      disabled={outlineBusy}
-                      className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40"
-                    >
-                      {outlineBusy ? 'Working…' : 'Regenerate All'}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400 dark:text-gray-500">Raise count to</span>
-                <input
-                  type="number" min={domainConfig.topicCount + 1} max={MAX_TOPICS_PER_DOMAIN} value={raiseInput}
-                  onChange={e => setRaiseInput(e.target.value)}
-                  className="w-20 text-sm rounded-xl px-3 py-1.5 bg-white border border-gray-300 text-gray-700 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300 focus:outline-none focus:border-gray-900 dark:focus:border-gray-100"
-                />
-                <button
-                  onClick={handleRaiseCount}
-                  disabled={countBusy || !(Number(raiseInput) > domainConfig.topicCount)}
-                  className="text-xs font-medium px-3 py-1.5 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40"
-                >
-                  {countBusy ? 'Working…' : 'Raise'}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        {isDraft && domain && targetCount === 0 && (
+          <div className="text-xs text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-900/50 rounded-xl px-4 py-2.5">
+            Set a topic count for {domain} on the Corpus Design page before generating an outline.
+          </div>
+        )}
 
         {loading ? (
           <div className="flex justify-center py-12">
@@ -361,12 +286,14 @@ export default function A2HTopicsPage() {
                     <span className="text-sm text-gray-800 dark:text-gray-200">{topic.title}</span>
                     {!topic.enabled && <span className="ml-2 text-xs text-amber-600 dark:text-amber-400">disabled</span>}
                   </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <button onClick={() => toggleEnabled(topic)} className="text-xs text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
-                      {topic.enabled ? 'Disable' : 'Enable'}
-                    </button>
-                    <button onClick={() => startEdit(topic)} className="text-xs text-gray-500 hover:text-gray-900 dark:hover:text-gray-100">Edit</button>
-                  </div>
+                  {isDraft && (
+                    <div className="flex items-center gap-3 shrink-0">
+                      <button onClick={() => toggleEnabled(topic)} className="text-xs text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+                        {topic.enabled ? 'Disable' : 'Enable'}
+                      </button>
+                      <button onClick={() => startEdit(topic)} className="text-xs text-gray-500 hover:text-gray-900 dark:hover:text-gray-100">Edit</button>
+                    </div>
+                  )}
                 </div>
                 {editingId === topic.id && (
                   <TopicForm form={form} setForm={setForm} onSubmit={submit} onCancel={() => setEditingId(null)} saving={saving} showTopicNumber={false} />
@@ -379,19 +306,21 @@ export default function A2HTopicsPage() {
           </div>
         )}
 
-        {editingId === '__new__' ? (
-          <div className="border border-gray-200 dark:border-gray-800 rounded-2xl">
-            <TopicForm form={form} setForm={setForm} onSubmit={submit} onCancel={() => setEditingId(null)} saving={saving} showTopicNumber />
-          </div>
-        ) : (
-          topics.length < targetCount && (
-            <button
-              onClick={startAdd}
-              className="w-full text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100
-                         border border-dashed border-gray-300 dark:border-gray-700 rounded-2xl py-3 transition-colors"
-            >
-              + Add topic
-            </button>
+        {isDraft && (
+          editingId === '__new__' ? (
+            <div className="border border-gray-200 dark:border-gray-800 rounded-2xl">
+              <TopicForm form={form} setForm={setForm} onSubmit={submit} onCancel={() => setEditingId(null)} saving={saving} showTopicNumber />
+            </div>
+          ) : (
+            topics.length < Math.max(targetCount, topics.length) + 1 && (
+              <button
+                onClick={startAdd}
+                className="w-full text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100
+                           border border-dashed border-gray-300 dark:border-gray-700 rounded-2xl py-3 transition-colors"
+              >
+                + Add topic
+              </button>
+            )
           )
         )}
       </div>

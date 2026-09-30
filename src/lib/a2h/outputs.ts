@@ -114,6 +114,7 @@ export async function transformSource(
   const latencyMs = Date.now() - start
   const output: BenchmarkOutput = {
     id,
+    corpusProjectId: source.corpusProjectId,
     sourceId: source.id,
     domainId: source.domainId,
     topicId: source.topicId,

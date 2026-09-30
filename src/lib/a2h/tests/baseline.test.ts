@@ -23,8 +23,8 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 const FROZEN_SOURCE: CorpusSource = {
-  id: 'CORPUS-V001__topic-1__100',
-  corpusVersion: 'CORPUS-V001',
+  id: 'project-1__topic-1__100',
+  corpusProjectId: 'project-1',
   domainId: 'general',
   topicId: 'topic-1',
   targetWords: 100,
@@ -61,6 +61,7 @@ describe('acquireBaseline', () => {
     const baseline = await acquireBaseline(firestore, FROZEN_SOURCE, 'test-key')
 
     expect(baseline.sourceId).toBe(FROZEN_SOURCE.id)
+    expect(baseline.corpusProjectId).toBe(FROZEN_SOURCE.corpusProjectId)
     expect(baseline.detector).toBe('gptzero')
     expect(baseline.classification).toBe('ai-generated')
     expect(baseline.aiProbability).toBe(0.85)
@@ -113,6 +114,7 @@ describe('listBaselines', () => {
 
 const SUCCESSFUL_OUTPUT: BenchmarkOutput = {
   id: `${FROZEN_SOURCE.id}__I5`,
+  corpusProjectId: FROZEN_SOURCE.corpusProjectId,
   sourceId: FROZEN_SOURCE.id,
   domainId: 'general',
   topicId: 'topic-1',
@@ -151,6 +153,7 @@ describe('acquirePostScore', () => {
     const postScore = await acquirePostScore(firestore, SUCCESSFUL_OUTPUT, 'test-key')
     expect(postScore.outputId).toBe(SUCCESSFUL_OUTPUT.id)
     expect(postScore.sourceId).toBe(FROZEN_SOURCE.id)
+    expect(postScore.corpusProjectId).toBe(FROZEN_SOURCE.corpusProjectId)
     expect(postScore.classification).toBe('human-written')
 
     const fetched = await getPostScore(firestore, SUCCESSFUL_OUTPUT.id)

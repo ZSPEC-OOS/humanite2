@@ -6,15 +6,14 @@ import { getUserApiConfig } from '@/lib/userApiConfig'
 import { getSource } from '@/lib/a2h/corpus'
 import { getOutput, listOutputsForSource } from '@/lib/a2h/outputs'
 import { acquirePostScore, listPostScores } from '@/lib/a2h/baseline'
-import { DEFAULT_CORPUS_VERSION } from '@/lib/a2h/types'
 
 export const maxDuration = 60
 
 interface PostScoreBody {
+  corpusProjectId?: string
   topicId?: string
   targetWords?: number
   intensity?: number
-  corpusVersion?: string
   force?: boolean
 }
 
@@ -22,14 +21,14 @@ export async function GET(req: NextRequest) {
   const auth = await requireA2HAdmin(req)
   if (isAuthFailure(auth)) return auth
 
+  const corpusProjectId = req.nextUrl.searchParams.get('corpusProjectId')
   const topicId = req.nextUrl.searchParams.get('topicId')
   const targetWords = Number(req.nextUrl.searchParams.get('targetWords'))
-  if (!topicId || !targetWords) {
-    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'topicId and targetWords are required.' } }, { status: 400 })
+  if (!corpusProjectId || !topicId || !targetWords) {
+    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'corpusProjectId, topicId, and targetWords are required.' } }, { status: 400 })
   }
-  const corpusVersion = req.nextUrl.searchParams.get('corpusVersion') ?? DEFAULT_CORPUS_VERSION
 
-  const source = await getSource(db(), corpusVersion, topicId, targetWords)
+  const source = await getSource(db(), corpusProjectId, topicId, targetWords)
   if (!source) {
     return NextResponse.json({ error: { code: 'NOT_FOUND', message: 'No source exists for this cell.' } }, { status: 404 })
   }
@@ -50,13 +49,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' } }, { status: 400 })
   }
 
-  const { topicId, targetWords, intensity } = body
-  if (!topicId || !targetWords || !intensity) {
-    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'topicId, targetWords, and intensity are required.' } }, { status: 400 })
+  const { corpusProjectId, topicId, targetWords, intensity } = body
+  if (!corpusProjectId || !topicId || !targetWords || !intensity) {
+    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'corpusProjectId, topicId, targetWords, and intensity are required.' } }, { status: 400 })
   }
 
-  const corpusVersion = body.corpusVersion ?? DEFAULT_CORPUS_VERSION
-  const source = await getSource(db(), corpusVersion, topicId, targetWords)
+  const source = await getSource(db(), corpusProjectId, topicId, targetWords)
   if (!source) {
     return NextResponse.json({ error: { code: 'NOT_FOUND', message: 'No source exists for this cell.' } }, { status: 404 })
   }

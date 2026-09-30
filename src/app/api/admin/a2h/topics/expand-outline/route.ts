@@ -9,11 +9,13 @@ import { expandOutline } from '@/lib/a2h/outlineGeneration'
 import { DOMAINS, type Domain } from '@/lib/style/types'
 
 // One model call generating only the additional topics needed to reach a
-// domain's raised locked count — never touches the existing roster. See
-// generate-outline/route.ts for the (destructive, full-replace) sibling.
+// domain's raised count within a project — never touches the existing
+// roster. See generate-outline/route.ts for the (destructive, full-replace)
+// sibling.
 export const maxDuration = 60
 
 interface ExpandOutlineBody {
+  corpusProjectId?: string
   domainId?: string
 }
 
@@ -28,7 +30,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' } }, { status: 400 })
   }
 
-  const domainId = body.domainId
+  const { corpusProjectId, domainId } = body
+  if (!corpusProjectId) {
+    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'corpusProjectId is required.' } }, { status: 400 })
+  }
   if (!domainId || !(DOMAINS as readonly string[]).includes(domainId)) {
     return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: `domainId must be one of: ${DOMAINS.join(', ')}` } }, { status: 400 })
   }
@@ -44,11 +49,11 @@ export async function POST(req: NextRequest) {
   const client = new OpenAI({ apiKey, baseURL })
 
   try {
-    const topics = await expandOutline(db(), { domainId: domainId as Domain, client, model })
+    const topics = await expandOutline(db(), { corpusProjectId, domainId: domainId as Domain, client, model })
     return NextResponse.json({ topics })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Outline expansion failed.'
-    const conflict = message.includes('Lock a topic count') || message.includes('meets or exceeds') || message.includes('No topics exist yet')
+    const conflict = message.includes('Set a topic count') || message.includes('meets or exceeds') || message.includes('No topics exist yet') || message.includes('project is')
     return NextResponse.json(
       { error: { code: conflict ? 'CONFLICT' : 'OUTLINE_GENERATION_FAILED', message } },
       { status: conflict ? 409 : 502 },

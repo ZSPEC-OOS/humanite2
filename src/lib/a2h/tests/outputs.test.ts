@@ -55,8 +55,8 @@ function rejectingClient(): OpenAI {
 }
 
 const FROZEN_SOURCE: CorpusSource = {
-  id: 'CORPUS-V001__topic-1__100',
-  corpusVersion: 'CORPUS-V001',
+  id: 'project-1__topic-1__100',
+  corpusProjectId: 'project-1',
   domainId: 'general',
   topicId: 'topic-1',
   targetWords: 100,
@@ -93,6 +93,7 @@ describe('transformSource', () => {
     const output = await transformSource(firestore, { source: FROZEN_SOURCE, intensity: 5, client: stubClient(), model: 'stub-model' })
 
     expect(output.status).toBe('success')
+    expect(output.corpusProjectId).toBe(FROZEN_SOURCE.corpusProjectId)
     expect(output.sourceId).toBe(FROZEN_SOURCE.id)
     expect(output.intensity).toBe(5)
     expect(output.outputText.length).toBeGreaterThan(0)

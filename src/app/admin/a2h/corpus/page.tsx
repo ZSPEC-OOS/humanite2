@@ -1,14 +1,13 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { DOMAINS, type Domain } from '@/lib/style/types'
-import { DEFAULT_CORPUS_VERSION } from '@/lib/a2h/types'
+import { useSearchParams } from 'next/navigation'
+import type { Domain } from '@/lib/style/types'
 import {
-  apiListTopics, apiListCorpus, apiGenerateSource, apiFreezeSource,
+  apiGetProject, apiListTopics, apiListCorpus, apiGenerateSource, apiFreezeSource,
   apiListBaselines, apiAcquireBaseline,
   apiListOutputs, apiTransformSource, apiListPostScores, apiAcquirePostScore,
-  apiGetLengthLadder,
-  type BenchmarkTopic, type CorpusSource, type BenchmarkOutput, type DetectorResult, type LengthLadderConfig,
+  type BenchmarkTopic, type CorpusSource, type BenchmarkOutput, type DetectorResult, type CorpusProject,
 } from '@/lib/a2hApi'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -33,11 +32,14 @@ const CELL_STYLES: Record<string, string> = {
 }
 
 export default function A2HCorpusPage() {
-  const [domain, setDomain] = useState<Domain>('general')
+  const searchParams = useSearchParams()
+  const projectId = searchParams.get('project') ?? ''
+
+  const [project, setProject] = useState<CorpusProject | null>(null)
+  const [domain, setDomain] = useState<Domain | null>(null)
   const [topics, setTopics] = useState<BenchmarkTopic[]>([])
   const [sources, setSources] = useState<Record<CellKey, CorpusSource>>({})
   const [baselines, setBaselines] = useState<Record<string, DetectorResult>>({})
-  const [ladderConfig, setLadderConfig] = useState<LengthLadderConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<{ topic: BenchmarkTopic; targetWords: number } | null>(null)
@@ -48,24 +50,41 @@ export default function A2HCorpusPage() {
   const [outputsLoading, setOutputsLoading] = useState(false)
 
   useEffect(() => {
+    if (!projectId) {
+      setError('No corpus project selected.')
+      setLoading(false)
+      return
+    }
+    let cancelled = false
+    apiGetProject(projectId)
+      .then(p => {
+        if (cancelled) return
+        setProject(p)
+        setDomain(prev => prev ?? p.domains[0] ?? null)
+      })
+      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load corpus project.') })
+    return () => { cancelled = true }
+  }, [projectId])
+
+  useEffect(() => {
+    if (!projectId || !domain) return
     let cancelled = false
     setLoading(true)
     setError(null)
     setSelected(null)
-    Promise.all([apiListTopics(domain), apiListCorpus(domain, DEFAULT_CORPUS_VERSION), apiListBaselines(domain, DEFAULT_CORPUS_VERSION), apiGetLengthLadder()])
-      .then(([topicsData, sourcesData, baselinesData, ladder]) => {
+    Promise.all([apiListTopics(projectId, domain), apiListCorpus(projectId, domain), apiListBaselines(projectId, domain)])
+      .then(([topicsData, sourcesData, baselinesData]) => {
         if (cancelled) return
         setTopics(topicsData)
         const map: Record<CellKey, CorpusSource> = {}
         for (const s of sourcesData) map[cellKey(s.topicId, s.targetWords)] = s
         setSources(map)
         setBaselines(baselinesData)
-        setLadderConfig(ladder)
       })
       .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load corpus data.') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [domain])
+  }, [projectId, domain])
 
   const selectedSource = selected ? sources[cellKey(selected.topic.id, selected.targetWords)] : undefined
   const selectedBaseline = selectedSource ? baselines[selectedSource.id] : undefined
@@ -74,17 +93,17 @@ export default function A2HCorpusPage() {
     setOutputs({})
     setPostScores({})
     setSelectedIntensity(null)
-    if (!selected || selectedSource?.status !== 'frozen') return
+    if (!projectId || !selected || selectedSource?.status !== 'frozen') return
     let cancelled = false
     setOutputsLoading(true)
-    apiListOutputs(selected.topic.id, selected.targetWords, DEFAULT_CORPUS_VERSION)
+    apiListOutputs(projectId, selected.topic.id, selected.targetWords)
       .then(async outputsData => {
         if (cancelled) return
         const map: Record<number, BenchmarkOutput> = {}
         for (const o of outputsData) map[o.intensity] = o
         setOutputs(map)
         if (outputsData.length > 0) {
-          const scores = await apiListPostScores(selected.topic.id, selected.targetWords, DEFAULT_CORPUS_VERSION)
+          const scores = await apiListPostScores(projectId, selected.topic.id, selected.targetWords)
           if (!cancelled) setPostScores(scores)
         }
       })
@@ -92,7 +111,7 @@ export default function A2HCorpusPage() {
       .finally(() => { if (!cancelled) setOutputsLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.topic.id, selected?.targetWords, selectedSource?.status])
+  }, [projectId, selected?.topic.id, selected?.targetWords, selectedSource?.status])
 
   const selectedOutput = selectedIntensity != null ? outputs[selectedIntensity] : undefined
   const selectedPostScore = selectedOutput ? postScores[selectedOutput.id] : undefined
@@ -102,7 +121,7 @@ export default function A2HCorpusPage() {
     setBusy(true)
     setError(null)
     try {
-      const source = await apiGenerateSource(selected.topic.id, selected.targetWords, force)
+      const source = await apiGenerateSource(projectId, selected.topic.id, selected.targetWords, force)
       setSources(prev => ({ ...prev, [cellKey(source.topicId, source.targetWords)]: source }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Generation failed.')
@@ -116,7 +135,7 @@ export default function A2HCorpusPage() {
     setBusy(true)
     setError(null)
     try {
-      const source = await apiFreezeSource(selected.topic.id, selected.targetWords)
+      const source = await apiFreezeSource(projectId, selected.topic.id, selected.targetWords)
       setSources(prev => ({ ...prev, [cellKey(source.topicId, source.targetWords)]: source }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Freeze failed.')
@@ -130,7 +149,7 @@ export default function A2HCorpusPage() {
     setBusy(true)
     setError(null)
     try {
-      const baseline = await apiAcquireBaseline(selected.topic.id, selected.targetWords, force)
+      const baseline = await apiAcquireBaseline(projectId, selected.topic.id, selected.targetWords, force)
       setBaselines(prev => ({ ...prev, [baseline.sourceId]: baseline }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Baseline acquisition failed.')
@@ -144,7 +163,7 @@ export default function A2HCorpusPage() {
     setBusy(true)
     setError(null)
     try {
-      const output = await apiTransformSource(selected.topic.id, selected.targetWords, selectedIntensity, force)
+      const output = await apiTransformSource(projectId, selected.topic.id, selected.targetWords, selectedIntensity, force)
       setOutputs(prev => ({ ...prev, [output.intensity]: output }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Transformation failed.')
@@ -158,7 +177,7 @@ export default function A2HCorpusPage() {
     setBusy(true)
     setError(null)
     try {
-      const postScore = await apiAcquirePostScore(selected.topic.id, selected.targetWords, selectedIntensity, force)
+      const postScore = await apiAcquirePostScore(projectId, selected.topic.id, selected.targetWords, selectedIntensity, force)
       setPostScores(prev => ({ ...prev, [postScore.outputId ?? postScore.id]: postScore }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Post-score acquisition failed.')
@@ -167,7 +186,8 @@ export default function A2HCorpusPage() {
     }
   }
 
-  const ladder = ladderConfig?.locked ? ladderConfig.ladder : []
+  const ladder = project?.lengthLadder ?? []
+  const canGenerate = project != null && ['blueprint_locked', 'generating', 'frozen'].includes(project.status)
 
   const counts = useMemo(() => {
     const values = Object.values(sources)
@@ -179,32 +199,45 @@ export default function A2HCorpusPage() {
     }
   }, [sources, topics, ladder.length])
 
+  if (!projectId) {
+    return (
+      <div className="min-h-screen bg-white dark:bg-gray-950 p-6">
+        <div className="max-w-6xl mx-auto text-sm text-gray-400 dark:text-gray-500 py-12 text-center">
+          No corpus project selected.{' '}
+          <Link href="/admin/a2h" className="underline hover:text-gray-700 dark:hover:text-gray-300">Pick one from the A2H home</Link>.
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950 p-6">
       <div className="max-w-6xl mx-auto space-y-5">
         <div>
-          <Link href="/admin/a2h" className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300">← A2H Benchmark</Link>
+          <Link href={`/admin/a2h/corpus-design?project=${projectId}`} className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300">← {project?.name ?? 'A2H Benchmark'}</Link>
           <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mt-1">Corpus Matrix</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {DEFAULT_CORPUS_VERSION} · {counts.frozen} frozen · {counts.validated} awaiting freeze · {counts.failed} validation issues · {counts.total} cells for {domain}
+            {counts.frozen} frozen · {counts.validated} awaiting freeze · {counts.failed} validation issues · {counts.total} cells for {domain}
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
-          {DOMAINS.map(d => (
-            <button
-              key={d}
-              onClick={() => setDomain(d)}
-              className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors capitalize ${
-                d === domain
-                  ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
-                  : 'border-gray-200 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'
-              }`}
-            >
-              {d}
-            </button>
-          ))}
-        </div>
+        {project && (
+          <div className="flex flex-wrap gap-1.5">
+            {project.domains.map(d => (
+              <button
+                key={d}
+                onClick={() => setDomain(d)}
+                className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors capitalize ${
+                  d === domain
+                    ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'
+                }`}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+        )}
 
         {error && (
           <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-2.5">{error}</div>
@@ -214,15 +247,19 @@ export default function A2HCorpusPage() {
           <div className="flex justify-center py-12">
             <Spinner className="w-6 h-6 border-gray-200 border-t-gray-700 dark:border-gray-700 dark:border-t-gray-300" />
           </div>
-        ) : !ladderConfig?.locked ? (
+        ) : !canGenerate ? (
           <div className="text-sm text-gray-400 dark:text-gray-500 py-8 text-center">
-            No length ladder locked yet.{' '}
-            <Link href="/admin/a2h/corpus-design" className="underline hover:text-gray-700 dark:hover:text-gray-300">Configure Corpus Design</Link>.
+            Lock the blueprint before generating corpus sources.{' '}
+            <Link href={`/admin/a2h/corpus-design?project=${projectId}`} className="underline hover:text-gray-700 dark:hover:text-gray-300">Configure Corpus Design</Link>.
+          </div>
+        ) : ladder.length === 0 ? (
+          <div className="text-sm text-gray-400 dark:text-gray-500 py-8 text-center">
+            This project has no length ladder configured.
           </div>
         ) : topics.length === 0 ? (
           <div className="text-sm text-gray-400 dark:text-gray-500 py-8 text-center">
             No topics defined for {domain} yet.{' '}
-            <Link href="/admin/a2h/topics" className="underline hover:text-gray-700 dark:hover:text-gray-300">Add topic outlines</Link>.
+            <Link href={`/admin/a2h/topics?project=${projectId}`} className="underline hover:text-gray-700 dark:hover:text-gray-300">Add topic outlines</Link>.
           </div>
         ) : (
           <div className="overflow-x-auto border border-gray-200 dark:border-gray-800 rounded-2xl">

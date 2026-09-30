@@ -4,7 +4,7 @@ import { resolveCapabilities } from '@/lib/providers'
 import type { Domain } from '@/lib/style/types'
 import type { BenchmarkTopic } from './types'
 import { DEFAULT_GENERATION_PROMPT_VERSION } from './types'
-import { getDomainConfig } from './domainConfig'
+import { getCorpusProject } from './corpusProject'
 import { listTopics, createTopic, deleteTopicsForDomain } from './topics'
 
 const FIELD_GUIDANCE = [
@@ -210,41 +210,49 @@ export function parseOutlineResponse(
 }
 
 export interface GenerateOutlineParams {
+  corpusProjectId: string
   domainId: Domain
   client: OpenAI
   model: string
 }
 
-// Bulk-generates a domain's full topic roster in one model call, per the
-// admin-driven workflow: lock a topic count, then generate. Requires the
-// domain's count to already be locked (domainConfig.ts) — generating
-// against an unlocked, still-changeable count would let the roster size
-// drift out from under corpus/detector data keyed to topic slot numbers.
+// Bulk-generates a domain's full topic roster (within one project) in one
+// model call, per the admin-driven workflow: configure the project's
+// topicCountByDomain, then generate — while the project is still 'draft'.
+// Generating against a project that's already past 'draft' would let the
+// roster drift out from under corpus/detector data keyed to topic slot
+// numbers, since the blueprint is meant to be fully settled before it locks.
 export async function generateOutline(
   firestore: Firestore,
   params: GenerateOutlineParams,
   forceOverwrite = false,
 ): Promise<BenchmarkTopic[]> {
-  const { domainId, client, model } = params
-  const config = await getDomainConfig(firestore, domainId)
-  if (!config || !config.locked) {
-    throw new Error('Lock a topic count for this domain before generating an outline.')
+  const { corpusProjectId, domainId, client, model } = params
+  const project = await getCorpusProject(firestore, corpusProjectId)
+  if (!project) throw new Error('Corpus project not found.')
+  if (project.status !== 'draft') {
+    throw new Error(`Cannot generate an outline — project is ${project.status}, not draft.`)
+  }
+  const topicCount = project.topicCountByDomain[domainId]
+  if (!topicCount) {
+    throw new Error(`Set a topic count for ${domainId} before generating an outline.`)
   }
 
-  const existing = await listTopics(firestore, domainId)
+  const existing = await listTopics(firestore, corpusProjectId, domainId)
   if (existing.length > 0 && !forceOverwrite) {
     throw new Error('Topics already exist for this domain — pass force to regenerate, or use expandOutline to add more without discarding these.')
   }
 
-  const raw = await callOutlineModel(client, model, buildOutlinePrompt(domainId, config.topicCount), config.topicCount)
-  const parsed = parseOutlineResponse(raw, config.topicCount)
+  const raw = await callOutlineModel(client, model, buildOutlinePrompt(domainId, topicCount), topicCount)
+  const parsed = parseOutlineResponse(raw, topicCount)
   if ('error' in parsed) throw new Error(parsed.error)
 
-  if (existing.length > 0) await deleteTopicsForDomain(firestore, domainId)
+  if (existing.length > 0) await deleteTopicsForDomain(firestore, corpusProjectId, domainId)
 
   return Promise.all(
     parsed.topics.map((t, index) =>
       createTopic(firestore, {
+        corpusProjectId,
         domainId,
         topicNumber: index + 1,
         title: t.title,
@@ -258,25 +266,31 @@ export async function generateOutline(
   )
 }
 
-// Grows an already-generated roster up to the domain's (raised) locked
+// Grows an already-generated roster up to the domain's (raised) configured
 // count without touching a single existing topic — the safe counterpart to
 // generateOutline's forceOverwrite path, which discards everything. Requires
-// raiseDomainTopicCount to have already moved the locked count past the
-// current roster size; this function only ever appends.
+// the project's topicCountByDomain[domain] to already have been raised past
+// the current roster size; this function only ever appends. Only usable
+// while the project is still 'draft' — same as generateOutline.
 export async function expandOutline(firestore: Firestore, params: GenerateOutlineParams): Promise<BenchmarkTopic[]> {
-  const { domainId, client, model } = params
-  const config = await getDomainConfig(firestore, domainId)
-  if (!config || !config.locked) {
-    throw new Error('Lock a topic count for this domain before generating an outline.')
+  const { corpusProjectId, domainId, client, model } = params
+  const project = await getCorpusProject(firestore, corpusProjectId)
+  if (!project) throw new Error('Corpus project not found.')
+  if (project.status !== 'draft') {
+    throw new Error(`Cannot expand an outline — project is ${project.status}, not draft.`)
+  }
+  const topicCount = project.topicCountByDomain[domainId]
+  if (!topicCount) {
+    throw new Error(`Set a topic count for ${domainId} before generating an outline.`)
   }
 
-  const existing = await listTopics(firestore, domainId)
+  const existing = await listTopics(firestore, corpusProjectId, domainId)
   if (existing.length === 0) {
     throw new Error('No topics exist yet for this domain — use generateOutline for the initial roster.')
   }
-  const needed = config.topicCount - existing.length
+  const needed = topicCount - existing.length
   if (needed <= 0) {
-    throw new Error(`This domain already has ${existing.length} topics, which meets or exceeds the locked count of ${config.topicCount} — raise the count first.`)
+    throw new Error(`This domain already has ${existing.length} topics, which meets or exceeds the configured count of ${topicCount} — raise the count first.`)
   }
 
   const existingTitles = existing.map(t => t.title)
@@ -287,6 +301,7 @@ export async function expandOutline(firestore: Firestore, params: GenerateOutlin
   return Promise.all(
     parsed.topics.map((t, index) =>
       createTopic(firestore, {
+        corpusProjectId,
         domainId,
         topicNumber: existing.length + index + 1,
         title: t.title,
