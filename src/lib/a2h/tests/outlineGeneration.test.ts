@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import type { Firestore } from 'firebase-admin/firestore'
 import type OpenAI from 'openai'
 import { buildOutlinePrompt, outlineMaxTokensFor, parseOutlineResponse, generateOutline } from '../outlineGeneration'
@@ -54,6 +54,16 @@ function stubClient(content: string): OpenAI {
   } as unknown as OpenAI
 }
 
+function stubClientWithOptions(
+  content: string,
+  opts: { finishReason?: string; baseURL?: string } = {},
+): { client: OpenAI; create: ReturnType<typeof vi.fn> } {
+  const create = vi.fn().mockResolvedValue({
+    choices: [{ message: { content }, finish_reason: opts.finishReason ?? 'stop' }],
+  })
+  return { client: { baseURL: opts.baseURL, chat: { completions: { create } } } as unknown as OpenAI, create }
+}
+
 function validOutlineJson(count: number): string {
   return JSON.stringify({
     topics: Array.from({ length: count }, (_, i) => ({
@@ -76,9 +86,9 @@ describe('buildOutlinePrompt', () => {
 })
 
 describe('outlineMaxTokensFor', () => {
-  it('scales with topic count and caps at 8192', () => {
+  it('scales with topic count and caps at 16384', () => {
     expect(outlineMaxTokensFor(5)).toBeLessThan(outlineMaxTokensFor(50))
-    expect(outlineMaxTokensFor(1000)).toBe(8192)
+    expect(outlineMaxTokensFor(1000)).toBe(16384)
   })
 })
 
@@ -170,11 +180,11 @@ describe('generateOutline', () => {
     expect(stored.every(t => t.title !== 'Old topic')).toBe(true)
   })
 
-  it('throws when the model does not return valid JSON', async () => {
+  it('throws when the model does not return valid JSON, including a snippet of the actual response', async () => {
     const { firestore } = makeFirestore()
     await lockDomainTopicCount(firestore, 'medical', 5)
-    await expect(generateOutline(firestore, { domainId: 'medical', client: stubClient('not json'), model: 'stub' }))
-      .rejects.toThrow(/valid json/i)
+    await expect(generateOutline(firestore, { domainId: 'medical', client: stubClient('Sorry, I cannot help with that.'), model: 'stub' }))
+      .rejects.toThrow(/Sorry, I cannot help with that/)
   })
 
   it('throws when the model returns fewer valid topics than the locked count, without persisting anything', async () => {
@@ -183,5 +193,48 @@ describe('generateOutline', () => {
     await expect(generateOutline(firestore, { domainId: 'medical', client: stubClient(validOutlineJson(2)), model: 'stub' }))
       .rejects.toThrow(/requested 5/)
     expect(await listTopics(firestore, 'medical')).toHaveLength(0)
+  })
+})
+
+describe('generateOutline — response robustness', () => {
+  it('parses a response wrapped in a markdown code fence despite the prompt asking for plain JSON', async () => {
+    const { firestore } = makeFirestore()
+    await lockDomainTopicCount(firestore, 'medical', 3)
+    const fenced = '```json\n' + validOutlineJson(3) + '\n```'
+    const { client } = stubClientWithOptions(fenced)
+    const created = await generateOutline(firestore, { domainId: 'medical', client, model: 'stub' })
+    expect(created).toHaveLength(3)
+  })
+
+  it('falls back to extracting the first balanced {...} block when the content has surrounding prose', async () => {
+    const { firestore } = makeFirestore()
+    await lockDomainTopicCount(firestore, 'medical', 3)
+    const { client } = stubClientWithOptions(`Sure, here is the JSON you asked for:\n${validOutlineJson(3)}\nLet me know if you need anything else!`)
+    const created = await generateOutline(firestore, { domainId: 'medical', client, model: 'stub' })
+    expect(created).toHaveLength(3)
+  })
+
+  it('omits response_format when the resolved provider has no JSON-mode capability', async () => {
+    const { firestore } = makeFirestore()
+    await lockDomainTopicCount(firestore, 'medical', 3)
+    const { client, create } = stubClientWithOptions(validOutlineJson(3), { baseURL: 'https://unrecognized-endpoint.example.com/v1' })
+    await generateOutline(firestore, { domainId: 'medical', client, model: 'stub' })
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty('response_format')
+  })
+
+  it('includes response_format for a known JSON-capable provider', async () => {
+    const { firestore } = makeFirestore()
+    await lockDomainTopicCount(firestore, 'medical', 3)
+    const { client, create } = stubClientWithOptions(validOutlineJson(3), { baseURL: 'https://api.openai.com/v1' })
+    await generateOutline(firestore, { domainId: 'medical', client, model: 'stub' })
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ response_format: { type: 'json_object' } })
+  })
+
+  it('throws a specific, actionable error when the response was cut off by the token limit', async () => {
+    const { firestore } = makeFirestore()
+    await lockDomainTopicCount(firestore, 'medical', 5)
+    const { client } = stubClientWithOptions('{"topics": [{"title": "Incomple', { finishReason: 'length' })
+    await expect(generateOutline(firestore, { domainId: 'medical', client, model: 'stub' }))
+      .rejects.toThrow(/cut off before completing/i)
   })
 })
