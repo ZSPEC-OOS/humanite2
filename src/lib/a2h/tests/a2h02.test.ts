@@ -27,7 +27,7 @@ function makePostScore(overrides: Partial<DetectorResult> = {}): DetectorResult 
     id: 'r1', corpusProjectId: 'project-1', runId: 'run-1', sourceId: 'source-1', outputId: 'output-1',
     detector: 'gptzero', detectorConfigId: 'gptzero-default', stage: 'post_transform',
     aiProbability: 0.2, humanProbability: 0.7, mixedProbability: 0.1, classification: 'human-written',
-    analyzedAt: '2026-01-01T00:00:00.000Z', rawResponse: {},
+    analyzedAt: '2026-01-01T00:00:00.000Z', rawResponse: {}, latencyMs: null,
     ...overrides,
   }
 }

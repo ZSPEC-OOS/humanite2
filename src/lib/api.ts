@@ -116,6 +116,22 @@ export async function restoreSession(): Promise<string | null> {
   }
 }
 
+// Downloads a raw (non-JSON) file from an authenticated endpoint — the same
+// auth-header pattern apiFetch uses, but returning a Blob instead of
+// parsing JSON, for endpoints that stream a CSV/attachment response (see
+// apiExport below, and the A2H benchmark's export-package routes).
+export async function apiFetchBlob(path: string): Promise<Blob> {
+  const token = useUserStore.getState().accessToken
+  const url = path.startsWith('http') ? path : `${API_BASE}/api${path}`
+  const resp = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  if (!resp.ok) {
+    const errorBody = await resp.json().catch(() => ({}))
+    const detail = errorBody.detail ?? errorBody.error
+    throw new APIError(detail?.code ?? 'UNKNOWN_ERROR', detail?.message ?? `HTTP ${resp.status}`, resp.status)
+  }
+  return resp.blob()
+}
+
 export async function authRegister(email: string, password: string): Promise<TokenResponse> {
   const data = await apiFetch<TokenResponse>(
     '/v1/auth/register',

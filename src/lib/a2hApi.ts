@@ -1,4 +1,4 @@
-import { apiFetch } from '@/lib/api'
+import { apiFetch, apiFetchBlob } from '@/lib/api'
 import type {
   BenchmarkTopic, CorpusSource, BenchmarkOutput, CorpusProject, CorpusManifest, DetectorResult,
   BenchmarkRun, BenchmarkRunSource, FixtureSet, BenchmarkFixture, A2HFixtureType, A2HTestCode,
@@ -8,6 +8,9 @@ import { IMPLEMENTED_A2H_TESTS, A2H_TEST_LABELS, A2H_TEST_DEFINITIONS } from '@/
 import type { CreateTopicInput } from '@/lib/a2h/topics'
 import type { ProjectDraftPatch, FreezeValidationResult } from '@/lib/a2h/corpusProject'
 import type { RunDraftPatch, RunValidationResult, RunProgress, FixtureTestEligibility, RunWorkEstimate } from '@/lib/a2h/runs'
+import type { BenchmarkRelease, ReleaseValidationResult } from '@/lib/a2h/types'
+import type { CreateReleaseResult, ReleaseIntegrityResult } from '@/lib/a2h/release'
+import { EXPORT_FILE_NAMES, type ExportFileName } from '@/lib/a2h/exportPackage'
 import type { ExecuteBatchResult } from '@/lib/a2h/execution'
 import type { A2H01Report, A2H01Filters } from '@/lib/a2h/a2h01'
 import type { A2H02Report, A2H02Filters } from '@/lib/a2h/a2h02'
@@ -42,7 +45,8 @@ export type {
   A2HTestCode, BenchmarkExperimentConfig, StyleToneContrast, GenreAudienceContrast, A2HTestDefinition,
 }
 
-export { IMPLEMENTED_A2H_TESTS, A2H_TEST_LABELS, A2H_TEST_DEFINITIONS }
+export { IMPLEMENTED_A2H_TESTS, A2H_TEST_LABELS, A2H_TEST_DEFINITIONS, EXPORT_FILE_NAMES }
+export type { BenchmarkRelease, ReleaseValidationResult, CreateReleaseResult, ReleaseIntegrityResult, ExportFileName }
 
 // ── Corpus projects ──────────────────────────────────────────────────────
 
@@ -442,4 +446,46 @@ export async function apiSeedRepairFixtures(fixtureSetId: string, sourceId: stri
     body: JSON.stringify({ sourceId, kind }),
   })
   return data.fixtures
+}
+
+// ── Phase 5: production execution hardening, release & export ────────────
+
+// Explicit admin action for a 'needs_attention' run — resets failed jobs to
+// queued and returns the run to 'running' for another pass.
+export async function apiRetryFailedJobs(runId: string): Promise<{ run: BenchmarkRun; retriedCount: number }> {
+  return apiFetch(`/admin/a2h/runs/${runId}/retry-failed-jobs`, { method: 'POST' })
+}
+
+export interface ReleaseReadiness {
+  readiness: ReleaseValidationResult
+  release: BenchmarkRelease | null
+}
+
+export async function apiGetReleaseReadiness(runId: string): Promise<ReleaseReadiness> {
+  return apiFetch<ReleaseReadiness>(`/admin/a2h/runs/${runId}/release`)
+}
+
+// Freezes the release — only succeeds once every readiness check passes.
+export async function apiCreateRelease(runId: string): Promise<CreateReleaseResult> {
+  return apiFetch<CreateReleaseResult>(`/admin/a2h/runs/${runId}/release`, { method: 'POST' })
+}
+
+// Recomputes every stored hash from the current raw records and compares —
+// an on-demand audit that a released run's numbers still match what was frozen.
+export async function apiVerifyReleaseIntegrity(runId: string): Promise<ReleaseIntegrityResult> {
+  return apiFetch<ReleaseIntegrityResult>(`/admin/a2h/runs/${runId}/release/verify`)
+}
+
+// Triggers a browser download of one export file (CSV/JSON) — the raw data
+// a researcher can independently reproduce every reported aggregate from.
+export async function apiDownloadExportFile(runId: string, file: ExportFileName): Promise<void> {
+  const blob = await apiFetchBlob(`/admin/a2h/runs/${runId}/export?file=${encodeURIComponent(file)}`)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = file
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }

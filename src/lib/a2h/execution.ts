@@ -6,7 +6,7 @@ import {
 } from './types'
 import { getRun, maybeCompleteRun } from './runs'
 import {
-  getOrCreateJob, markJobRunning, markJobCompleted, markJobFailed, listJobsByStageAndStatus,
+  getOrCreateJob, claimJob, reclaimStaleJobs, markJobCompleted, markJobFailed, listJobsByStageAndStatus, listDueRetryJobs,
   transformJobId, postScoreJobId, testEvaluationJobId,
 } from './jobs'
 import { getSourceById } from './corpus'
@@ -38,6 +38,11 @@ export interface ExecuteBatchOptions {
   modelProvider: string
   gptZeroApiKey: string
   maxJobsPerStage?: number
+  // Identifies which worker invocation is doing this batch — an interactive
+  // browser call or a cron tick — recorded on each job's leaseOwner so a
+  // stuck lease can be traced back to what claimed it. Callers that don't
+  // care (existing tests, the interactive route) get a reasonable default.
+  workerId?: string
 }
 
 export interface ExecuteBatchResult {
@@ -62,18 +67,22 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   return chunks
 }
 
-// Processes one bounded batch of a run's queued work and returns immediately
-// — this deployment has no background worker process, so "executing" a run
-// means an admin-driven interactive call like this one, made repeatedly
-// (the UI's "Continue Run" / "Run All" action loops this) until the run
-// reports 'completed'. A call against a paused/cancelled/completed run is a
-// safe no-op (§11: pause must not start additional queued work).
+// Processes one bounded batch of a run's ready work and returns immediately.
+// Phase 5: this is now WORKER-COMPATIBLE processing logic — both the
+// interactive "Run All" browser loop and the cron worker (see
+// /api/cron/a2h-worker) call this exact function, and both go through the
+// same claimJob() transaction, so they can safely run concurrently without
+// ever double-processing (or double-paying for) the same job. A call
+// against a paused/cancelled/completed/needs_attention run is a safe no-op
+// (§11: pause must not start additional queued work).
 //
 // Stages are drained in dependency order within one call: a later stage's
 // jobs don't exist until the earlier stage that creates them (see below)
 // has completed jobs to react to, so this only ever processes one stage per
-// call — exactly the stage with work ready right now. Jobs within a batch
-// run with up to run.concurrency in flight at once via Promise.all chunks.
+// call — exactly the stage with work ready right now. "Ready" now means
+// queued OR a due retry (nextAttemptAt has passed) — see listDueRetryJobs.
+// Jobs within a batch run with up to run.concurrency in flight at once via
+// Promise.all chunks.
 export async function executeRunBatch(firestore: Firestore, runId: string, options: ExecuteBatchOptions): Promise<ExecuteBatchResult> {
   const run = await getRun(firestore, runId)
   if (!run) throw new Error('Benchmark run not found.')
@@ -81,7 +90,13 @@ export async function executeRunBatch(firestore: Firestore, runId: string, optio
     return { processed: 0, stage: 'idle', run }
   }
 
+  // Reclaim any 'running' job whose lease expired before its worker
+  // finished (a crash, a timeout, a killed request) — a maintenance sweep
+  // once per tick, not part of the per-job claim path.
+  await reclaimStaleJobs(firestore, runId)
+
   const maxJobs = options.maxJobsPerStage ?? DEFAULT_MAX_JOBS_PER_STAGE
+  const workerId = options.workerId ?? `interactive-${Date.now()}`
   const detectorConfigId = run.detectorConfigId ?? DEFAULT_DETECTOR_CONFIG_ID
   // One fixture query per source, shared across every test_evaluation job
   // this call processes (§48) — several deterministic tests (A2H-04/05/09/
@@ -91,13 +106,17 @@ export async function executeRunBatch(firestore: Firestore, runId: string, optio
   const fixtureCache = new Map<string, Promise<BenchmarkFixture[]>>()
 
   for (const stage of STAGE_ORDER) {
-    const queued = await listJobsByStageAndStatus(firestore, runId, stage, 'queued')
-    if (queued.length === 0) continue
+    const [queued, dueRetries] = await Promise.all([
+      listJobsByStageAndStatus(firestore, runId, stage, 'queued'),
+      listDueRetryJobs(firestore, runId, stage),
+    ])
+    const ready = [...queued, ...dueRetries]
+    if (ready.length === 0) continue
 
-    const batch = queued.slice(0, maxJobs)
+    const batch = ready.slice(0, maxJobs)
     let processed = 0
     for (const chunk of chunkArray(batch, Math.max(1, run.concurrency))) {
-      await Promise.all(chunk.map(job => processJob(firestore, run, job, detectorConfigId, options, fixtureCache)))
+      await Promise.all(chunk.map(job => processJob(firestore, run, job, detectorConfigId, options, fixtureCache, workerId)))
       processed += chunk.length
     }
     await maybeCompleteRun(firestore, runId)
@@ -115,8 +134,13 @@ async function processJob(
   detectorConfigId: string,
   options: ExecuteBatchOptions,
   fixtureCache: Map<string, Promise<BenchmarkFixture[]>>,
+  workerId: string,
 ): Promise<void> {
-  await markJobRunning(firestore, job.id)
+  const claimed = await claimJob(firestore, job.id, workerId)
+  // Another worker already claimed this job (or its lease hadn't actually
+  // expired yet) between when we listed it and now — an expected race, not
+  // an error, so this attempt simply skips it.
+  if (!claimed) return
   try {
     if (job.stage === 'baseline_gptzero') {
       await runBaselineJob(firestore, run, job, detectorConfigId, options)
@@ -133,9 +157,7 @@ async function processJob(
     }
     await markJobCompleted(firestore, job.id)
   } catch (err) {
-    const errorCode = err instanceof Error ? err.constructor.name : 'UnknownError'
-    const errorMessage = err instanceof Error ? err.message : 'Job failed.'
-    await markJobFailed(firestore, job.id, errorCode, errorMessage)
+    await markJobFailed(firestore, job.id, err)
   }
 }
 
@@ -185,6 +207,7 @@ async function runTransformJob(
     client: options.client,
     model: options.model,
     modelProvider: options.modelProvider,
+    releasedAt: run.releasedAt,
   })
 
   await getOrCreateJob(firestore, {
@@ -370,10 +393,10 @@ async function runRepairEvaluationJob(
       repair: async () => {
         const start = Date.now()
         try {
-          const repairedOutput = await repairGrammar(options.client, options.model, expected.corruptedText)
+          const result = await repairGrammar(options.client, options.model, expected.corruptedText)
           return {
-            repairedOutput, modelProvider: options.modelProvider, model: options.model, latencyMs: Date.now() - start,
-            modelCalls: 1, retryCount: 0, inputTokens: null, outputTokens: null, estimatedCostUsd: null,
+            repairedOutput: result.text, modelProvider: options.modelProvider, model: options.model, latencyMs: Date.now() - start,
+            modelCalls: 1, retryCount: 0, inputTokens: result.inputTokens, outputTokens: result.outputTokens, estimatedCostUsd: null,
             status: 'success', errorCode: null, errorMessage: null,
           }
         } catch (err) {
@@ -415,7 +438,7 @@ async function runRepairEvaluationJob(
           const repairResult = await repairChunk(options.client, options.model, expected.cleanText, expected.corruptedText, REPAIR_TONE, source.domainId)
           return {
             repairedOutput: repairResult.text, modelProvider: options.modelProvider, model: options.model, latencyMs: Date.now() - start,
-            modelCalls: repairResult.attempted ? 1 : 0, retryCount: 0, inputTokens: null, outputTokens: null, estimatedCostUsd: null,
+            modelCalls: repairResult.modelCalls, retryCount: 0, inputTokens: repairResult.inputTokens, outputTokens: repairResult.outputTokens, estimatedCostUsd: null,
             status: 'success', errorCode: null, errorMessage: null,
           }
         } catch (err) {
