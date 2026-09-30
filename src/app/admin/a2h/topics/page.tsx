@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { type Domain } from '@/lib/style/types'
 import { MAX_TOPICS_PER_DOMAIN, DOMAIN_CODE, DEFAULT_GENERATION_PROMPT_VERSION } from '@/lib/a2h/types'
-import { normalizeTopicTitle, titlesLikelyOverlap } from '@/lib/a2h/textNormalize'
+import { normalizeTopicTitle, titlesLikelyOverlap, countDuplicateTitlesByDomain } from '@/lib/a2h/textNormalize'
 import {
   apiGetProject, apiListTopics, apiCreateTopic, apiUpdateTopic,
   apiGenerateOutline, apiExpandOutline, apiLockBlueprint,
@@ -272,14 +272,9 @@ export default function A2HTopicsPage() {
     : []
   const missingSlots = reviewByDomain.reduce((sum, r) => sum + Math.max(0, r.target - r.actual), 0)
   const disabledCount = allTopics.filter(t => !t.enabled).length
-  const duplicateTitleCount = (() => {
-    const seen = new Map<string, number>()
-    for (const t of allTopics) {
-      const key = normalizeTopicTitle(t.title)
-      seen.set(key, (seen.get(key) ?? 0) + 1)
-    }
-    return [...seen.values()].filter(c => c > 1).length
-  })()
+  // Scoped per domain, not project-wide — the same normalized title in two
+  // different domains is a legitimate coincidence, not a duplicate.
+  const duplicateTitleCount = countDuplicateTitlesByDomain(allTopics)
   const overlapCount = (() => {
     let count = 0
     const byDomain = new Map<Domain, BenchmarkTopic[]>()
@@ -293,7 +288,7 @@ export default function A2HTopicsPage() {
     }
     return count
   })()
-  const canLock = missingSlots === 0 && duplicateTitleCount === 0 && reviewByDomain.length > 0
+  const canLock = missingSlots === 0 && duplicateTitleCount === 0 && disabledCount === 0 && reviewByDomain.length > 0
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950 p-6">
@@ -492,7 +487,13 @@ export default function A2HTopicsPage() {
             </button>
             {!canLock && (
               <p className="text-xs text-gray-400 dark:text-gray-500">
-                {missingSlots > 0 ? `${missingSlots} topic slot(s) still missing.` : duplicateTitleCount > 0 ? 'Resolve duplicate titles before locking.' : ''}
+                {missingSlots > 0
+                  ? `${missingSlots} topic slot(s) still missing.`
+                  : duplicateTitleCount > 0
+                    ? 'Resolve duplicate titles within a domain before locking.'
+                    : disabledCount > 0
+                      ? `${disabledCount} disabled topic(s) must be re-enabled or replaced before locking.`
+                      : ''}
               </p>
             )}
           </div>
