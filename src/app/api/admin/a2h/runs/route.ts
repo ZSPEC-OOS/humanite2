@@ -3,7 +3,7 @@ import { requireA2HAdmin } from '@/lib/require-a2h-admin'
 import { isAuthFailure } from '@/lib/require-auth'
 import { db } from '@/lib/firestore'
 import { getUserApiConfig } from '@/lib/userApiConfig'
-import { resolveProvider } from '@/lib/providerResolution'
+import { resolveProvider, resolvedProviderId } from '@/lib/providerResolution'
 import { createRun, listRunsForProject } from '@/lib/a2h/runs'
 
 export async function GET(req: NextRequest) {
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     const userConfig = await getUserApiConfig(auth.claims.sub)
     const resolved = resolveProvider(userConfig)
     model = model ?? resolved.model
-    modelProvider = modelProvider ?? (resolved.usingByok ? (resolved.baseURL ?? 'openai') : 'openai')
+    modelProvider = modelProvider ?? resolvedProviderId(resolved.baseURL, resolved.usingByok)
   }
 
   try {

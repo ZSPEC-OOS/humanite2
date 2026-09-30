@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { db } from '@/lib/firestore'
-import { resolveProvider } from '@/lib/providerResolution'
+import { resolveProvider, resolvedProviderId } from '@/lib/providerResolution'
 import { listRunningRuns } from '@/lib/a2h/runs'
 import { executeRunBatch } from '@/lib/a2h/execution'
 
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
     if (Date.now() >= deadline) break
     try {
       const result = await executeRunBatch(firestore, run.id, {
-        client, model, modelProvider: 'openai', gptZeroApiKey, workerId,
+        client, model, modelProvider: resolvedProviderId(baseURL, false), gptZeroApiKey, workerId,
       })
       results.push({ runId: run.id, processed: result.processed, stage: result.stage })
     } catch (err) {

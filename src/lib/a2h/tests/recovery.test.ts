@@ -128,7 +128,7 @@ async function buildFrozenCorpus(firestore: Firestore, opts: { domains: Domain[]
   return project.id
 }
 
-const EXECUTE_OPTIONS = { model: 'stub-model', modelProvider: 'openai', gptZeroApiKey: 'test-key' }
+const EXECUTE_OPTIONS = { model: 'gpt-4o-mini', modelProvider: 'openai', gptZeroApiKey: 'test-key' }
 const DETECTOR_CONFIG_ID = 'gptzero-default'
 
 afterEach(() => {

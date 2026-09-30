@@ -70,12 +70,19 @@ export default function A2H17ResultsPage() {
               <Card label="Median Latency" value={`${num(report.overall.latencyMs.median, 0)}ms`} />
               <Card label="P95 Latency" value={`${num(report.overall.latencyMs.p95, 0)}ms`} />
               <Card label="P99 Latency" value={`${num(report.overall.latencyMs.p99, 0)}ms`} />
-              <Card label="Total Model Calls" value={report.overall.modelCalls.total?.toLocaleString() ?? '—'} />
-              <Card label="Total Tokens" value={((report.overall.inputTokens.total ?? 0) + (report.overall.outputTokens.total ?? 0)).toLocaleString()} />
-              <Card label="Total Estimated Cost" value={report.overall.costUsd.total != null ? `$${report.overall.costUsd.total.toFixed(2)}` : '—'} />
-              <Card label="Retry Rate" value={pct(report.overall.retries.retryRate)} />
+              <Card label="Primary-Generation Model Calls" value={report.overall.modelCalls.total?.toLocaleString() ?? '—'} />
+              <Card label="Primary-Generation Tokens" value={((report.overall.inputTokens.total ?? 0) + (report.overall.outputTokens.total ?? 0)).toLocaleString()} />
+              <Card label="Estimated Cost" value={report.overall.costUsd.total != null ? `$${report.overall.costUsd.total.toFixed(2)}` : 'unavailable'} />
+              <Card label="Pipeline Retry Rate" value={pct(report.overall.pipelineRetries.retryRate)} />
+              <Card label="Benchmark Job Retry Rate" value={pct(report.overall.jobRetries.retryRate)} />
               <Card label="Failure Rate" value={pct(report.overall.failures.rate)} />
             </div>
+            <p className="text-xs text-gray-400 dark:text-gray-500 -mt-2">
+              Model-call and token counts cover primary generation only — internal quality-gate/judge, targeted-repair,
+              claim-verification, and document-context/consistency calls are not yet instrumented, so true totals are somewhat
+              higher. Pipeline retries (Humanite&apos;s own candidate/quality-gate retries) and benchmark job retries (a
+              provider error causing this run&apos;s own job to be re-attempted) are different events, reported separately.
+            </p>
 
             <Section title="Latency by Intensity">
               <BreakdownList data={Object.fromEntries(Object.entries(report.byIntensity).map(([k, v]) => [`I${k}`, { n: v.n, value: v.latencyMs.median }]))} valueLabel="Median (ms)" format={v => num(v, 0)} />

@@ -203,6 +203,35 @@ describe('transformSource', () => {
   })
 })
 
+// "Final Polish" patch, §22: the exact per-domain intensity cap table,
+// exercised through transformSource end-to-end (not just effectiveIntensity
+// in isolation) — proves BenchmarkOutput persists requested/applied/capped
+// correctly for every domain, not merely that the pure function is right.
+describe('transformSource — domain intensity cap table (§22)', () => {
+  const CASES: Array<{ domain: CorpusSource['domainId']; requested: number; applied: number; capped: boolean }> = [
+    { domain: 'general', requested: 10, applied: 10, capped: false },
+    { domain: 'business', requested: 10, applied: 10, capped: false },
+    { domain: 'academic', requested: 10, applied: 8, capped: true },
+    { domain: 'technical', requested: 10, applied: 7, capped: true },
+    { domain: 'medical', requested: 10, applied: 5, capped: true },
+    { domain: 'legal', requested: 10, applied: 4, capped: true },
+    { domain: 'medical', requested: 3, applied: 3, capped: false },
+    { domain: 'legal', requested: 4, applied: 4, capped: false },
+  ]
+
+  for (const { domain, requested, applied, capped } of CASES) {
+    it(`${domain} requested ${requested} → applied ${applied} (capped: ${capped})`, async () => {
+      const { firestore } = makeFirestore()
+      const source: CorpusSource = { ...FROZEN_SOURCE, id: `${FROZEN_SOURCE.id}__${domain}__${requested}`, domainId: domain }
+      const output = await transformSource(firestore, { runId: RUN_ID, source, intensity: requested, client: stubClient(), model: 'stub-model', modelProvider: 'openai' })
+      expect(output.intensity).toBe(requested)
+      expect(output.requestedIntensity).toBe(requested)
+      expect(output.appliedIntensity).toBe(applied)
+      expect(output.intensityCapped).toBe(capped)
+    })
+  }
+})
+
 describe('listOutputsForSource / listOutputsForRun', () => {
   it('returns every intensity generated for a source, sorted', async () => {
     const { firestore } = makeFirestore()

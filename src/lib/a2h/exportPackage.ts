@@ -4,7 +4,7 @@ import { getCorpusManifest } from './corpusProject'
 import { getFixtureSet, listFixturesForSet } from './fixtures'
 import { getSourceById } from './corpus'
 import { listOutputsForRun } from './outputs'
-import { listDetectorResultsForRun } from './baseline'
+import { listDetectorEvidenceForRun } from './baseline'
 import { listTestResultsForRun } from './testResults'
 import { listTrialsForRun } from './trials'
 import { listRepairAttemptsForRun } from './repairAttempts'
@@ -21,11 +21,14 @@ import { getReleaseForRun, computeAggregateSnapshot } from './release'
 // too; the UI's own release workflow is what decides when a run's numbers
 // are "final."
 //
-// Known gap: detector-results.csv is queried by THIS run's runId — a
-// baseline a run REUSED from an earlier run (§8's cross-run baseline
-// sharing) keeps that earlier run's runId as provenance, so it will be
-// missing from a reusing run's own export even though its A2H-01/02
-// measurements depend on it. Documented rather than silently incomplete.
+// "Final Polish" patch, blocker #10: detector-results.csv used to be
+// queried by THIS run's runId — a baseline a run REUSED from an earlier run
+// (§8's cross-run baseline sharing) keeps that earlier run's runId as
+// provenance, so it was silently missing from a reusing run's own export
+// even though its A2H-01/02 measurements depend on it. Now built from
+// listDetectorEvidenceForRun's LOGICAL definition (every baseline this
+// run's cohort actually uses, plus every post-score this run's own outputs
+// actually have), never the stored runId field.
 
 export interface ExportFile {
   name: string
@@ -105,11 +108,23 @@ export async function buildExportFile(firestore: Firestore, runId: string, name:
     case 'outputs.csv': {
       const outputs = await listOutputsForRun(firestore, runId)
       const rows = outputs.map(o => ({ ...o, outputText: o.outputText.length }))
-      return { name, contentType: 'text/csv', content: toCsv(rows, ['id', 'sourceId', 'domainId', 'targetWords', 'intensity', 'outputWords', 'outputSha256', 'model', 'latencyMs', 'modelCalls', 'inputTokens', 'outputTokens', 'estimatedCostUsd', 'retryCount', 'candidateCount', 'status', 'errorCode', 'outputText']) }
+      return {
+        name, contentType: 'text/csv', content: toCsv(rows, [
+          'id', 'sourceId', 'domainId', 'targetWords', 'intensity', 'requestedIntensity', 'appliedIntensity', 'intensityCapped',
+          'outputWords', 'outputSha256', 'modelProvider', 'model', 'latencyMs', 'modelCalls', 'inputTokens', 'outputTokens', 'telemetryScope',
+          'estimatedCostUsd', 'retryCount', 'candidateCount', 'status', 'errorCode', 'outputText',
+        ]),
+      }
     }
     case 'detector-results.csv': {
-      const results = await listDetectorResultsForRun(firestore, runId)
-      return { name, contentType: 'text/csv', content: toCsv(results as unknown as Array<Record<string, unknown>>, ['id', 'sourceId', 'outputId', 'stage', 'detector', 'detectorConfigId', 'aiProbability', 'humanProbability', 'mixedProbability', 'classification', 'latencyMs', 'analyzedAt']) }
+      const results = await listDetectorEvidenceForRun(firestore, run)
+      const rows = results.map(r => ({ ...r, baselineReusedAcrossRuns: r.stage === 'baseline' && r.runId !== run.id }))
+      return {
+        name, contentType: 'text/csv', content: toCsv(rows as unknown as Array<Record<string, unknown>>, [
+          'id', 'sourceId', 'outputId', 'stage', 'detector', 'detectorConfigId', 'aiProbability', 'humanProbability',
+          'mixedProbability', 'classification', 'latencyMs', 'analyzedAt', 'runId', 'baselineReusedAcrossRuns',
+        ]),
+      }
     }
     case 'test-results.csv': {
       const results = await listTestResultsForRun(firestore, runId)
@@ -127,7 +142,13 @@ export async function buildExportFile(firestore: Firestore, runId: string, name:
     }
     case 'operational-metrics.csv': {
       const records = await collectOperationRecords(firestore, runId)
-      return { name, contentType: 'text/csv', content: toCsv(records as unknown as Array<Record<string, unknown>>, ['operation', 'benchmarkCode', 'domainId', 'targetWords', 'intensity', 'model', 'latencyMs', 'inputTokens', 'outputTokens', 'modelCalls', 'retryCount', 'estimatedCostUsd', 'status', 'timedOut']) }
+      return {
+        name, contentType: 'text/csv', content: toCsv(records as unknown as Array<Record<string, unknown>>, [
+          'operation', 'benchmarkCode', 'domainId', 'targetWords', 'intensity', 'requestedIntensity', 'appliedIntensity', 'intensityCapped',
+          'model', 'latencyMs', 'inputTokens', 'outputTokens', 'modelCalls', 'telemetryScope',
+          'pipelineRetryCount', 'jobAttemptCount', 'jobRetryCount', 'estimatedCostUsd', 'status', 'timedOut',
+        ]),
+      }
     }
   }
 }

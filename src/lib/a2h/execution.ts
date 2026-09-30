@@ -66,6 +66,41 @@ export interface ExecuteBatchResult {
 
 type JobOutcome = 'completed' | 'retrying' | 'failed' | 'skipped'
 
+// A permanent, never-retryable configuration error — thrown, not classified
+// through retryPolicy.ts, since there is no job to mark 'retrying'/'failed'
+// here: this stops the WHOLE batch before any job is even claimed. The name
+// is checked by classifyFailure (via its constructor name) too, in case it
+// ever surfaces from inside a per-job try/catch in the future.
+export class ExecutionConfigMismatchError extends Error {
+  constructor(run: BenchmarkRun, options: { model: string; modelProvider: string }) {
+    super(
+      `Benchmark execution configuration changed.\n` +
+      `This run was validated with:\n` +
+      `provider: ${run.modelProvider}\n` +
+      `model: ${run.model}\n` +
+      `Current Settings resolve to:\n` +
+      `provider: ${options.modelProvider}\n` +
+      `model: ${options.model}\n` +
+      `Restore the original configuration to resume this run, or create a new Benchmark Run.`,
+    )
+    this.name = 'ExecutionConfigMismatchError'
+  }
+}
+
+// §7 of the "Final Polish" patch: a BenchmarkRun snapshots its model/provider
+// at validation time (§2 of Phase 5), but nothing previously stopped a LATER
+// /execute call from resolving the admin's now-different Settings and
+// quietly claiming/paying for the run's remaining jobs under a different
+// model. Called before any stale recovery, job claim, or paid API call — a
+// mismatch throws immediately and claims/executes nothing. Recovery of
+// already-saved evidence (a separate concern — see recovery.ts) is
+// unaffected by this: it never calls a paid API itself, so it stays safe to
+// run even when the currently-resolved Settings no longer match the run.
+export function assertExecutionConfigMatchesRun(run: BenchmarkRun, options: { model: string; modelProvider: string }): void {
+  if (options.model === run.model && options.modelProvider === run.modelProvider) return
+  throw new ExecutionConfigMismatchError(run, options)
+}
+
 const DEFAULT_MAX_JOBS_PER_STAGE = 5
 // 'repair_evaluation' (A2H-06/A2H-12) has no dependency on the earlier
 // stages — it operates on fixtures, not outputs — but is still drained in
@@ -104,6 +139,11 @@ export async function executeRunBatch(firestore: Firestore, runId: string, optio
   if (run.status !== 'running') {
     return { processed: 0, stage: 'idle', run, claimedJobs: 0, completedJobs: 0, retryScheduled: 0, failedJobs: 0, nextRetryAt: null }
   }
+
+  // §7: refuse outright if the currently-resolved model/provider no longer
+  // matches what this run was validated with — before touching recovery,
+  // claiming, or spending anything.
+  assertExecutionConfigMatchesRun(run, options)
 
   // Reconcile any 'running' job whose lease expired before its worker
   // finished (a crash, a timeout, a killed request, a closed browser tab) —

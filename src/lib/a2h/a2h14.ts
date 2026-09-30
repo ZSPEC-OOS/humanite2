@@ -1,8 +1,8 @@
 import type { Firestore } from 'firebase-admin/firestore'
 import type OpenAI from 'openai'
 import { createHash } from 'crypto'
-import { preprocess } from '@/lib/preprocess'
-import { humanizeChunk } from '@/lib/humanizePipeline'
+import { runHumaniteDocument } from '@/lib/runHumaniteDocument'
+import { effectiveIntensity } from '@/lib/intensity'
 import { calculateLocalDiagnostics } from '@/lib/detection/diagnostics'
 import { toValidGenre, toValidAudience } from '@/lib/style/types'
 import type { BenchmarkRun, BenchmarkJob, CorpusSource, BenchmarkTrial, GenreAudienceContrast } from './types'
@@ -11,7 +11,6 @@ import { groupBy } from './statistics'
 import { aggregateMetric, type StyleToneMetricAggregate, type StyleToneMetricDelta, metricDelta } from './styleContrastShared'
 
 export const A2H14_CODE = 'A2H-14' as const
-const MAX_GATE_RETRIES = 2
 const FIXED_TONE = 'balanced'
 const FIXED_INTENSITY = 5
 
@@ -85,6 +84,7 @@ export async function runA2H14Trial(firestore: Firestore, run: BenchmarkRun, sou
   const genre = toValidGenre(side.genre ?? null)
   const audience = toValidAudience(side.audience ?? null)
   const domain = contrast.domain ?? source.domainId
+  const effective = effectiveIntensity(FIXED_INTENSITY, domain)
 
   await getOrCreateTrial(firestore, {
     runId: run.id,
@@ -93,27 +93,29 @@ export async function runA2H14Trial(firestore: Firestore, run: BenchmarkRun, sou
     sourceId: source.id,
     conditionId: job.conditionId,
     trialIndex: 0,
-    condition: { sourceId: source.id, contrastId, side: isLeft ? 'left' : 'right', genre, audience, domain, intensity: FIXED_INTENSITY },
+    condition: {
+      sourceId: source.id, contrastId, side: isLeft ? 'left' : 'right', genre, audience, domain, intensity: FIXED_INTENSITY,
+      requestedIntensity: effective.requested, appliedIntensity: effective.applied, intensityCapped: effective.capped,
+    },
     run: async (): Promise<TrialRunResult> => {
       const start = Date.now()
       try {
-        const prep = preprocess(source.text)
-        const result = await humanizeChunk(
-          options.client, options.model, source.text, prep.sanitized_text, prep.fact_locks,
-          FIXED_INTENSITY, FIXED_TONE, domain, MAX_GATE_RETRIES, genre, audience,
-        )
+        const generated = await runHumaniteDocument({
+          client: options.client, model: options.model, sourceText: source.text, requestedIntensity: FIXED_INTENSITY,
+          tone: FIXED_TONE, domain, genre, audience,
+        })
         return {
-          outputText: result.text,
-          outputSha256: createHash('sha256').update(result.text).digest('hex'),
-          outputWords: result.text.trim() ? result.text.trim().split(/\s+/).length : 0,
+          outputText: generated.text,
+          outputSha256: createHash('sha256').update(generated.text).digest('hex'),
+          outputWords: generated.text.trim() ? generated.text.trim().split(/\s+/).length : 0,
           modelProvider: options.modelProvider,
-          model: result.modelUsed,
+          model: generated.modelUsed,
           latencyMs: Date.now() - start,
-          modelCalls: result.modelCalls,
-          retryCount: result.retryCount,
-          candidateCount: result.candidateSelection.candidateCount,
-          inputTokens: result.inputTokens,
-          outputTokens: result.outputTokens,
+          modelCalls: generated.modelCalls,
+          retryCount: generated.retryCount,
+          candidateCount: generated.candidateCount,
+          inputTokens: generated.inputTokens,
+          outputTokens: generated.outputTokens,
           estimatedCostUsd: null,
           aiProbability: null,
           humanProbability: null,

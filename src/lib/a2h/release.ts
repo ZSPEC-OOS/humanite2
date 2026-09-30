@@ -1,5 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore'
 import { createHash } from 'crypto'
+import { effectiveIntensity } from '@/lib/intensity'
 import {
   A2H_COLLECTIONS, EXPERIMENTAL_TRIAL_TEST_CODES,
   type BenchmarkRun, type BenchmarkRelease, type ReleaseValidationResult, type A2HTestCode,
@@ -12,6 +13,7 @@ import { listTestResultsForRun } from './testResults'
 import { listTrialsForRun } from './trials'
 import { listRepairAttemptsForRun } from './repairAttempts'
 import { listJobsForRun } from './jobs'
+import { listDetectorEvidenceForRun } from './baseline'
 import { getExperimentCohort } from './experimentCohort'
 import { getA2H01Report } from './a2h01'
 import { getA2H02Report } from './a2h02'
@@ -131,6 +133,62 @@ export async function validateReleaseReadiness(firestore: Firestore, runId: stri
     if (!experimentCohort) errors.push(`${code} is enabled but has no frozen experiment cohort.`)
   }
 
+  // "Final Polish" patch, §13/§15: output configuration consistency. A
+  // legacy run (no executionSemanticsVersion at all) predates
+  // requestedIntensity/appliedIntensity/intensityCapped existing as real,
+  // persisted fields — checking them would be meaningless, so this run is
+  // instead checked ONLY for whether it touches a domain/intensity
+  // combination the current cap would have applied to; if so, its outputs
+  // may have bypassed production's domain intensity policy entirely (§1)
+  // and it must not be released as-is.
+  if (!run.executionSemanticsVersion) {
+    const wouldHaveBeenCapped = successfulOutputs.some(o => effectiveIntensity(o.intensity, o.domainId).capped)
+    if (wouldHaveBeenCapped) {
+      errors.push(
+        'This run predates product-faithful domain intensity caps. Create a new run before producing a final benchmark release.',
+      )
+    } else {
+      warnings.push(
+        "This run predates executionSemanticsVersion tracking — none of its domains/intensities would have been capped, but full product-fidelity cannot be verified for it.",
+      )
+    }
+  } else {
+    // A current-schema run: verify every successful output's model/
+    // provider/intensity fields are actually internally consistent, not
+    // just present — catches a mixed-model/provider run, or an intensity
+    // cap drift between generation time and release time, before
+    // publication. Aggregated into one message per category rather than
+    // one per row, since a systemic issue could otherwise affect every
+    // output in the run.
+    const wrongRunId = successfulOutputs.filter(o => o.runId !== run.id).length
+    if (wrongRunId > 0) errors.push(`${wrongRunId} output(s) have a runId that does not match this run.`)
+
+    const wrongProvider = successfulOutputs.filter(o => o.modelProvider !== run.modelProvider).length
+    if (wrongProvider > 0) {
+      errors.push(`${wrongProvider} output(s) were generated under a different provider than this run's snapshot ('${run.modelProvider}') — release blocked to prevent mixed-provider evidence.`)
+    }
+
+    // Tolerates a provider-versioned suffix (e.g. requested 'gpt-4o-mini',
+    // API reports 'gpt-4o-mini-2024-07-18') — a real, benign difference
+    // between the requested model name and what a provider's response
+    // reports, not a mixed-model run.
+    const wrongModel = successfulOutputs.filter(o => o.model !== run.model && !o.model.startsWith(`${run.model}-`)).length
+    if (wrongModel > 0) {
+      errors.push(`${wrongModel} output(s) were generated under a different model than this run's snapshot ('${run.model}') — release blocked to prevent mixed-model evidence.`)
+    }
+
+    const badRequested = successfulOutputs.filter(o => o.requestedIntensity !== o.intensity).length
+    if (badRequested > 0) errors.push(`${badRequested} output(s) have a requestedIntensity that does not match their own intensity field.`)
+
+    const badApplied = successfulOutputs.filter(o => {
+      const expected = effectiveIntensity(o.requestedIntensity, o.domainId)
+      return o.appliedIntensity !== expected.applied || o.intensityCapped !== expected.capped
+    }).length
+    if (badApplied > 0) {
+      errors.push(`${badApplied} output(s) have an appliedIntensity/intensityCapped value inconsistent with the current effective-intensity policy for their domain.`)
+    }
+  }
+
   return { ok: errors.length === 0, errors, warnings }
 }
 
@@ -195,18 +253,27 @@ export async function createRelease(firestore: Firestore, runId: string): Promis
   if (!readiness.ok) return { ok: false, errors: readiness.errors, release: null }
 
   const run = (await getRun(firestore, runId))!
-  const [outputs, testResults, trials, repairAttempts, jobs] = await Promise.all([
+  const [outputs, testResults, trials, repairAttempts, jobs, detectorEvidence] = await Promise.all([
     listOutputsForRun(firestore, runId),
     listTestResultsForRun(firestore, runId),
     listTrialsForRun(firestore, runId),
     listRepairAttemptsForRun(firestore, runId),
     listJobsForRun(firestore, runId),
+    listDetectorEvidenceForRun(firestore, run),
   ])
   const manifest = (await getCorpusManifest(firestore, run.corpusProjectId))!
 
   const aggregateSnapshot = await computeAggregateSnapshot(firestore, run)
   const outputHashes: Record<string, string> = { outputs: hashRows(outputs) }
+  // §12 of the "Final Polish" patch: A2H-01/A2H-02 fundamentally depend on
+  // detector evidence (baselines + post-scores) — a release that hashes
+  // only outputs/results/trials/repair-attempts could have its underlying
+  // GPTZero rows silently change or vanish without integrity verification
+  // ever noticing. detectorResults uses the LOGICAL definition
+  // (listDetectorEvidenceForRun), never a stored runId filter, so a reused
+  // cross-run baseline is covered too.
   const resultHashes: Record<string, string> = {
+    detectorResults: hashRows(detectorEvidence),
     testResults: hashRows(testResults),
     trials: hashRows(trials),
     repairAttempts: hashRows(repairAttempts),
@@ -264,16 +331,20 @@ export interface ReleaseIntegrityResult {
 export async function verifyReleaseIntegrity(firestore: Firestore, releaseId: string): Promise<ReleaseIntegrityResult> {
   const release = await getRelease(firestore, releaseId)
   if (!release) return { ok: false, errors: ['Release not found.'] }
+  const run = await getRun(firestore, release.runId)
+  if (!run) return { ok: false, errors: ['The released run no longer exists.'] }
 
   const errors: string[] = []
-  const [outputs, testResults, trials, repairAttempts] = await Promise.all([
+  const [outputs, testResults, trials, repairAttempts, detectorEvidence] = await Promise.all([
     listOutputsForRun(firestore, release.runId),
     listTestResultsForRun(firestore, release.runId),
     listTrialsForRun(firestore, release.runId),
     listRepairAttemptsForRun(firestore, release.runId),
+    listDetectorEvidenceForRun(firestore, run),
   ])
 
   if (hashRows(outputs) !== release.outputHashes['outputs']) errors.push('outputs hash no longer matches stored records.')
+  if (hashRows(detectorEvidence) !== release.resultHashes['detectorResults']) errors.push('detectorResults hash no longer matches stored records.')
   if (hashRows(testResults) !== release.resultHashes['testResults']) errors.push('testResults hash no longer matches stored records.')
   if (hashRows(trials) !== release.resultHashes['trials']) errors.push('trials hash no longer matches stored records.')
   if (hashRows(repairAttempts) !== release.resultHashes['repairAttempts']) errors.push('repairAttempts hash no longer matches stored records.')

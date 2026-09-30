@@ -1,8 +1,8 @@
 import type { Firestore } from 'firebase-admin/firestore'
 import type OpenAI from 'openai'
 import { createHash } from 'crypto'
-import { preprocess } from '@/lib/preprocess'
-import { humanizeChunk } from '@/lib/humanizePipeline'
+import { runHumaniteDocument } from '@/lib/runHumaniteDocument'
+import { effectiveIntensity } from '@/lib/intensity'
 import { measureStyleDiagnostics } from '@/lib/style/measure'
 import { toValidTone } from '@/lib/style/types'
 import type { BenchmarkRun, BenchmarkJob, CorpusSource, BenchmarkTrial, StyleToneContrast } from './types'
@@ -11,7 +11,6 @@ import { groupBy } from './statistics'
 import { metricDelta, aggregateMetric, type StyleToneMetricDelta, type StyleToneMetricAggregate } from './styleContrastShared'
 
 export const A2H11_CODE = 'A2H-11' as const
-const MAX_GATE_RETRIES = 2
 // Held constant across both arms of every contrast, at a mid-level intensity
 // — Phase 3's own acceptance criterion for the style compiler held domain
 // constant "to isolate the tone axis"; this holds intensity constant for the
@@ -94,6 +93,7 @@ export async function runA2H11Trial(firestore: Firestore, run: BenchmarkRun, sou
   const contrast = contrasts.find(c => c.id === contrastId)
   if (!contrast) throw new Error(`A2H-11 trial job ${job.id} references unknown contrast ${contrastId}.`)
   const tone = toValidTone(isLeft ? contrast.left.tone : contrast.right.tone)
+  const effective = effectiveIntensity(FIXED_INTENSITY, source.domainId)
 
   await getOrCreateTrial(firestore, {
     runId: run.id,
@@ -102,27 +102,29 @@ export async function runA2H11Trial(firestore: Firestore, run: BenchmarkRun, sou
     sourceId: source.id,
     conditionId: job.conditionId,
     trialIndex: 0,
-    condition: { sourceId: source.id, contrastId, side: isLeft ? 'left' : 'right', tone, intensity: FIXED_INTENSITY },
+    condition: {
+      sourceId: source.id, contrastId, side: isLeft ? 'left' : 'right', tone, intensity: FIXED_INTENSITY,
+      requestedIntensity: effective.requested, appliedIntensity: effective.applied, intensityCapped: effective.capped,
+    },
     run: async (): Promise<TrialRunResult> => {
       const start = Date.now()
       try {
-        const prep = preprocess(source.text)
-        const result = await humanizeChunk(
-          options.client, options.model, source.text, prep.sanitized_text, prep.fact_locks,
-          FIXED_INTENSITY, tone, source.domainId, MAX_GATE_RETRIES,
-        )
+        const generated = await runHumaniteDocument({
+          client: options.client, model: options.model, sourceText: source.text, requestedIntensity: FIXED_INTENSITY,
+          tone, domain: source.domainId,
+        })
         return {
-          outputText: result.text,
-          outputSha256: createHash('sha256').update(result.text).digest('hex'),
-          outputWords: result.text.trim() ? result.text.trim().split(/\s+/).length : 0,
+          outputText: generated.text,
+          outputSha256: createHash('sha256').update(generated.text).digest('hex'),
+          outputWords: generated.text.trim() ? generated.text.trim().split(/\s+/).length : 0,
           modelProvider: options.modelProvider,
-          model: result.modelUsed,
+          model: generated.modelUsed,
           latencyMs: Date.now() - start,
-          modelCalls: result.modelCalls,
-          retryCount: result.retryCount,
-          candidateCount: result.candidateSelection.candidateCount,
-          inputTokens: result.inputTokens,
-          outputTokens: result.outputTokens,
+          modelCalls: generated.modelCalls,
+          retryCount: generated.retryCount,
+          candidateCount: generated.candidateCount,
+          inputTokens: generated.inputTokens,
+          outputTokens: generated.outputTokens,
           estimatedCostUsd: null,
           aiProbability: null,
           humanProbability: null,

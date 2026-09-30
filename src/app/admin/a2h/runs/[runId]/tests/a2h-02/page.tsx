@@ -96,12 +96,43 @@ export default function A2H02ResultsPage() {
             </div>
 
             <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-1.5">
-              <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">Per-Intensity Statistics</h2>
+              <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">Per-Intensity Statistics (requested)</h2>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">
+                Requested is the setting exposed to the user. A capped domain shows several requested levels converging on the
+                same applied Humanite configuration — see Applied Intensity below to confirm.
+              </p>
               {levels.map(l => {
                 const agg = report.byIntensity[l]!
+                const appliedLevels = [...new Set(report.rows.filter(r => r.intensity === l).map(r => r.appliedIntensity))].sort((a, b) => a - b)
+                const capped = report.rows.some(r => r.intensity === l && r.intensityCapped)
                 return (
                   <div key={l} className="flex items-center gap-3 text-xs">
                     <span className="w-12 shrink-0 text-gray-600 dark:text-gray-400">I{l}</span>
+                    <span className="text-gray-400 dark:text-gray-500">n={agg.n}</span>
+                    <span className="text-gray-700 dark:text-gray-300">mag {num(agg.transformationMagnitude.mean, 2)}</span>
+                    <span className="text-gray-700 dark:text-gray-300">conv {pct(agg.conversionRate.successRate)}</span>
+                    <span className="text-gray-700 dark:text-gray-300">ΔAI {num(agg.aiProbability.mean, 2)}</span>
+                    <span className="text-gray-400 dark:text-gray-500">|Δwords| {num(agg.wordCountAbsChange.mean, 1)}</span>
+                    {capped && (
+                      <span className="text-amber-600 dark:text-amber-400" title="At least one output at this requested level was capped by the production domain policy.">
+                        applied: {appliedLevels.join(', ')} (capped)
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-1.5">
+              <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">Per-Applied-Intensity Statistics</h2>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">
+                What Humanite actually received after the production domain cap — the honest configuration axis for a capped domain.
+              </p>
+              {Object.keys(report.byAppliedIntensity).map(Number).sort((a, b) => a - b).map(l => {
+                const agg = report.byAppliedIntensity[l]!
+                return (
+                  <div key={l} className="flex items-center gap-3 text-xs">
+                    <span className="w-12 shrink-0 text-gray-600 dark:text-gray-400">A{l}</span>
                     <span className="text-gray-400 dark:text-gray-500">n={agg.n}</span>
                     <span className="text-gray-700 dark:text-gray-300">mag {num(agg.transformationMagnitude.mean, 2)}</span>
                     <span className="text-gray-700 dark:text-gray-300">conv {pct(agg.conversionRate.successRate)}</span>

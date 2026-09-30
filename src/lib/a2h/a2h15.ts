@@ -2,7 +2,8 @@ import type { Firestore } from 'firebase-admin/firestore'
 import type OpenAI from 'openai'
 import { createHash } from 'crypto'
 import { preprocess } from '@/lib/preprocess'
-import { humanizeChunk } from '@/lib/humanizePipeline'
+import { runHumaniteDocument } from '@/lib/runHumaniteDocument'
+import { effectiveIntensity } from '@/lib/intensity'
 import { measureIntensity } from '@/lib/evaluation/intensity'
 import { candidateCountForIntensity } from '@/lib/selection'
 import type { BenchmarkRun, BenchmarkJob, CorpusSource, BenchmarkTrial, BenchmarkFixture, BenchmarkOutput, A2HTestCode } from './types'
@@ -16,7 +17,6 @@ import { getSourceById } from './corpus'
 import { summarizeContinuous, groupBy, type ContinuousSummary } from './statistics'
 
 export const A2H15_CODE = 'A2H-15' as const
-const MAX_GATE_RETRIES = 2
 const FIXED_TONE = 'balanced'
 
 // A2H-15 — Candidate Selection Effectiveness (§17-22). Compares production
@@ -74,6 +74,12 @@ export async function runA2H15Trial(firestore: Firestore, run: BenchmarkRun, sou
   if (!parsed) throw new Error(`A2H-15 trial job ${job.id} has an unrecognized conditionId ${job.conditionId}.`)
   const { intensity, arm } = parsed
   const candidateCountOverride = arm === 'single' ? 1 : null
+  // Computed once, independent of the arm — both the single-candidate and
+  // production arms must share IDENTICAL applied intensity (§23: "matched
+  // arms must always share identical applied intensity"), which is
+  // automatic here since effectiveIntensity is a pure function of
+  // (requested, domain) and candidateCountOverride never changes it.
+  const effective = effectiveIntensity(intensity, source.domainId)
 
   await getOrCreateTrial(firestore, {
     runId: run.id,
@@ -82,39 +88,41 @@ export async function runA2H15Trial(firestore: Firestore, run: BenchmarkRun, sou
     sourceId: source.id,
     conditionId: job.conditionId,
     trialIndex: 0,
-    condition: { sourceId: source.id, intensity, arm },
+    condition: {
+      sourceId: source.id, intensity, arm,
+      requestedIntensity: effective.requested, appliedIntensity: effective.applied, intensityCapped: effective.capped,
+    },
     run: async (): Promise<TrialRunResult> => {
       const start = Date.now()
       try {
-        const prep = preprocess(source.text)
-        const result = await humanizeChunk(
-          options.client, options.model, source.text, prep.sanitized_text, prep.fact_locks,
-          intensity, FIXED_TONE, source.domainId, MAX_GATE_RETRIES,
-          null, null, null, candidateCountOverride,
-        )
-        const detector = await scoreTextWithGPTZero(result.text, options.gptZeroApiKey)
-        const transformationMagnitude = measureIntensity(source.text, result.text, prep.fact_locks.map(l => l.text)).transformationMagnitude
+        const generated = await runHumaniteDocument({
+          client: options.client, model: options.model, sourceText: source.text, requestedIntensity: intensity,
+          tone: FIXED_TONE, domain: source.domainId, candidateCountOverride,
+        })
+        const detector = await scoreTextWithGPTZero(generated.text, options.gptZeroApiKey)
+        const factLockTexts = preprocess(source.text).fact_locks.map(l => l.text)
+        const transformationMagnitude = measureIntensity(source.text, generated.text, factLockTexts).transformationMagnitude
         return {
-          outputText: result.text,
-          outputSha256: createHash('sha256').update(result.text).digest('hex'),
-          outputWords: result.text.trim() ? result.text.trim().split(/\s+/).length : 0,
+          outputText: generated.text,
+          outputSha256: createHash('sha256').update(generated.text).digest('hex'),
+          outputWords: generated.text.trim() ? generated.text.trim().split(/\s+/).length : 0,
           modelProvider: options.modelProvider,
-          model: result.modelUsed,
+          model: generated.modelUsed,
           latencyMs: Date.now() - start,
-          modelCalls: result.modelCalls,
-          retryCount: result.retryCount,
-          candidateCount: result.candidateSelection.candidateCount,
-          inputTokens: result.inputTokens,
-          outputTokens: result.outputTokens,
+          modelCalls: generated.modelCalls,
+          retryCount: generated.retryCount,
+          candidateCount: generated.candidateCount,
+          inputTokens: generated.inputTokens,
+          outputTokens: generated.outputTokens,
           estimatedCostUsd: null,
           aiProbability: detector.aiProbability,
           humanProbability: detector.humanProbability,
           classification: detector.classification,
           diagnostics: {
             transformationMagnitude,
-            candidateSelection: result.candidateSelection,
-            gatesUnavailable: result.gatesUnavailable,
-            passed: result.gate?.passed ?? null,
+            candidateSelection: generated.chunkResult.candidateSelection,
+            gatesUnavailable: generated.chunkResult.gatesUnavailable,
+            passed: generated.chunkResult.gate?.passed ?? null,
           },
           status: 'success',
           errorCode: null,
@@ -139,10 +147,11 @@ function buildSyntheticOutput(source: CorpusSource, intensity: number, outputTex
   const trimmed = outputText.trim()
   return {
     id: 'synthetic', runId: '', corpusProjectId: source.corpusProjectId, sourceId: source.id, domainId: source.domainId,
-    topicId: source.topicId, targetWords: source.targetWords, intensity, outputText,
+    topicId: source.topicId, targetWords: source.targetWords, intensity,
+    requestedIntensity: intensity, appliedIntensity: intensity, intensityCapped: false, outputText,
     outputWords: trimmed ? trimmed.split(/\s+/).length : 0, outputSha256: '', modelProvider: '', model: '',
     latencyMs: 0, modelCalls: null, retryCount: 0, candidateCount: null, inputTokens: null, outputTokens: null,
-    estimatedCostUsd: null, generatedAt: new Date().toISOString(), status: 'success', errorCode: null, errorMessage: null,
+    telemetryScope: 'primary_generation_only', estimatedCostUsd: null, generatedAt: new Date().toISOString(), status: 'success', errorCode: null, errorMessage: null,
   }
 }
 

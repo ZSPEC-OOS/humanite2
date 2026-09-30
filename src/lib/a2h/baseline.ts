@@ -1,6 +1,8 @@
 import type { Firestore } from 'firebase-admin/firestore'
 import { GPTZeroProvider } from '@/lib/detection/providers/gptzero'
-import { A2H_COLLECTIONS, type CorpusSource, type BenchmarkOutput, type DetectorResult } from './types'
+import { A2H_COLLECTIONS, DEFAULT_DETECTOR_CONFIG_ID, type CorpusSource, type BenchmarkOutput, type BenchmarkRun, type DetectorResult } from './types'
+import { listRunSources } from './runs'
+import { listOutputsForRun } from './outputs'
 
 const COLLECTION = A2H_COLLECTIONS.detectorResults
 
@@ -74,14 +76,49 @@ export async function listPostScoresForOutputs(firestore: Firestore, outputIds: 
   return map
 }
 
-// Phase 5 export layer: every baseline AND post-transform DetectorResult
-// this run produced or reused — a baseline's own runId is only provenance
-// (§8: "which run first produced it"), so this can surface baselines this
-// run reused from an earlier run too, which is correct: they still scored
-// text this run's own A2H-01/02 measurements depend on.
+// Phase 5 export layer, superseded by listDetectorEvidenceForRun below —
+// kept only because it's a plain, cheap "what does this run's OWN runId
+// field say" query some other read path might still want; do not use this
+// for exports, release hashing, or anything claiming completeness. See
+// listDetectorEvidenceForRun's own comment for why runId-based filtering
+// is wrong for that purpose (blocker #10 of the "Final Polish" patch).
 export async function listDetectorResultsForRun(firestore: Firestore, runId: string): Promise<DetectorResult[]> {
   const snap = await firestore.collection(COLLECTION).where('runId', '==', runId).get()
   return snap.docs.map(d => d.data() as DetectorResult)
+}
+
+// §10-11 of the "Final Polish" patch: a baseline's identity is
+// (sourceId, detectorConfigId) — deliberately NOT scoped by runId, so the
+// SAME source scored under the SAME detector configuration is never paid
+// for twice across runs (§8). That means a baseline's own `runId` field
+// only records which run happened to create it FIRST — a run that REUSES
+// an older baseline never appears as that baseline's `runId`, even though
+// its own A2H-01/02 measurements depend on it. `where('runId', '==', runId)`
+// (the old listDetectorResultsForRun) therefore silently omits every reused
+// baseline from a run's detector export and release hashes — an incomplete
+// research package with no error or warning.
+//
+// The correct definition of "detector evidence for this run" is LOGICAL,
+// not a stored field: every baseline actually used by this run's source
+// cohort, plus every post-score actually used by this run's own outputs —
+// regardless of which run's runId a shared baseline happens to carry.
+export async function listDetectorEvidenceForRun(firestore: Firestore, run: BenchmarkRun): Promise<DetectorResult[]> {
+  const detectorConfigId = run.detectorConfigId ?? DEFAULT_DETECTOR_CONFIG_ID
+  const [cohort, outputs] = await Promise.all([
+    listRunSources(firestore, run.id),
+    listOutputsForRun(firestore, run.id),
+  ])
+  const successfulOutputs = outputs.filter(o => o.status === 'success')
+
+  const [baselines, postScores] = await Promise.all([
+    listBaselinesForSources(firestore, cohort.map(row => row.sourceId), detectorConfigId),
+    listPostScoresForOutputs(firestore, successfulOutputs.map(o => o.id), detectorConfigId),
+  ])
+
+  const byId = new Map<string, DetectorResult>()
+  for (const result of Object.values(baselines)) byId.set(result.id, result)
+  for (const result of Object.values(postScores)) byId.set(result.id, result)
+  return [...byId.values()]
 }
 
 export interface AcquireBaselineParams {

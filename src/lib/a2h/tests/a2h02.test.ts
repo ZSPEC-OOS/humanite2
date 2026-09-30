@@ -34,7 +34,7 @@ function makePostScore(overrides: Partial<DetectorResult> = {}): DetectorResult 
 
 describe('computeA2H02Measurements', () => {
   it('computes word count delta and percentage change deterministically', () => {
-    const output = { outputText: 'A completely different sentence with more words than the original had before.', outputWords: 12, intensity: 5 }
+    const output = { outputText: 'A completely different sentence with more words than the original had before.', outputWords: 12, intensity: 5, requestedIntensity: 5, appliedIntensity: 5, intensityCapped: false }
     const measurements = computeA2H02Measurements(SOURCE, output, makePostScore())
     expect(measurements.sourceWords).toBe(100)
     expect(measurements.outputWords).toBe(12)
@@ -44,14 +44,14 @@ describe('computeA2H02Measurements', () => {
   })
 
   it('is deterministic for the same source/output pair — no randomness, no LLM judge', () => {
-    const output = { outputText: 'A rewritten version of the source text used for this test.', outputWords: 11, intensity: 3 }
+    const output = { outputText: 'A rewritten version of the source text used for this test.', outputWords: 11, intensity: 3, requestedIntensity: 3, appliedIntensity: 3, intensityCapped: false }
     const first = computeA2H02Measurements(SOURCE, output, makePostScore())
     const second = computeA2H02Measurements(SOURCE, output, makePostScore())
     expect(second).toEqual(first)
   })
 
   it('copies aiProbability/humanProbability/classification straight from the post-score', () => {
-    const output = { outputText: 'Some output text.', outputWords: 3, intensity: 7 }
+    const output = { outputText: 'Some output text.', outputWords: 3, intensity: 7, requestedIntensity: 7, appliedIntensity: 7, intensityCapped: false }
     const postScore = makePostScore({ aiProbability: 0.42, humanProbability: 0.5, classification: 'mixed' })
     const measurements = computeA2H02Measurements(SOURCE, output, postScore)
     expect(measurements.aiProbability).toBe(0.42)
@@ -63,8 +63,8 @@ describe('computeA2H02Measurements', () => {
 describe('aggregateA2H02', () => {
   it('reports N, transformation magnitude summary, and word count summaries', () => {
     const outputs = [
-      { outputText: 'Short one.', outputWords: 2, intensity: 3 },
-      { outputText: 'A slightly longer output text here.', outputWords: 6, intensity: 3 },
+      { outputText: 'Short one.', outputWords: 2, intensity: 3, requestedIntensity: 3, appliedIntensity: 3, intensityCapped: false },
+      { outputText: 'A slightly longer output text here.', outputWords: 6, intensity: 3, requestedIntensity: 3, appliedIntensity: 3, intensityCapped: false },
     ]
     const measurements = outputs.map(o => computeA2H02Measurements(SOURCE, o, makePostScore()))
     const aggregate = aggregateA2H02(measurements)
@@ -75,9 +75,9 @@ describe('aggregateA2H02', () => {
 
   it('computes a post-transform conversion rate (fraction classified human-written) distinct from A2H-01\'s eligibility-gated rate', () => {
     const measurements = [
-      computeA2H02Measurements(SOURCE, { outputText: 'a', outputWords: 1, intensity: 1 }, makePostScore({ classification: 'human-written' })),
-      computeA2H02Measurements(SOURCE, { outputText: 'b', outputWords: 1, intensity: 1 }, makePostScore({ classification: 'ai-generated' })),
-      computeA2H02Measurements(SOURCE, { outputText: 'c', outputWords: 1, intensity: 1 }, makePostScore({ classification: 'human-written' })),
+      computeA2H02Measurements(SOURCE, { outputText: 'a', outputWords: 1, intensity: 1, requestedIntensity: 1, appliedIntensity: 1, intensityCapped: false }, makePostScore({ classification: 'human-written' })),
+      computeA2H02Measurements(SOURCE, { outputText: 'b', outputWords: 1, intensity: 1, requestedIntensity: 1, appliedIntensity: 1, intensityCapped: false }, makePostScore({ classification: 'ai-generated' })),
+      computeA2H02Measurements(SOURCE, { outputText: 'c', outputWords: 1, intensity: 1, requestedIntensity: 1, appliedIntensity: 1, intensityCapped: false }, makePostScore({ classification: 'human-written' })),
     ]
     const aggregate = aggregateA2H02(measurements)
     expect(aggregate.conversionRate.n).toBe(3)
@@ -86,9 +86,9 @@ describe('aggregateA2H02', () => {
 
   it('builds a classification distribution across all rows', () => {
     const measurements = [
-      computeA2H02Measurements(SOURCE, { outputText: 'a', outputWords: 1, intensity: 1 }, makePostScore({ classification: 'human-written' })),
-      computeA2H02Measurements(SOURCE, { outputText: 'b', outputWords: 1, intensity: 1 }, makePostScore({ classification: 'ai-generated' })),
-      computeA2H02Measurements(SOURCE, { outputText: 'c', outputWords: 1, intensity: 1 }, makePostScore({ classification: 'human-written' })),
+      computeA2H02Measurements(SOURCE, { outputText: 'a', outputWords: 1, intensity: 1, requestedIntensity: 1, appliedIntensity: 1, intensityCapped: false }, makePostScore({ classification: 'human-written' })),
+      computeA2H02Measurements(SOURCE, { outputText: 'b', outputWords: 1, intensity: 1, requestedIntensity: 1, appliedIntensity: 1, intensityCapped: false }, makePostScore({ classification: 'ai-generated' })),
+      computeA2H02Measurements(SOURCE, { outputText: 'c', outputWords: 1, intensity: 1, requestedIntensity: 1, appliedIntensity: 1, intensityCapped: false }, makePostScore({ classification: 'human-written' })),
     ]
     const aggregate = aggregateA2H02(measurements)
     expect(aggregate.classificationDistribution).toEqual({ 'human-written': 2, 'ai-generated': 1 })
