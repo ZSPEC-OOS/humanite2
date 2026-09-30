@@ -16,7 +16,17 @@ export const A2H02_CODE = 'A2H-02' as const
 // sentence/paragraph boundary and order changes) — already production code,
 // not something trapped in a test file, so this is reuse, not a rewrite.
 export interface A2H02Measurements {
+  // "Final Polish" patch, §3: `intensity` remains the REQUESTED value —
+  // A2H-02's primary strata stay requested-intensity 1-10, since that's the
+  // setting actually exposed to a user. requestedIntensity/appliedIntensity/
+  // intensityCapped are carried alongside it so a plateau in a capped
+  // domain (medical/legal at high requested settings) is visible and
+  // interpretable, rather than silently read as five genuinely different
+  // Humanite configurations when it's really the same capped one repeated.
   intensity: number
+  requestedIntensity: number
+  appliedIntensity: number
+  intensityCapped: boolean
   aiProbability: number | null
   humanProbability: number | null
   classification: string
@@ -32,12 +42,19 @@ export interface A2H02Measurements {
 // transformationMagnitude averages) can't exclude them from its
 // denominator here the way the live Humanize pipeline's own evaluation
 // does. A documented simplification, not a silent gap.
-export function computeA2H02Measurements(source: CorpusSource, output: { outputText: string; outputWords: number; intensity: number }, postScore: DetectorResult): A2H02Measurements {
+export function computeA2H02Measurements(
+  source: CorpusSource,
+  output: { outputText: string; outputWords: number; intensity: number; requestedIntensity: number; appliedIntensity: number; intensityCapped: boolean },
+  postScore: DetectorResult,
+): A2H02Measurements {
   const metrics = measureIntensity(source.text, output.outputText, [])
   const wordCountDelta = output.outputWords - source.actualWords
   const wordCountDeltaPct = source.actualWords === 0 ? 0 : wordCountDelta / source.actualWords
   return {
     intensity: output.intensity,
+    requestedIntensity: output.requestedIntensity,
+    appliedIntensity: output.appliedIntensity,
+    intensityCapped: output.intensityCapped,
     aiProbability: postScore.aiProbability,
     humanProbability: postScore.humanProbability,
     classification: postScore.classification,
@@ -129,6 +146,8 @@ export interface A2H02Row {
   topicId: string
   targetWords: number
   intensity: number
+  appliedIntensity: number
+  intensityCapped: boolean
   model: string
   measurements: A2H02Measurements
 }
@@ -166,6 +185,8 @@ export async function getA2H02Rows(firestore: Firestore, runId: string, filters?
       topicId: output.topicId,
       targetWords: output.targetWords,
       intensity: output.intensity,
+      appliedIntensity: output.appliedIntensity,
+      intensityCapped: output.intensityCapped,
       model: output.model,
       measurements: tr.measurements as unknown as A2H02Measurements,
     }
@@ -176,7 +197,16 @@ export async function getA2H02Rows(firestore: Firestore, runId: string, filters?
 
 export interface A2H02Report {
   overall: A2H02Aggregate
+  // Primary strata (§3): requested intensity 1-10 — the setting actually
+  // exposed to a user. A capped domain (medical/legal/...) will show several
+  // requested levels converging on the same applied configuration; that
+  // convergence is the intended, scientifically honest result, not a bug.
   byIntensity: Record<number, A2H02Aggregate>
+  // Secondary breakdown by what Humanite ACTUALLY received after the
+  // production domain cap — lets an analyst confirm (or refute) that a
+  // requested-intensity plateau really does correspond to one applied
+  // configuration, rather than assuming it.
+  byAppliedIntensity: Record<number, A2H02Aggregate>
   trend: IntensityTrendDiagnostics | null
   rows: A2H02Row[]
 }
@@ -192,9 +222,16 @@ export async function getA2H02Report(firestore: Firestore, runId: string, filter
     if (agg.transformationMagnitude.mean != null) meanMagnitudeByLevel.set(intensity, agg.transformationMagnitude.mean)
   }
 
+  const byAppliedIntensityGroups = groupBy(rows, r => r.appliedIntensity)
+  const byAppliedIntensity: Record<number, A2H02Aggregate> = {}
+  for (const [appliedIntensity, group] of byAppliedIntensityGroups) {
+    byAppliedIntensity[appliedIntensity] = aggregateA2H02(group.map(r => r.measurements))
+  }
+
   return {
     overall: aggregateA2H02(rows.map(r => r.measurements)),
     byIntensity,
+    byAppliedIntensity,
     trend: computeIntensityTrendDiagnostics(meanMagnitudeByLevel),
     rows,
   }

@@ -8,14 +8,15 @@ import { preprocess, FactLock } from '@/lib/preprocess'
 import { generateWatermark, hashContent } from '@/lib/watermark'
 import { chunkFactLockedText } from '@/lib/chunk'
 import { humanizeChunk, ChunkResult, joinChunkResults } from '@/lib/humanizePipeline'
-import { toValidDomain, toValidGenre, toValidAudience } from '@/lib/style'
-import { buildDocumentContext, emptyDocumentContext, runDocumentConsistencyPass, type DocumentContext } from '@/lib/document'
+import { toValidDomain } from '@/lib/style'
+import { runDocumentConsistencyPass } from '@/lib/document'
 import { effectiveIntensity } from '@/lib/intensity'
+import { runHumaniteDocument, buildDocumentContextSafely } from '@/lib/runHumaniteDocument'
 import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
 import { buildOutput, tryClassifyOutput } from '@/lib/humanizeOutput'
 import { checkAndRecordGenerationUsage } from '@/lib/usageLimits'
 import { getUserApiConfig } from '@/lib/userApiConfig'
-import { resolveProvider } from '@/lib/providerResolution'
+import { resolveProvider, resolvedProviderId } from '@/lib/providerResolution'
 import { saveTransformation } from '@/lib/transformations'
 import type { StoredApiConfig } from '@/lib/r2'
 
@@ -45,30 +46,6 @@ interface HumanizeSettings {
   audience: string | null
 }
 
-// Best-effort — a document without unusual terminology, abbreviations, or
-// section structure gets no less service from this failing than from
-// succeeding; see buildDocumentContext's own budget note (capped analysis
-// text, capped extraction counts) for why this stays a single call rather
-// than something worth retrying.
-async function buildDocumentContextSafely(
-  client: OpenAI,
-  model: string,
-  sourceText: string,
-  genre: string | null,
-  audience: string | null,
-): Promise<DocumentContext> {
-  const validGenre = toValidGenre(genre)
-  const validAudience = toValidAudience(audience)
-  try {
-    return await buildDocumentContext(client, model, sourceText, validGenre, validAudience)
-  } catch (err) {
-    console.warn('Document context analysis unavailable, continuing without cross-chunk consistency data', {
-      type: err instanceof Error ? err.constructor.name : typeof err,
-    })
-    return emptyDocumentContext(validGenre, validAudience)
-  }
-}
-
 // ── Async background processing ──────────────────────────────────────────────
 // Kicked off via waitUntil after the "pending" response is already sent. On
 // Vercel this keeps the serverless invocation alive past the response; on a
@@ -85,7 +62,7 @@ async function processHumanizeJobAsync(
   originalText: string,
 ) {
   try {
-    const { apiKey, baseURL, model } = resolveProvider(userConfig)
+    const { apiKey, baseURL, model, usingByok } = resolveProvider(userConfig)
     const client = new OpenAI({ apiKey, baseURL })
     const start = Date.now()
     const chunks = chunkFactLockedText(sanitizedText, factLocks, CHUNK_MAX_CHARS)
@@ -139,7 +116,7 @@ async function processHumanizeJobAsync(
         output,
         processing_metadata: {
           model_used: modelUsed,
-          provider_used: 'openai',
+          provider_used: resolvedProviderId(baseURL, usingByok),
           processing_duration_ms: durationMs,
           chunk_count: chunks.length,
         },
@@ -178,6 +155,17 @@ export async function POST(req: NextRequest) {
 
   const text = (body.text ?? '').trim()
   const settingsIn = body.settings ?? {}
+  // Silent Math.round()-style normalization would make an experiment
+  // sending, say, 5.5 quietly become "whatever 5.5 rounds to" without the
+  // caller ever knowing — reject it instead so intensity stays a
+  // reproducible integer 1-10 contract everywhere (the UI slider already
+  // only ever sends integers).
+  if (settingsIn.intensity !== undefined && !Number.isInteger(settingsIn.intensity)) {
+    return NextResponse.json(
+      { error: { code: 'INVALID_INTENSITY', message: 'intensity must be an integer between 1 and 10.' } },
+      { status: 400 },
+    )
+  }
   const requestedIntensity = Math.min(10, Math.max(1, settingsIn.intensity ?? 5))
   const tone = settingsIn.tone ?? 'balanced'
   const domain = settingsIn.domain ?? 'general'
@@ -281,25 +269,26 @@ export async function POST(req: NextRequest) {
 
   // ── Short document: process synchronously within this request ─────────────
   try {
-    const { apiKey, baseURL, model } = resolveProvider(userConfig)
+    const { apiKey, baseURL, model, usingByok } = resolveProvider(userConfig)
     const client = new OpenAI({ apiKey, baseURL })
     const start = Date.now()
-    const documentContext = await buildDocumentContextSafely(client, model, prep.sanitized_text, genre, audience)
 
-    const result = await humanizeChunk(
-      client, model, text, prep.sanitized_text, prep.fact_locks,
-      intensity.applied, tone, domain, MAX_GATE_RETRIES,
-      genre, audience, documentContext,
-    )
-    const consistency = await runDocumentConsistencyPass(client, model, result.text, documentContext, [result.text])
-    const finalText = consistency.text
+    // The same preprocess -> effectiveIntensity -> document-context ->
+    // humanizeChunk -> document-consistency sequence the A2H benchmark's
+    // ordinary/experimental transformations now also run through, so
+    // production and benchmark share one transformation semantics instead
+    // of two hand-maintained copies that can drift.
+    const run = await runHumaniteDocument({
+      client, model, sourceText: text, requestedIntensity, tone, domain: toValidDomain(domain), genre, audience,
+    })
+    const finalText = run.text
     const durationMs = Date.now() - start
 
-    const watermark = generateWatermark(jobId, result.modelUsed)
+    const watermark = generateWatermark(jobId, run.modelUsed)
     const detection = await tryClassifyOutput(finalText, auth.claims.sub, auth.claims.tier, userConfig?.gptzeroApiKey || undefined)
-    const output = buildOutput(finalText, [result], watermark, detection, consistency)
+    const output = buildOutput(finalText, [run.chunkResult], watermark, detection, run.consistency)
 
-    await saveTransformation({ jobId, userId: auth.claims.sub, inputText: text, output, modelUsed: result.modelUsed })
+    await saveTransformation({ jobId, userId: auth.claims.sub, inputText: text, output, modelUsed: run.modelUsed })
 
     await tryPersist(() => db().collection('jobs').doc(jobId).update({
       status: 'completed',
@@ -321,8 +310,8 @@ export async function POST(req: NextRequest) {
       },
       intensity,
       processing_metadata: {
-        model_used: result.modelUsed,
-        provider_used: 'openai',
+        model_used: run.modelUsed,
+        provider_used: resolvedProviderId(baseURL, usingByok),
         processing_duration_ms: durationMs,
       },
       result_url: null,

@@ -4,7 +4,9 @@ import { summarizeOperations, type OperationRecord } from '../a2h17'
 function op(overrides: Partial<OperationRecord> = {}): OperationRecord {
   return {
     operation: 'humanite_transform', benchmarkCode: null, domainId: 'general', targetWords: 100, intensity: 5,
-    model: 'gpt-4o-mini', latencyMs: 1000, inputTokens: 500, outputTokens: 300, modelCalls: 1, retryCount: 0,
+    requestedIntensity: 5, appliedIntensity: 5, intensityCapped: false,
+    model: 'gpt-4o-mini', latencyMs: 1000, inputTokens: 500, outputTokens: 300, modelCalls: 1,
+    telemetryScope: 'primary_generation_only', pipelineRetryCount: 0, jobAttemptCount: 1, jobRetryCount: 0,
     estimatedCostUsd: null, status: 'success', timedOut: false,
     ...overrides,
   }
@@ -22,11 +24,20 @@ describe('summarizeOperations — percentile/rate math (§53: integration/groupi
     expect(summary.latencyMs.p99).toBeGreaterThan(summary.latencyMs.p95!)
   })
 
-  it('computes retry rate as the fraction of operations with any retry, and total retries', () => {
-    const records = [op({ retryCount: 0 }), op({ retryCount: 2 }), op({ retryCount: 0 }), op({ retryCount: 1 })]
+  it('computes pipeline retry rate as the fraction of operations with any retry, and total retries', () => {
+    const records = [op({ pipelineRetryCount: 0 }), op({ pipelineRetryCount: 2 }), op({ pipelineRetryCount: 0 }), op({ pipelineRetryCount: 1 })]
     const summary = summarizeOperations(records)
-    expect(summary.retries.retryRate).toBe(0.5)
-    expect(summary.retries.total).toBe(3)
+    expect(summary.pipelineRetries.retryRate).toBe(0.5)
+    expect(summary.pipelineRetries.total).toBe(3)
+  })
+
+  it('computes job retry rate/total separately from pipeline retries, ignoring records with no correlating job', () => {
+    const records = [op({ jobRetryCount: 0 }), op({ jobRetryCount: 1 }), op({ jobRetryCount: null })]
+    const summary = summarizeOperations(records)
+    // Only 2 of 3 records have a correlating job — the null one is excluded
+    // from both the denominator and the total, not treated as a 0.
+    expect(summary.jobRetries.retryRate).toBe(0.5)
+    expect(summary.jobRetries.total).toBe(1)
   })
 
   it('computes failure rate and timeout rate independently', () => {

@@ -2,6 +2,7 @@ import type { Firestore } from 'firebase-admin/firestore'
 import {
   A2H_COLLECTIONS, IMPLEMENTED_A2H_TESTS, DEFAULT_ENABLED_TESTS, DEFAULT_TEST_VERSION, DEFAULT_DETECTOR_CONFIG_ID,
   DEFAULT_REPAIR_CONFIG_VERSION, FIXTURE_TYPE_FOR_TEST, FIXTURE_REQUIRING_TESTS, EXPERIMENTAL_TRIAL_TEST_CODES,
+  CURRENT_EXECUTION_SEMANTICS_VERSION,
   type BenchmarkRun, type BenchmarkRunSource, type A2HTestCode, type BenchmarkExperimentConfig,
   type BenchmarkJobStage, type BenchmarkJobStatus, type BenchmarkExperimentalTestCode,
 } from './types'
@@ -122,6 +123,7 @@ export async function createRun(firestore: Firestore, params: CreateRunParams): 
     startedAt: null,
     completedAt: null,
     releasedAt: null,
+    executionSemanticsVersion: CURRENT_EXECUTION_SEMANTICS_VERSION,
   }
   await ref.set(run)
   return run

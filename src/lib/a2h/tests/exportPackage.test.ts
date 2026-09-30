@@ -70,12 +70,19 @@ function generationStubClient(targetWords: number): OpenAI {
 }
 
 function humanizeStubClient(): OpenAI {
-  const chatCreate = vi.fn().mockImplementation(async (args: { response_format?: { type?: string } }) => {
+  // Echoes back whatever model was actually requested — matching a real
+  // provider's completion.model response field, which is what
+  // outputs.model ultimately records (see runHumaniteDocument/
+  // humanizeChunk). A hardcoded literal here would silently disagree with
+  // whatever model the run/EXECUTE_OPTIONS actually requested, and the
+  // "Final Polish" patch's release-consistency check (§13) would then
+  // correctly flag every output as mixed-model — not a bug in that check.
+  const chatCreate = vi.fn().mockImplementation(async (args: { model: string; response_format?: { type?: string } }) => {
     if (args.response_format?.type === 'json_object') {
-      return { model: 'stub-model', choices: [{ message: { content: '{"entailment_probability": 0.9, "issues": []}' }, finish_reason: 'stop' }] }
+      return { model: args.model, choices: [{ message: { content: '{"entailment_probability": 0.9, "issues": []}' }, finish_reason: 'stop' }] }
     }
     return {
-      model: 'stub-model',
+      model: args.model,
       choices: [{ message: { content: 'A humanized rewrite of the source text, produced for export-layer test purposes only.' }, finish_reason: 'stop' }],
       usage: { total_tokens: 500 },
     }
@@ -118,7 +125,7 @@ async function buildFrozenCorpus(firestore: Firestore, opts: { domains: Domain[]
   return project.id
 }
 
-const EXECUTE_OPTIONS = { model: 'stub-model', modelProvider: 'openai', gptZeroApiKey: 'test-key' }
+const EXECUTE_OPTIONS = { model: 'gpt-4o-mini', modelProvider: 'openai', gptZeroApiKey: 'test-key' }
 
 async function runToCompletion(firestore: Firestore, runId: string, client: OpenAI, maxIterations = 200): Promise<void> {
   for (let i = 0; i < maxIterations; i++) {
@@ -253,5 +260,65 @@ describe('buildExportFile', () => {
     const runId = await buildCompletedRun(firestore)
     const file = await buildExportFile(firestore, runId, 'fixture-manifest.json')
     expect(JSON.parse(file!.content)).toBeNull()
+  })
+
+  // "Final Polish" patch, §10-11/§26: a baseline's identity is
+  // (sourceId, detectorConfigId), not runId — a run that REUSES an older
+  // baseline never appears as that baseline's own `runId`, so
+  // listDetectorEvidenceForRun (not the old runId-filtered query) must be
+  // what detector-results.csv is built from, or a reusing run's export
+  // silently drops every baseline it actually depends on.
+  it("detector-results.csv includes a REUSED cross-run baseline plus the reusing run's own post-scores, each exactly once", async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => jsonResponse(200, {
+      classification: 'ai',
+      class_probabilities: { human: 0.05, ai: 0.9, mixed: 0.05 },
+    })))
+    const { firestore } = makeFirestore()
+    const projectId = await buildFrozenCorpus(firestore, { domains: ['general'], topicsPerDomain: 2, lengths: [100] })
+
+    const runA = await createRun(firestore, { corpusProjectId: projectId, name: 'Export Run A', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await updateRunDraft(firestore, runA.id, { intensities: [3, 6] })
+    await validateRun(firestore, runA.id, { hasModelConfig: true, hasDetectorConfig: true })
+    await startRun(firestore, runA.id)
+    await runToCompletion(firestore, runA.id, humanizeStubClient())
+
+    const runB = await createRun(firestore, { corpusProjectId: projectId, name: 'Export Run B', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await updateRunDraft(firestore, runB.id, { intensities: [3, 6] })
+    await validateRun(firestore, runB.id, { hasModelConfig: true, hasDetectorConfig: true })
+    await startRun(firestore, runB.id)
+    await runToCompletion(firestore, runB.id, humanizeStubClient())
+
+    const file = await buildExportFile(firestore, runB.id, 'detector-results.csv')
+    const [header, ...lines] = file!.content.trim().split('\n')
+    const cols = header!.split(',')
+    const idIdx = cols.indexOf('id')
+    const stageIdx = cols.indexOf('stage')
+    const runIdIdx = cols.indexOf('runId')
+    const reusedIdx = cols.indexOf('baselineReusedAcrossRuns')
+
+    // 2 sources -> 2 shared baselines (reused from Run A, not re-created by
+    // Run B) + 4 of Run B's own post-scores (2 sources x 2 intensities).
+    expect(lines).toHaveLength(6)
+    // Every row id appears exactly once — no duplicate baseline entries even
+    // though Run B's cohort and Run A's cohort both reference it.
+    const ids = lines.map(l => l.split(',')[idIdx])
+    expect(new Set(ids).size).toBe(ids.length)
+
+    const baselineRows = lines.filter(l => l.split(',')[stageIdx] === 'baseline')
+    const postScoreRows = lines.filter(l => l.split(',')[stageIdx] === 'post_transform')
+    expect(baselineRows).toHaveLength(2)
+    expect(postScoreRows).toHaveLength(4)
+
+    // The reused baselines still carry Run A's id as provenance (who first
+    // paid for them), flagged as reused-across-runs; Run B's own post-scores
+    // carry Run B's id and are never flagged as a reused baseline.
+    for (const row of baselineRows) {
+      expect(row.split(',')[runIdIdx]).toBe(runA.id)
+      expect(row.split(',')[reusedIdx]).toBe('true')
+    }
+    for (const row of postScoreRows) {
+      expect(row.split(',')[runIdIdx]).toBe(runB.id)
+      expect(row.split(',')[reusedIdx]).toBe('false')
+    }
   })
 })

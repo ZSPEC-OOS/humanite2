@@ -1,13 +1,11 @@
 import type { Firestore } from 'firebase-admin/firestore'
 import { createHash } from 'crypto'
 import type OpenAI from 'openai'
-import { preprocess } from '@/lib/preprocess'
-import { humanizeChunk } from '@/lib/humanizePipeline'
-import { buildDocumentContext, emptyDocumentContext, runDocumentConsistencyPass, type DocumentContext } from '@/lib/document'
+import { runHumaniteDocument } from '@/lib/runHumaniteDocument'
+import { effectiveIntensity } from '@/lib/intensity'
 import { A2H_COLLECTIONS, type CorpusSource, type BenchmarkOutput, type BenchmarkOutputStatus } from './types'
 
 const COLLECTION = A2H_COLLECTIONS.outputs
-const MAX_GATE_RETRIES = 2
 // Tone is held fixed across every A2H-01/02/03 measurement — per the spec's
 // core experimental principle, intensity is the one repeated-measures
 // factor; varying tone here would confound it. Style/tone itself is what
@@ -51,20 +49,6 @@ export async function listOutputsForRun(firestore: Firestore, runId: string): Pr
   return snap.docs.map(d => d.data() as BenchmarkOutput)
 }
 
-// Best-effort, matching /v1/humanize's own buildDocumentContextSafely — a
-// document without unusual terminology/abbreviations/structure loses
-// nothing from this failing rather than succeeding.
-async function safeDocumentContext(client: OpenAI, model: string, text: string): Promise<DocumentContext> {
-  try {
-    return await buildDocumentContext(client, model, text, null, null)
-  } catch (err) {
-    console.warn('A2H: document context analysis unavailable, continuing without cross-chunk consistency data', {
-      type: err instanceof Error ? err.constructor.name : typeof err,
-    })
-    return emptyDocumentContext(null, null)
-  }
-}
-
 export interface TransformSourceParams {
   runId: string
   source: CorpusSource
@@ -79,12 +63,21 @@ export interface TransformSourceParams {
   releasedAt?: string | null
 }
 
-// Runs the real Humanize pipeline (preprocess -> humanizeChunk -> document
-// consistency pass — the exact synchronous path /v1/humanize itself takes,
-// since every A2H source is well under SYNC_MAX_CHARS) against a frozen
+// Runs the real Humanize pipeline via the SAME shared runHumaniteDocument
+// helper /v1/humanize's synchronous path uses (preprocess -> effective
+// intensity -> document context -> humanizeChunk -> document consistency
+// pass — every A2H source is well under SYNC_MAX_CHARS) against a frozen
 // source at one intensity, within one Benchmark Run. Only a frozen source
 // qualifies — an un-frozen source's text isn't yet the immutable unit the
 // rest of the benchmark's comparability depends on.
+//
+// "Final Polish" patch, blocker #1: this used to send the raw benchmark
+// intensity straight to humanizeChunk, bypassing production's per-domain
+// intensity caps entirely — a medical source at requested intensity 10 was
+// actually humanized at intensity 10, when the real product would have
+// capped it to 5. Going through runHumaniteDocument means every A2H output
+// now receives EXACTLY the same effective-intensity policy a real user's
+// request would.
 //
 // Idempotent by default (§26): an existing SUCCESSFUL output for this exact
 // (runId, sourceId, intensity) is returned as-is, without any new model
@@ -122,7 +115,11 @@ export async function transformSource(
   }
 
   const id = outputDocId(runId, source.id, intensity)
-  const prep = preprocess(source.text)
+  // Pure and deterministic from (requested, domain) — computed once here so
+  // both the success AND failure paths below record the same honest
+  // requested/applied/capped values, regardless of whether the paid call
+  // itself succeeded.
+  const effective = effectiveIntensity(intensity, source.domainId)
   const start = Date.now()
 
   let status: BenchmarkOutputStatus = 'success'
@@ -137,20 +134,16 @@ export async function transformSource(
   let outputTokens: number | null = null
 
   try {
-    const documentContext = await safeDocumentContext(client, model, prep.sanitized_text)
-    const result = await humanizeChunk(
-      client, model, source.text, prep.sanitized_text, prep.fact_locks,
-      intensity, FIXED_TONE, source.domainId, MAX_GATE_RETRIES,
-      null, null, documentContext,
-    )
-    const consistency = await runDocumentConsistencyPass(client, model, result.text, documentContext, [result.text])
-    outputText = consistency.text
-    modelUsed = result.modelUsed
-    retryCount = result.retryCount
-    candidateCount = result.candidateSelection.candidateCount
-    modelCalls = result.modelCalls
-    inputTokens = result.inputTokens
-    outputTokens = result.outputTokens
+    const generated = await runHumaniteDocument({
+      client, model, sourceText: source.text, requestedIntensity: intensity, tone: FIXED_TONE, domain: source.domainId,
+    })
+    outputText = generated.text
+    modelUsed = generated.modelUsed
+    retryCount = generated.retryCount
+    candidateCount = generated.candidateCount
+    modelCalls = generated.modelCalls
+    inputTokens = generated.inputTokens
+    outputTokens = generated.outputTokens
   } catch (err) {
     status = 'failed'
     errorCode = err instanceof Error ? err.constructor.name : 'UnknownError'
@@ -167,6 +160,9 @@ export async function transformSource(
     topicId: source.topicId,
     targetWords: source.targetWords,
     intensity,
+    requestedIntensity: effective.requested,
+    appliedIntensity: effective.applied,
+    intensityCapped: effective.capped,
     outputText,
     outputWords: status === 'success' ? wordCount(outputText) : 0,
     outputSha256: status === 'success' ? createHash('sha256').update(outputText).digest('hex') : '',
@@ -175,6 +171,7 @@ export async function transformSource(
     retryCount,
     candidateCount: status === 'success' ? candidateCount : null,
     modelCalls: status === 'success' ? modelCalls : null,
+    telemetryScope: 'primary_generation_only',
     latencyMs,
     inputTokens: status === 'success' ? inputTokens : null,
     outputTokens: status === 'success' ? outputTokens : null,

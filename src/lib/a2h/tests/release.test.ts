@@ -76,12 +76,19 @@ function generationStubClient(targetWords: number): OpenAI {
 }
 
 function humanizeStubClient(): OpenAI {
-  const chatCreate = vi.fn().mockImplementation(async (args: { response_format?: { type?: string } }) => {
+  // Echoes back whatever model was actually requested — matching a real
+  // provider's completion.model response field, which is what
+  // outputs.model ultimately records (see runHumaniteDocument/
+  // humanizeChunk). A hardcoded literal here would silently disagree with
+  // whatever model the run/EXECUTE_OPTIONS actually requested, and the
+  // "Final Polish" patch's release-consistency check (§13) would then
+  // correctly flag every output as mixed-model — not a bug in that check.
+  const chatCreate = vi.fn().mockImplementation(async (args: { model: string; response_format?: { type?: string } }) => {
     if (args.response_format?.type === 'json_object') {
-      return { model: 'stub-model', choices: [{ message: { content: '{"entailment_probability": 0.9, "issues": []}' }, finish_reason: 'stop' }] }
+      return { model: args.model, choices: [{ message: { content: '{"entailment_probability": 0.9, "issues": []}' }, finish_reason: 'stop' }] }
     }
     return {
-      model: 'stub-model',
+      model: args.model,
       choices: [{ message: { content: 'A humanized rewrite of the source text, produced for release-layer test purposes only.' }, finish_reason: 'stop' }],
       usage: { total_tokens: 500 },
     }
@@ -124,7 +131,7 @@ async function buildFrozenCorpus(firestore: Firestore, opts: { domains: Domain[]
   return project.id
 }
 
-const EXECUTE_OPTIONS = { model: 'stub-model', modelProvider: 'openai', gptZeroApiKey: 'test-key' }
+const EXECUTE_OPTIONS = { model: 'gpt-4o-mini', modelProvider: 'openai', gptZeroApiKey: 'test-key' }
 
 async function runToCompletion(firestore: Firestore, runId: string, client: OpenAI, maxIterations = 200): Promise<void> {
   for (let i = 0; i < maxIterations; i++) {
@@ -352,5 +359,102 @@ describe('verifyReleaseIntegrity', () => {
     const result = await verifyReleaseIntegrity(firestore, release!.id)
     expect(result.ok).toBe(false)
     expect(result.errors.some(e => /outputs hash no longer matches/i.test(e))).toBe(true)
+  })
+
+  // "Final Polish" patch, §12/§27: resultHashes.detectorResults is hashed
+  // from listDetectorEvidenceForRun's LOGICAL dependency set (baselines the
+  // cohort actually used + post-scores the outputs actually used), not a
+  // runId-filtered query — so mutating OR deleting one of those detector
+  // rows must be caught exactly like a mutated output/test-result would be.
+  it('detects a mutated detector-evidence row (a baseline) as an integrity failure', async () => {
+    const { firestore } = makeFirestore()
+    const { runId } = await buildCompletedRun(firestore)
+    const { release } = await createRelease(firestore, runId)
+
+    const snap = await firestore.collection(A2H_COLLECTIONS.detectorResults).get()
+    const baselineRow = snap.docs.map(d => d.data() as { id: string; stage?: string }).find(d => d.stage === 'baseline')
+    expect(baselineRow).toBeDefined()
+    await firestore.collection(A2H_COLLECTIONS.detectorResults).doc(baselineRow!.id).update({ aiProbability: 0.01 })
+
+    const result = await verifyReleaseIntegrity(firestore, release!.id)
+    expect(result.ok).toBe(false)
+    expect(result.errors.some(e => /detector.*results.*hash no longer matches/i.test(e))).toBe(true)
+  })
+
+  it('detects a DELETED detector-evidence row as an integrity failure, not a silent pass', async () => {
+    const { firestore } = makeFirestore()
+    const { runId } = await buildCompletedRun(firestore)
+    const { release } = await createRelease(firestore, runId)
+
+    const snap = await firestore.collection(A2H_COLLECTIONS.detectorResults).get()
+    const postScoreRow = snap.docs.map(d => d.data() as { id: string; stage?: string }).find(d => d.stage === 'post_transform')
+    expect(postScoreRow).toBeDefined()
+    await firestore.collection(A2H_COLLECTIONS.detectorResults).doc(postScoreRow!.id).delete()
+
+    const result = await verifyReleaseIntegrity(firestore, release!.id)
+    expect(result.ok).toBe(false)
+    expect(result.errors.some(e => /detector.*results.*hash no longer matches/i.test(e))).toBe(true)
+  })
+})
+
+// "Final Polish" patch, §13/§28: before release, every successful output
+// must actually have been produced under the run's own frozen model/provider
+// snapshot — a mixed-model or mixed-provider run (e.g. Settings drifted mid-
+// run before §7's guard existed, or a legacy row was hand-edited) must never
+// be released as if it were one internally-consistent configuration.
+describe('validateReleaseReadiness — output configuration consistency (§13/§28)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('fails when a successful output was generated under a DIFFERENT model than the run snapshot', async () => {
+    const { firestore } = makeFirestore()
+    const { runId } = await buildCompletedRun(firestore)
+
+    const outputs = await listOutputsForRun(firestore, runId)
+    const [firstOutput] = outputs
+    await firestore.collection(A2H_COLLECTIONS.outputs).doc(firstOutput!.id).update({ model: 'gpt-3.5-turbo' })
+
+    const result = await validateReleaseReadiness(firestore, runId)
+    expect(result.ok).toBe(false)
+    expect(result.errors.some(e => /different model than this run's snapshot/i.test(e))).toBe(true)
+  })
+
+  it('fails when a successful output was generated under a DIFFERENT provider than the run snapshot', async () => {
+    const { firestore } = makeFirestore()
+    const { runId } = await buildCompletedRun(firestore)
+
+    const outputs = await listOutputsForRun(firestore, runId)
+    const [firstOutput] = outputs
+    await firestore.collection(A2H_COLLECTIONS.outputs).doc(firstOutput!.id).update({ modelProvider: 'https://byok.example.com/v1' })
+
+    const result = await validateReleaseReadiness(firestore, runId)
+    expect(result.ok).toBe(false)
+    expect(result.errors.some(e => /different provider than this run's snapshot/i.test(e))).toBe(true)
+  })
+
+  it('tolerates a provider-versioned model suffix (e.g. gpt-4o-mini-2024-07-18) without flagging it as mixed-model', async () => {
+    const { firestore } = makeFirestore()
+    const { runId } = await buildCompletedRun(firestore)
+
+    const outputs = await listOutputsForRun(firestore, runId)
+    const [firstOutput] = outputs
+    await firestore.collection(A2H_COLLECTIONS.outputs).doc(firstOutput!.id).update({ model: 'gpt-4o-mini-2024-07-18' })
+
+    const result = await validateReleaseReadiness(firestore, runId)
+    expect(result.errors.some(e => /different model than this run's snapshot/i.test(e))).toBe(false)
+  })
+
+  it("fails when a successful output's appliedIntensity is inconsistent with the current effective-intensity policy", async () => {
+    const { firestore } = makeFirestore()
+    const { runId } = await buildCompletedRun(firestore)
+
+    const outputs = await listOutputsForRun(firestore, runId)
+    const [firstOutput] = outputs
+    await firestore.collection(A2H_COLLECTIONS.outputs).doc(firstOutput!.id).update({ appliedIntensity: 999, intensityCapped: true })
+
+    const result = await validateReleaseReadiness(firestore, runId)
+    expect(result.ok).toBe(false)
+    expect(result.errors.some(e => /appliedIntensity\/intensityCapped value inconsistent/i.test(e))).toBe(true)
   })
 })

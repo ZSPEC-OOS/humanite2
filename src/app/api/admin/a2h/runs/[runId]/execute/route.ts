@@ -4,8 +4,8 @@ import { requireA2HAdmin } from '@/lib/require-a2h-admin'
 import { isAuthFailure } from '@/lib/require-auth'
 import { db } from '@/lib/firestore'
 import { getUserApiConfig } from '@/lib/userApiConfig'
-import { resolveProvider } from '@/lib/providerResolution'
-import { executeRunBatch } from '@/lib/a2h/execution'
+import { resolveProvider, resolvedProviderId } from '@/lib/providerResolution'
+import { executeRunBatch, ExecutionConfigMismatchError } from '@/lib/a2h/execution'
 
 // Advances one bounded batch of the run's queued work (§10/§11/§26) — the
 // interactive equivalent of a worker picking a job off a queue, since this
@@ -39,12 +39,15 @@ export async function POST(req: NextRequest, { params }: { params: { runId: stri
     const result = await executeRunBatch(db(), params.runId, {
       client,
       model,
-      modelProvider: usingByok ? (baseURL ?? 'openai') : 'openai',
+      modelProvider: resolvedProviderId(baseURL, usingByok),
       gptZeroApiKey,
       workerId: `interactive-${auth.claims.sub}`,
     })
     return NextResponse.json(result)
   } catch (err) {
+    if (err instanceof ExecutionConfigMismatchError) {
+      return NextResponse.json({ error: { code: 'CONFIG_MISMATCH', message: err.message } }, { status: 409 })
+    }
     const message = err instanceof Error ? err.message : 'Execution failed.'
     const notFound = message === 'Benchmark run not found.'
     return NextResponse.json({ error: { code: notFound ? 'NOT_FOUND' : 'EXECUTION_FAILED', message } }, { status: notFound ? 404 : 502 })

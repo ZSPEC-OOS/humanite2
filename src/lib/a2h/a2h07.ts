@@ -2,7 +2,8 @@ import type { Firestore } from 'firebase-admin/firestore'
 import type OpenAI from 'openai'
 import { createHash } from 'crypto'
 import { preprocess } from '@/lib/preprocess'
-import { humanizeChunk } from '@/lib/humanizePipeline'
+import { runHumaniteDocument } from '@/lib/runHumaniteDocument'
+import { effectiveIntensity } from '@/lib/intensity'
 import { measureIntensity } from '@/lib/evaluation/intensity'
 import type { DetectionClassification } from '@/lib/detection/contracts'
 import type { BenchmarkRun, BenchmarkJob, CorpusSource, BenchmarkTrial } from './types'
@@ -12,7 +13,6 @@ import { summarizeContinuous, coefficientOfVariation, groupBy, type ContinuousSu
 
 export const A2H07_CODE = 'A2H-07' as const
 const FIXED_TONE = 'balanced'
-const MAX_GATE_RETRIES = 2
 
 // A2H-07 — Repeatability (§3-7). Measures variance when the EXACT SAME
 // source + intensity + Humanite configuration is executed repeatedly — every
@@ -73,6 +73,11 @@ export async function runA2H07Trial(firestore: Firestore, run: BenchmarkRun, sou
     throw new Error(`A2H-07 trial job ${job.id} is missing intensity/conditionId/trialIndex.`)
   }
   const intensity = job.intensity
+  // Pure/deterministic — computed once here (not inside `run`) so the
+  // frozen `condition` itself records what was requested vs. what
+  // production's domain cap would actually apply, even before the trial's
+  // async generation runs at all (§2/§23 of the "Final Polish" patch).
+  const effective = effectiveIntensity(intensity, source.domainId)
 
   await getOrCreateTrial(firestore, {
     runId: run.id,
@@ -81,34 +86,37 @@ export async function runA2H07Trial(firestore: Firestore, run: BenchmarkRun, sou
     sourceId: source.id,
     conditionId: job.conditionId,
     trialIndex: job.trialIndex,
-    condition: { sourceId: source.id, intensity, model: options.model, humaniteVersion: run.humaniteVersion },
+    condition: {
+      sourceId: source.id, intensity, model: options.model, humaniteVersion: run.humaniteVersion,
+      requestedIntensity: effective.requested, appliedIntensity: effective.applied, intensityCapped: effective.capped,
+    },
     run: async (): Promise<TrialRunResult> => {
       const start = Date.now()
       try {
-        const prep = preprocess(source.text)
-        const result = await humanizeChunk(
-          options.client, options.model, source.text, prep.sanitized_text, prep.fact_locks,
-          intensity, FIXED_TONE, source.domainId, MAX_GATE_RETRIES,
-        )
+        const generated = await runHumaniteDocument({
+          client: options.client, model: options.model, sourceText: source.text, requestedIntensity: intensity,
+          tone: FIXED_TONE, domain: source.domainId,
+        })
         const latencyMs = Date.now() - start
-        const detector = await scoreTextWithGPTZero(result.text, options.gptZeroApiKey)
+        const detector = await scoreTextWithGPTZero(generated.text, options.gptZeroApiKey)
+        const factLockTexts = preprocess(source.text).fact_locks.map(l => l.text)
         return {
-          outputText: result.text,
-          outputSha256: createHash('sha256').update(result.text).digest('hex'),
-          outputWords: wordCount(result.text),
+          outputText: generated.text,
+          outputSha256: createHash('sha256').update(generated.text).digest('hex'),
+          outputWords: wordCount(generated.text),
           modelProvider: options.modelProvider,
-          model: result.modelUsed,
+          model: generated.modelUsed,
           latencyMs,
-          modelCalls: result.modelCalls,
-          retryCount: result.retryCount,
-          candidateCount: result.candidateSelection.candidateCount,
-          inputTokens: result.inputTokens,
-          outputTokens: result.outputTokens,
+          modelCalls: generated.modelCalls,
+          retryCount: generated.retryCount,
+          candidateCount: generated.candidateCount,
+          inputTokens: generated.inputTokens,
+          outputTokens: generated.outputTokens,
           estimatedCostUsd: null,
           aiProbability: detector.aiProbability,
           humanProbability: detector.humanProbability,
           classification: detector.classification,
-          diagnostics: { transformationMagnitude: measureIntensity(source.text, result.text, prep.fact_locks.map(l => l.text)).transformationMagnitude },
+          diagnostics: { transformationMagnitude: measureIntensity(source.text, generated.text, factLockTexts).transformationMagnitude },
           status: 'success',
           errorCode: null,
           errorMessage: null,

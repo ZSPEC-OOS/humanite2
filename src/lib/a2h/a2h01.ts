@@ -24,6 +24,18 @@ export interface A2H01Measurements {
   deltaAiProbability: number | null
   eligibleForConversion: boolean
   convertedAiToHuman: boolean | null
+  // §16 of the "Final Polish" patch: GPTZero baselines are shared across
+  // runs by design (§8 — the same frozen source under the same detector
+  // config is never paid for twice), which means a baseline this run's own
+  // A2H-01 measurement depends on may have been scored by an EARLIER run,
+  // possibly under a different GPTZero backend model version than what's
+  // running today. Recorded rather than hidden: baselineOriginRunId is
+  // whichever run first produced this exact baseline; baselineReusedAcrossRuns
+  // is true whenever that's not THIS run.
+  baselineAnalyzedAt: string
+  postAnalyzedAt: string
+  baselineOriginRunId: string
+  baselineReusedAcrossRuns: boolean
 }
 
 // deltaAiProbability = before - after (a positive value means the AI
@@ -50,6 +62,13 @@ export function computeA2H01Measurements(baseline: DetectorResult, postScore: De
     deltaAiProbability,
     eligibleForConversion,
     convertedAiToHuman,
+    baselineAnalyzedAt: baseline.analyzedAt,
+    postAnalyzedAt: postScore.analyzedAt,
+    baselineOriginRunId: baseline.runId,
+    // postScore.runId IS the current run (a post-transform score is scoped
+    // to a BenchmarkOutput, which is always run-scoped) — comparing against
+    // it, rather than threading a separate run parameter through, is exact.
+    baselineReusedAcrossRuns: baseline.runId !== postScore.runId,
   }
 }
 

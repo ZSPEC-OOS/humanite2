@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import type { Firestore } from 'firebase-admin/firestore'
 import type OpenAI from 'openai'
 import type { Domain } from '@/lib/style/types'
-import { executeRunBatch } from '../execution'
+import { executeRunBatch, ExecutionConfigMismatchError } from '../execution'
 import { createRun, updateRunDraft, validateRun, startRun, pauseRun, resumeRun, listRunSources, getRunProgress, getRun } from '../runs'
 import { createCorpusProject, updateProjectDraft, lockBlueprint, freezeCorpusProject } from '../corpusProject'
 import { createTopic, listTopics } from '../topics'
@@ -23,7 +23,7 @@ import { getA2H07Report } from '../a2h07'
 import { getA2H11Report } from '../a2h11'
 import { getA2H14Report } from '../a2h14'
 import { getA2H15Report } from '../a2h15'
-import { getA2H17Report } from '../a2h17'
+import { getA2H17Report, collectOperationRecords } from '../a2h17'
 
 function makeFirestore() {
   const collections = new Map<string, Map<string, Record<string, unknown>>>()
@@ -141,7 +141,7 @@ async function buildFrozenCorpus(firestore: Firestore, opts: { domains: Domain[]
   return project.id
 }
 
-const EXECUTE_OPTIONS = { model: 'stub-model', modelProvider: 'openai', gptZeroApiKey: 'test-key' }
+const EXECUTE_OPTIONS = { model: 'gpt-4o-mini', modelProvider: 'openai', gptZeroApiKey: 'test-key' }
 
 // Runs executeRunBatch repeatedly (mirroring the UI's "Run All" loop) until
 // the run leaves 'running' status, with a generous iteration cap so a bug
@@ -651,6 +651,17 @@ describe('dry-run acceptance (Phase 4): experimental trials + A2H-16 + A2H-17', 
     expect(a2h17Report.overall.n).toBe(18)
     expect(a2h17Report.overall.failures.count).toBe(0)
 
+    // "Final Polish" patch §17/§29: this deployment only instruments the
+    // PRIMARY generation call, never the full pipeline (judge/document-
+    // context/consistency/repair calls) — every real record must say so
+    // explicitly, never silently default to 'complete', and a stub client
+    // reporting no cost data must leave estimatedCostUsd null, never a
+    // fabricated 0.
+    const operationRecords = await collectOperationRecords(firestore, run.id)
+    expect(operationRecords.length).toBe(a2h17Report.overall.n)
+    expect(operationRecords.every(r => r.telemetryScope === 'primary_generation_only')).toBe(true)
+    expect(operationRecords.every(r => r.estimatedCostUsd === null)).toBe(true)
+
     // Idempotency (§37, critical): re-running must not enqueue a single new
     // job, duplicate a single trial, or make one more model call.
     const callsBeforeResume = (client.chat.completions.create as ReturnType<typeof vi.fn>).mock.calls.length
@@ -666,5 +677,104 @@ describe('dry-run acceptance (Phase 4): experimental trials + A2H-16 + A2H-17', 
     const trialsAfterResume = await listTrialsForRun(firestore, run.id)
     expect(trialsAfterResume).toHaveLength(16)
     expect(trialsAfterResume.map(t => t.id).sort()).toEqual(allTrials.map(t => t.id).sort())
+  })
+})
+
+// "Final Polish" patch, §24-25: a run snapshots its model/provider at
+// validation time, but nothing previously stopped a LATER /execute call from
+// resolving the admin's now-different Settings and silently claiming/paying
+// for the run's remaining jobs under a different configuration while the
+// run's own metadata kept claiming the original one. §7's
+// assertExecutionConfigMatchesRun must refuse this outright, before touching
+// recovery, job claiming, or the paid client at all.
+describe('model/provider drift protection (§24-25)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('throws ExecutionConfigMismatchError and claims/executes nothing when the resolved model differs from the run snapshot', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => jsonResponse(200, { classification: 'ai', class_probabilities: { human: 0.05, ai: 0.9, mixed: 0.05 } })))
+    const { firestore } = makeFirestore()
+    const projectId = await buildFrozenCorpus(firestore, { domains: ['general'], topicsPerDomain: 1, lengths: [100] })
+    const run = await createRun(firestore, { corpusProjectId: projectId, name: 'Drift Run', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await updateRunDraft(firestore, run.id, { intensities: [5, 8] })
+    const { result } = await validateRun(firestore, run.id, { hasModelConfig: true, hasDetectorConfig: true })
+    expect(result.ok).toBe(true)
+    await startRun(firestore, run.id)
+
+    const client = humanizeStubClient()
+    await expect(executeRunBatch(firestore, run.id, { ...EXECUTE_OPTIONS, model: 'gpt-4o', client }))
+      .rejects.toThrow(ExecutionConfigMismatchError)
+    expect((client.chat.completions.create as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
+
+    const jobs = await listJobsForRun(firestore, run.id)
+    expect(jobs.every(j => j.status === 'queued')).toBe(true)
+    expect(jobs.filter(j => j.status === 'running')).toHaveLength(0)
+    // The run's own snapshot must never be silently rewritten to the new
+    // configuration just because a mismatched execute call was attempted.
+    const unchangedRun = await getRun(firestore, run.id)
+    expect(unchangedRun?.model).toBe('gpt-4o-mini')
+    expect(unchangedRun?.status).toBe('running')
+  })
+
+  it('throws ExecutionConfigMismatchError and claims/executes nothing when the resolved provider differs from the run snapshot', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => jsonResponse(200, { classification: 'ai', class_probabilities: { human: 0.05, ai: 0.9, mixed: 0.05 } })))
+    const { firestore } = makeFirestore()
+    const projectId = await buildFrozenCorpus(firestore, { domains: ['general'], topicsPerDomain: 1, lengths: [100] })
+    const run = await createRun(firestore, { corpusProjectId: projectId, name: 'Drift Run 2', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await updateRunDraft(firestore, run.id, { intensities: [5, 8] })
+    const { result } = await validateRun(firestore, run.id, { hasModelConfig: true, hasDetectorConfig: true })
+    expect(result.ok).toBe(true)
+    await startRun(firestore, run.id)
+
+    const client = humanizeStubClient()
+    await expect(executeRunBatch(firestore, run.id, { ...EXECUTE_OPTIONS, modelProvider: 'https://byok.example.com/v1', client }))
+      .rejects.toThrow(ExecutionConfigMismatchError)
+    expect((client.chat.completions.create as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
+
+    const jobs = await listJobsForRun(firestore, run.id)
+    expect(jobs.filter(j => j.status === 'running')).toHaveLength(0)
+  })
+
+  it('a run paused and resumed under a CHANGED Settings configuration still refuses to execute until the original config is restored', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => jsonResponse(200, { classification: 'ai', class_probabilities: { human: 0.05, ai: 0.9, mixed: 0.05 } })))
+    const { firestore } = makeFirestore()
+    const projectId = await buildFrozenCorpus(firestore, { domains: ['general'], topicsPerDomain: 2, lengths: [100] })
+    const run = await createRun(firestore, { corpusProjectId: projectId, name: 'Resume Drift Run', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await updateRunDraft(firestore, run.id, { intensities: [3, 6] })
+    await validateRun(firestore, run.id, { hasModelConfig: true, hasDetectorConfig: true })
+    await startRun(firestore, run.id)
+
+    // Complete some real work under the ORIGINAL configuration first.
+    const client = humanizeStubClient()
+    await executeRunBatch(firestore, run.id, { ...EXECUTE_OPTIONS, client, maxJobsPerStage: 1 })
+    await pauseRun(firestore, run.id)
+    const progressAtPause = await getRunProgress(firestore, run.id)
+    expect(progressAtPause.baselinesCompleted).toBeGreaterThan(0)
+
+    // Admin changes Settings to a different model, then resumes the run —
+    // the resume itself only flips status; it does not touch model/provider.
+    await resumeRun(firestore, run.id)
+    const resumedRun = await getRun(firestore, run.id)
+    expect(resumedRun?.status).toBe('running')
+    expect(resumedRun?.model).toBe('gpt-4o-mini') // unchanged by resume
+
+    // Attempting to continue execution under the NEW (mismatched) Settings
+    // must refuse outright — no new work claimed, no paid calls made, and
+    // already-completed evidence from before the pause is left untouched.
+    const newModelClient = humanizeStubClient()
+    await expect(executeRunBatch(firestore, run.id, { ...EXECUTE_OPTIONS, model: 'gpt-4o', client: newModelClient }))
+      .rejects.toThrow(ExecutionConfigMismatchError)
+    expect((newModelClient.chat.completions.create as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
+    const progressAfterBlockedAttempt = await getRunProgress(firestore, run.id)
+    expect(progressAfterBlockedAttempt).toEqual(progressAtPause)
+
+    // Restoring the ORIGINAL configuration lets the run resume normally and
+    // finish to completion, with the already-completed baseline preserved.
+    await runToCompletion(firestore, run.id, client)
+    const finalRun = await getRun(firestore, run.id)
+    expect(finalRun?.status).toBe('completed')
+    const finalProgress = await getRunProgress(firestore, run.id)
+    expect(finalProgress.baselinesCompleted).toBe(2)
   })
 })

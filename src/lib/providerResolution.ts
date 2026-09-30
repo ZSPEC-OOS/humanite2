@@ -27,6 +27,26 @@ function safeBaseUrl(userConfig: StoredApiConfig | null): string | undefined {
 // this deployment's bill with no key of the caller's own paying for it. The
 // caller's own config is only ever honored as a complete set, gated on
 // actually having their own key — never mixed with the server's defaults.
+// The canonical OpenAI endpoint, normalized the same way a caller-saved
+// baseUrl is (trimmed, no trailing slash, case-insensitive) — anything that
+// resolves to this is identity 'openai' regardless of whether it came from
+// this deployment's own OPENAI_BASE_URL default or was left unset entirely.
+const OPENAI_DEFAULT_BASE_URLS = new Set(['https://api.openai.com/v1', 'https://api.openai.com'])
+
+// One stable, normalized provider identity — used everywhere a run/output/
+// trial needs to record (and later compare) "which provider actually served
+// this," instead of each call site independently reconstructing a label
+// from `usingByok ? (baseURL ?? 'openai') : 'openai'` in its own slightly
+// different way. `usingByok` is accepted for context/documentation (a BYOK
+// caller and this deployment's own platform key can both resolve to the
+// same 'openai' identity when both ultimately hit api.openai.com) but does
+// not itself change the computed identity — only the endpoint does.
+export function resolvedProviderId(baseURL: string | undefined, _usingByok: boolean): string {
+  const normalized = baseURL?.trim().replace(/\/+$/, '').toLowerCase()
+  if (!normalized || OPENAI_DEFAULT_BASE_URLS.has(normalized)) return 'openai'
+  return normalized
+}
+
 export function resolveProvider(userConfig: StoredApiConfig | null): ResolvedProvider {
   const usingByok = !!userConfig?.apiKey
   if (usingByok) {

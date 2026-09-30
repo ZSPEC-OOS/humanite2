@@ -10,6 +10,8 @@ function a2h01Row(overrides: Partial<A2H01Row> = {}): A2H01Row {
       aiProbabilityBefore: 0.9, aiProbabilityAfter: 0.1, humanProbabilityBefore: 0.05, humanProbabilityAfter: 0.8,
       mixedProbabilityBefore: 0.05, mixedProbabilityAfter: 0.1, classificationBefore: 'ai-generated', classificationAfter: 'human-written',
       deltaAiProbability: 0.8, eligibleForConversion: true, convertedAiToHuman: true,
+      baselineAnalyzedAt: '2026-01-01T00:00:00.000Z', postAnalyzedAt: '2026-01-01T00:10:00.000Z',
+      baselineOriginRunId: 'run-1', baselineReusedAcrossRuns: false,
     },
     ...overrides,
   }
@@ -17,9 +19,11 @@ function a2h01Row(overrides: Partial<A2H01Row> = {}): A2H01Row {
 
 function a2h02Row(overrides: Partial<A2H02Row> = {}): A2H02Row {
   return {
-    sourceId: 's1', outputId: 'o1', domainId: 'general', topicId: 't1', targetWords: 100, intensity: 5, model: 'gpt-4o-mini',
+    sourceId: 's1', outputId: 'o1', domainId: 'general', topicId: 't1', targetWords: 100, intensity: 5,
+    appliedIntensity: 5, intensityCapped: false, model: 'gpt-4o-mini',
     measurements: {
-      intensity: 5, aiProbability: 0.1, humanProbability: 0.8, classification: 'human-written',
+      intensity: 5, requestedIntensity: 5, appliedIntensity: 5, intensityCapped: false,
+      aiProbability: 0.1, humanProbability: 0.8, classification: 'human-written',
       sourceWords: 100, outputWords: 95, wordCountDelta: -5, wordCountDeltaPct: -0.05, transformationMagnitude: 0.4,
     },
     ...overrides,

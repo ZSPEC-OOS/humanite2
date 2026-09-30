@@ -176,6 +176,15 @@ export interface CorpusSource {
 
 export type BenchmarkOutputStatus = 'success' | 'failed'
 
+// "Final Polish" patch, §17: labels whether modelCalls/inputTokens/
+// outputTokens cover every paid call a transformation makes, or only the
+// PRIMARY generation-phase completions (the current, and so far only,
+// Humanite instrumentation level — internal quality-gate/judge, targeted
+// repair, claim-verification, document-context, and document-consistency
+// calls are NOT counted). Never displayed or reported as "total" while this
+// reads 'primary_generation_only'.
+export type TelemetryScope = 'primary_generation_only' | 'complete'
+
 // One Humanize transformation of a frozen source at a single intensity
 // (1-10) within one specific Benchmark Run — the repeated-measures unit
 // §1/§9 describe: the same frozen source run through the real product
@@ -192,8 +201,19 @@ export interface BenchmarkOutput {
   sourceId: string
   domainId: Domain
   topicId: string
-  targetWords: number
+  // "Final Polish" patch, §1-2: `intensity` is retained (equal to
+  // requestedIntensity) purely for backward compatibility with every
+  // existing reader that keys/filters on it — the benchmark's own
+  // repeated-measures grid dimension. requestedIntensity/appliedIntensity/
+  // intensityCapped are the honest record of what was actually asked for
+  // vs. what production's per-domain cap (effectiveIntensity) let through;
+  // Humanite itself only ever received appliedIntensity, never `intensity`
+  // directly (see outputs.ts's transformSource / runHumaniteDocument).
   intensity: number
+  requestedIntensity: number
+  appliedIntensity: number
+  intensityCapped: boolean
+  targetWords: number
   outputText: string
   outputWords: number
   outputSha256: string
@@ -209,6 +229,10 @@ export interface BenchmarkOutput {
   candidateCount: number | null
   inputTokens: number | null
   outputTokens: number | null
+  // §17: modelCalls/inputTokens/outputTokens above cover PRIMARY generation
+  // only — see TelemetryScope. Always 'primary_generation_only' until this
+  // codebase instruments gate/judge/repair/claim/document-analysis calls too.
+  telemetryScope: TelemetryScope
   estimatedCostUsd: number | null
   generatedAt: string
   status: BenchmarkOutputStatus
@@ -464,7 +488,24 @@ export interface BenchmarkRun {
   // must refuse, regardless of what the caller passes (see release.ts and
   // the checks in outputs.ts/trials.ts/repairAttempts.ts).
   releasedAt: string | null
+  // "Final Polish" patch, §14: identifies which generation-semantics
+  // generation this run's outputs were produced under — at minimum, whether
+  // production's effective-intensity domain cap, the shared
+  // runHumaniteDocument transformation wrapper, and model/provider freeze
+  // enforcement were all in effect. null ONLY for a run created before this
+  // field existed at all (a genuinely pre-patch Firestore document, which
+  // won't have the field in storage — never fabricated as CURRENT_VERSION
+  // for an old row just because reading it back "looks" fine). Every run
+  // created from this point on gets CURRENT_EXECUTION_SEMANTICS_VERSION.
+  executionSemanticsVersion: string | null
 }
+
+// Bump this whenever a change to this codebase alters what a benchmark
+// output/trial actually MEANS (not just what it records) — e.g. this
+// patch's effective-intensity fix. A run's own snapshotted
+// executionSemanticsVersion is what release validation checks against to
+// decide whether a pre-fix run can be trusted for a final release (§15).
+export const CURRENT_EXECUTION_SEMANTICS_VERSION = 'A2H-EXEC-V002'
 
 // The frozen source cohort for one run, written once by validateRun (never
 // re-inferred from filters later) — doc id `${runId}__${sourceId}` enforces
