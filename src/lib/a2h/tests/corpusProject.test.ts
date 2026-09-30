@@ -9,7 +9,7 @@ import {
   archiveCorpusProject, duplicateCorpusProject,
 } from '../corpusProject'
 import { generateSource, freezeSource } from '../corpus'
-import { createTopic, listTopics } from '../topics'
+import { createTopic, listTopics, updateTopic } from '../topics'
 import type { CreateTopicInput } from '../topics'
 import type OpenAI from 'openai'
 
@@ -315,6 +315,16 @@ describe('lockBlueprint', () => {
     await expect(lockBlueprint(firestore, project.id)).rejects.toThrow(/1 of 5 topics generated/i)
   })
 
+  it('throws when a configured topic is disabled, even if the count matches', async () => {
+    const { firestore } = makeFirestore()
+    const id = await buildLockableProject(firestore)
+    const [t1] = await listTopics(firestore, id, 'medical')
+    await updateTopic(firestore, t1!.id, { enabled: false })
+
+    await expect(lockBlueprint(firestore, id)).rejects.toThrow(/1 disabled topic/i)
+    expect((await getCorpusProject(firestore, id))?.status).toBe('draft')
+  })
+
   it('locks a fully-generated blueprint', async () => {
     const { firestore } = makeFirestore()
     const id = await buildLockableProject(firestore)
@@ -420,6 +430,57 @@ describe('validateCorpusForFreeze', () => {
     expect(validation.frozenCount).toBe(3)
     expect(validation.missingCells).toHaveLength(0)
   })
+
+  it('is not ok when an extra source record exists for a length that is not on the ladder', async () => {
+    const { firestore } = makeFirestore()
+    const id = await buildLockableProject(firestore)
+    await lockBlueprint(firestore, id)
+    const topics = await listTopics(firestore, id, 'medical')
+    await freezeAllCells(firestore, id, topics.map(t => t.id), [100, 200])
+
+    // An extra, unexpected record — same topic, but a length outside the
+    // project's [100, 200] ladder. Written directly since generateSource
+    // itself already refuses a targetWords not on the ladder; this
+    // simulates a record that ended up there some other way (a bug, a
+    // ladder edited after the fact in another code path, direct data
+    // manipulation) — validateCorpusForFreeze must catch it regardless of
+    // how it arose.
+    await firestore.collection('a2hCorpusSources').doc(`${id}__${topics[0]!.id}__999`).set({
+      id: `${id}__${topics[0]!.id}__999`, corpusProjectId: id, domainId: 'medical', topicId: topics[0]!.id,
+      targetWords: 999, actualWords: 999, generatorProvider: 'openai', generatorModel: 'stub', generationPrompt: 'p',
+      generationPromptVersion: 'GEN-V001', temperature: null, seed: null, text: words(999),
+      sha256: 'f'.repeat(64), generatedAt: new Date().toISOString(), frozenAt: new Date().toISOString(), status: 'frozen',
+    })
+
+    const project = await getCorpusProject(firestore, id)
+    const validation = await validateCorpusForFreeze(firestore, project!)
+    expect(validation.ok).toBe(false)
+    expect(validation.expectedSourceCount).toBe(4)
+    expect(validation.actualSourceCount).toBe(5)
+    expect(validation.frozenCount).toBe(4) // the extra record isn't counted as one of the 4 expected cells
+    expect(validation.problems.some(p => /unexpected source/i.test(p))).toBe(true)
+  })
+
+  it('is not ok when a source references a topic that does not belong to the expected matrix', async () => {
+    const { firestore } = makeFirestore()
+    const id = await buildLockableProject(firestore)
+    await lockBlueprint(firestore, id)
+    const topics = await listTopics(firestore, id, 'medical')
+    await freezeAllCells(firestore, id, topics.map(t => t.id), [100, 200])
+
+    await firestore.collection('a2hCorpusSources').doc(`${id}__ghost-topic__100`).set({
+      id: `${id}__ghost-topic__100`, corpusProjectId: id, domainId: 'medical', topicId: 'ghost-topic',
+      targetWords: 100, actualWords: 100, generatorProvider: 'openai', generatorModel: 'stub', generationPrompt: 'p',
+      generationPromptVersion: 'GEN-V001', temperature: null, seed: null, text: words(100),
+      sha256: 'e'.repeat(64), generatedAt: new Date().toISOString(), frozenAt: new Date().toISOString(), status: 'frozen',
+    })
+
+    const project = await getCorpusProject(firestore, id)
+    const validation = await validateCorpusForFreeze(firestore, project!)
+    expect(validation.ok).toBe(false)
+    expect(validation.actualSourceCount).toBe(5)
+    expect(validation.problems.some(p => /ghost-topic/.test(p))).toBe(true)
+  })
 })
 
 describe('freezeCorpusProject', () => {
@@ -470,6 +531,25 @@ describe('freezeCorpusProject', () => {
     await firestore.collection('a2hCorpusSources').doc(`${id}__${topics[0]!.id}__100`).update({ status: 'validated', frozenAt: null })
 
     await expect(freezeCorpusProject(firestore, id)).rejects.toThrow(/cannot freeze corpus/i)
+  })
+
+  it('fails if an unexpected source record exists, and writes no manifest', async () => {
+    const { firestore } = makeFirestore()
+    const id = await buildLockableProject(firestore)
+    await lockBlueprint(firestore, id)
+    const topics = await listTopics(firestore, id, 'medical')
+    await freezeAllCells(firestore, id, topics.map(t => t.id), [100, 200])
+    // An extra record outside the expected 2-topic x [100,200] matrix.
+    await firestore.collection('a2hCorpusSources').doc(`${id}__${topics[0]!.id}__999`).set({
+      id: `${id}__${topics[0]!.id}__999`, corpusProjectId: id, domainId: 'medical', topicId: topics[0]!.id,
+      targetWords: 999, actualWords: 999, generatorProvider: 'openai', generatorModel: 'stub', generationPrompt: 'p',
+      generationPromptVersion: 'GEN-V001', temperature: null, seed: null, text: words(999),
+      sha256: 'f'.repeat(64), generatedAt: new Date().toISOString(), frozenAt: new Date().toISOString(), status: 'frozen',
+    })
+
+    await expect(freezeCorpusProject(firestore, id)).rejects.toThrow(/cannot freeze corpus/i)
+    expect((await getCorpusProject(firestore, id))?.status).not.toBe('frozen')
+    expect(await getCorpusManifest(firestore, id)).toBeNull()
   })
 
   it('succeeds only once the whole matrix is frozen, and writes an immutable manifest', async () => {

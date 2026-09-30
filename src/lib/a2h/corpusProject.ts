@@ -228,6 +228,15 @@ export async function lockBlueprint(firestore: Firestore, id: string): Promise<C
     if (existing.length !== target) {
       throw new Error(`${d} has ${existing.length} of ${target} topics generated — finish the blueprint before locking.`)
     }
+    // A disabled topic is a configured slot the admin marked "don't generate
+    // sources for this" — locking with one still disabled would freeze that
+    // decision in as a slot the source matrix can never fill (a matrix
+    // sized off topicCountByDomain, not off the enabled subset). Re-enable
+    // or replace it before locking, same as any other incomplete slot.
+    const disabled = existing.filter(t => !t.enabled)
+    if (disabled.length > 0) {
+      throw new Error(`${d} has ${disabled.length} disabled topic(s) — enable or replace them before locking.`)
+    }
   }
 
   const updated: CorpusProject = { ...project, status: 'blueprint_locked', updatedAt: new Date().toISOString() }
@@ -275,6 +284,8 @@ export interface FreezeValidationResult {
 export async function validateCorpusForFreeze(firestore: Firestore, project: CorpusProject): Promise<FreezeValidationResult> {
   const allTopics = await listTopics(firestore, project.id)
   const relevantTopics = allTopics.filter(t => project.domains.includes(t.domainId))
+  const relevantTopicIds = new Set(relevantTopics.map(t => t.id))
+  const expectedLengths = new Set(project.lengthLadder)
 
   const sourcesSnap = await firestore.collection(A2H_COLLECTIONS.sources).where('corpusProjectId', '==', project.id).get()
   const sources = sourcesSnap.docs.map(d => d.data() as CorpusSource)
@@ -288,6 +299,14 @@ export async function validateCorpusForFreeze(firestore: Firestore, project: Cor
     // out.
     if (s.corpusProjectId !== project.id) {
       problems.push(`Source ${s.id} is stored under this project's query but claims corpusProjectId ${s.corpusProjectId}.`)
+      continue
+    }
+    // A source whose topic isn't part of a selected domain, or whose length
+    // isn't on the ladder, doesn't correspond to any cell the blueprint
+    // actually defines — freezing must never quietly accept (or manifest)
+    // a record outside the expected matrix, however it got there.
+    if (!relevantTopicIds.has(s.topicId) || !expectedLengths.has(s.targetWords)) {
+      problems.push(`Unexpected source ${s.id} (topic ${s.topicId} at ${s.targetWords} words) does not correspond to any cell in the expected blueprint matrix.`)
       continue
     }
     const key = `${s.topicId}__${s.targetWords}`
@@ -325,6 +344,7 @@ export async function validateCorpusForFreeze(firestore: Firestore, project: Cor
     && validatedNotFrozenCount === 0
     && validationFailedCount === 0
     && frozenCount === expectedSourceCount
+    && sources.length === expectedSourceCount
 
   return {
     ok,
@@ -384,9 +404,22 @@ export async function freezeCorpusProject(firestore: Firestore, id: string): Pro
   const relevantTopics = allTopics.filter(t => project.domains.includes(t.domainId))
   const sourcesSnap = await firestore.collection(A2H_COLLECTIONS.sources).where('corpusProjectId', '==', id).get()
   const sources = sourcesSnap.docs.map(d => d.data() as CorpusSource)
+  const sourceByCell = new Map<string, CorpusSource>()
+  for (const s of sources) sourceByCell.set(`${s.topicId}__${s.targetWords}`, s)
 
+  // Built strictly from the expected topic x length matrix, never from the
+  // raw sources list — validation.ok already guarantees there's no
+  // unexpected record at this point, but the manifest must reflect the
+  // blueprint's own cells regardless, not whatever happens to be sitting in
+  // the collection.
   const sourceHashes: Record<string, string> = {}
-  for (const s of sources) sourceHashes[`${s.topicId}__${s.targetWords}`] = s.sha256
+  for (const topic of relevantTopics) {
+    for (const targetWords of project.lengthLadder) {
+      const key = `${topic.id}__${targetWords}`
+      const match = sourceByCell.get(key)
+      if (match) sourceHashes[key] = match.sha256
+    }
+  }
 
   const topicBlueprintHash = computeTopicBlueprintHash(relevantTopics)
   const manifestWithoutHash: Omit<CorpusManifest, 'manifestHash'> = {

@@ -16,6 +16,28 @@ export function normalizeTopicTitle(title: string): string {
     .trim()
 }
 
+// Counts how many normalized titles collide *within the same domain* — the
+// only scope that matters for a blueprint. The same title in two different
+// domains (e.g. "Contract Law Basics" in both legal and business) is a
+// legitimate coincidence, not a duplicate; this must never conflate the two
+// the way a single project-wide title map would.
+export function countDuplicateTitlesByDomain<T extends { domainId: string; title: string }>(topics: T[]): number {
+  const byDomain = new Map<string, Map<string, number>>()
+  for (const t of topics) {
+    const domainSeen = byDomain.get(t.domainId) ?? new Map<string, number>()
+    const key = normalizeTopicTitle(t.title)
+    domainSeen.set(key, (domainSeen.get(key) ?? 0) + 1)
+    byDomain.set(t.domainId, domainSeen)
+  }
+  let duplicates = 0
+  for (const domainSeen of byDomain.values()) {
+    for (const count of domainSeen.values()) {
+      if (count > 1) duplicates++
+    }
+  }
+  return duplicates
+}
+
 // A cheap, purely lexical "might be the same subject" signal for the
 // blueprint review's "potential overlaps" count — real semantic overlap
 // detection would need embeddings or a judge call, which isn't worth the
