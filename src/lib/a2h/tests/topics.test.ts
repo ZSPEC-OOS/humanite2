@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Firestore } from 'firebase-admin/firestore'
-import { parseTopicInput, parseTopicPatch, listTopics, getTopic, createTopic, updateTopic, type CreateTopicInput } from '../topics'
+import { parseTopicInput, parseTopicPatch, listTopics, getTopic, createTopic, updateTopic, deleteTopicsForDomain, type CreateTopicInput } from '../topics'
 
 // A minimal in-memory Firestore fake — just enough surface for topics.ts's
 // own calls (collection().doc()/.where()/.get()/.set()/.update()), the same
@@ -15,6 +15,7 @@ function makeFirestore() {
       get: async () => ({ exists: docs.has(id), data: () => docs.get(id) }),
       set: async (data: Record<string, unknown>) => { docs.set(id, data) },
       update: async (patch: Record<string, unknown>) => { docs.set(id, { ...(docs.get(id) ?? {}), ...patch }) },
+      delete: async () => { docs.delete(id) },
     }
   }
 
@@ -57,10 +58,15 @@ describe('parseTopicInput', () => {
     expect(parseTopicInput({ ...VALID_INPUT, domainId: undefined })).toHaveProperty('error')
   })
 
-  it('rejects a topicNumber outside 1..20', () => {
+  it('rejects a topicNumber outside 1..50 (the sanity ceiling, independent of any domain\'s own locked count)', () => {
     expect(parseTopicInput({ ...VALID_INPUT, topicNumber: 0 })).toHaveProperty('error')
-    expect(parseTopicInput({ ...VALID_INPUT, topicNumber: 21 })).toHaveProperty('error')
+    expect(parseTopicInput({ ...VALID_INPUT, topicNumber: 51 })).toHaveProperty('error')
     expect(parseTopicInput({ ...VALID_INPUT, topicNumber: 1.5 })).toHaveProperty('error')
+  })
+
+  it('accepts a topicNumber above the old fixed-20 default, since a domain can lock a larger count', () => {
+    expect(parseTopicInput({ ...VALID_INPUT, topicNumber: 21 })).toHaveProperty('input')
+    expect(parseTopicInput({ ...VALID_INPUT, topicNumber: 50 })).toHaveProperty('input')
   })
 
   it('rejects an empty/whitespace-only title, description, audience, or writingType', () => {
@@ -139,5 +145,17 @@ describe('topic CRUD against Firestore', () => {
     const fetched = await getTopic(firestore, created.id)
     expect(fetched?.enabled).toBe(false)
     expect(fetched?.title).toBe(created.title)
+  })
+
+  it('deleteTopicsForDomain removes only that domain\'s topics', async () => {
+    const { firestore } = makeFirestore()
+    await createTopic(firestore, { ...VALID_INPUT, domainId: 'medical', topicNumber: 1 } as unknown as CreateTopicInput)
+    await createTopic(firestore, { ...VALID_INPUT, domainId: 'medical', topicNumber: 2 } as unknown as CreateTopicInput)
+    await createTopic(firestore, { ...VALID_INPUT, domainId: 'legal', topicNumber: 1 } as unknown as CreateTopicInput)
+
+    await deleteTopicsForDomain(firestore, 'medical')
+
+    expect(await listTopics(firestore, 'medical')).toHaveLength(0)
+    expect(await listTopics(firestore, 'legal')).toHaveLength(1)
   })
 })

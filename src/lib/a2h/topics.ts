@@ -1,6 +1,6 @@
 import type { Firestore, Query, DocumentData } from 'firebase-admin/firestore'
 import { DOMAINS, type Domain } from '@/lib/style/types'
-import { TOPICS_PER_DOMAIN, type BenchmarkTopic } from './types'
+import { MAX_TOPICS_PER_DOMAIN, type BenchmarkTopic } from './types'
 
 const COLLECTION = 'a2hTopics'
 
@@ -16,8 +16,8 @@ export function parseTopicInput(body: Record<string, unknown>): { input: CreateT
     return { error: `domainId must be one of: ${DOMAINS.join(', ')}` }
   }
   const topicNumber = Number(body.topicNumber)
-  if (!Number.isInteger(topicNumber) || topicNumber < 1 || topicNumber > TOPICS_PER_DOMAIN) {
-    return { error: `topicNumber must be an integer between 1 and ${TOPICS_PER_DOMAIN}` }
+  if (!Number.isInteger(topicNumber) || topicNumber < 1 || topicNumber > MAX_TOPICS_PER_DOMAIN) {
+    return { error: `topicNumber must be an integer between 1 and ${MAX_TOPICS_PER_DOMAIN}` }
   }
   const title = typeof body.title === 'string' ? body.title.trim() : ''
   if (!title) return { error: 'title is required' }
@@ -90,4 +90,12 @@ export function parseTopicPatch(body: Record<string, unknown>): TopicPatch {
 
 export async function updateTopic(firestore: Firestore, topicId: string, patch: TopicPatch): Promise<void> {
   await firestore.collection(COLLECTION).doc(topicId).update({ ...patch, updatedAt: new Date().toISOString() })
+}
+
+// Used only by outline regeneration (generateOutline's forceOverwrite path)
+// to clear a domain's roster before writing a fresh one — never exposed as
+// its own "delete all" admin action.
+export async function deleteTopicsForDomain(firestore: Firestore, domainId: Domain): Promise<void> {
+  const existing = await listTopics(firestore, domainId)
+  await Promise.all(existing.map(t => firestore.collection(COLLECTION).doc(t.id).delete()))
 }
