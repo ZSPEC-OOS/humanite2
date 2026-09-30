@@ -3,11 +3,12 @@ import { createHash } from 'crypto'
 import type OpenAI from 'openai'
 import type { Domain } from '@/lib/style/types'
 import type { BenchmarkTopic, CorpusSource, CorpusSourceStatus } from './types'
+import { A2H_COLLECTIONS } from './types'
 import { isWithinTolerance } from './wordCountTolerance'
 import { buildGenerationPrompt, maxTokensFor } from './generationPrompt'
 import { getCorpusProject, markGeneratingIfNeeded } from './corpusProject'
 
-const COLLECTION = 'a2hCorpusSources'
+const COLLECTION = A2H_COLLECTIONS.sources
 
 function wordCount(text: string): number {
   const trimmed = text.trim()
@@ -56,12 +57,10 @@ export interface GenerateSourceParams {
 // server-side key this admin doesn't control) to write one topic x length
 // cell, then computes word count/hash/tolerance status deterministically
 // from the actual returned text — a model-reported word count is never
-// trusted. Refuses to silently overwrite an already-accepted cell: per §7,
-// "regenerate failed cells only; never overwrite accepted text silently."
-// Requires the project's blueprint to already be locked — a source
-// generated against a still-editable topic roster or length ladder isn't
-// yet the immutable unit the rest of the benchmark's comparability depends
-// on.
+// trusted. Requires the project to be blueprint_locked or generating —
+// never draft (the topic roster/ladder isn't settled yet), archived, or
+// frozen (a frozen project's matrix is a closed, immutable record; nothing
+// may be added to or changed in it, ever, even a still-missing cell).
 export async function generateSource(
   firestore: Firestore,
   params: GenerateSourceParams,
@@ -70,18 +69,28 @@ export async function generateSource(
   const { corpusProjectId, topic, targetWords, temperature, client, model, providerLabel } = params
   const project = await getCorpusProject(firestore, corpusProjectId)
   if (!project) throw new Error('Corpus project not found.')
-  if (project.status === 'draft') {
-    throw new Error('Lock the blueprint before generating corpus sources.')
-  }
-  if (project.status === 'archived') {
-    throw new Error('Cannot generate sources for an archived project.')
+  if (project.status !== 'blueprint_locked' && project.status !== 'generating') {
+    throw new Error(`Cannot generate sources while the project is ${project.status} — the blueprint must be locked and the project must not yet be frozen.`)
   }
   if (!project.lengthLadder.includes(targetWords)) {
     throw new Error(`targetWords must be one of: ${project.lengthLadder.join(', ')}`)
   }
+  // Never trust an opaque topicId alone as proof the caller is targeting
+  // the right project — a topic id is only unique globally, not proof of
+  // which project's blueprint it belongs to.
+  if (topic.corpusProjectId !== corpusProjectId) {
+    throw new Error('Topic does not belong to this corpus project.')
+  }
 
   const existing = await getSource(firestore, corpusProjectId, topic.id, targetWords)
-  if (existing && !forceOverwrite && (existing.status === 'validated' || existing.status === 'frozen')) {
+  // A frozen source is immutable, full stop — this check runs before
+  // forceOverwrite is even considered, unlike 'validated' below, so no
+  // caller can ever pass force:true to silently rewrite an already-frozen
+  // cell.
+  if (existing?.status === 'frozen') {
+    throw new Error('Frozen sources are immutable and can never be regenerated.')
+  }
+  if (existing && !forceOverwrite && existing.status === 'validated') {
     throw new Error(`Source for this cell is already ${existing.status} — pass force to regenerate.`)
   }
 

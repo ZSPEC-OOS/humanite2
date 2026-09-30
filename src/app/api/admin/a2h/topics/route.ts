@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireA2HAdmin } from '@/lib/require-a2h-admin'
 import { isAuthFailure } from '@/lib/require-auth'
 import { db } from '@/lib/firestore'
-import { listTopics, createTopic, parseTopicInput } from '@/lib/a2h/topics'
+import { listTopics, parseTopicInput } from '@/lib/a2h/topics'
+import { createTopicChecked } from '@/lib/a2h/topicMutations'
 import { DOMAINS, type Domain } from '@/lib/style/types'
 
 export async function GET(req: NextRequest) {
@@ -40,6 +41,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: parsed.error } }, { status: 400 })
   }
 
-  const topic = await createTopic(db(), { ...parsed.input, corpusProjectId })
-  return NextResponse.json({ topic }, { status: 201 })
+  try {
+    const topic = await createTopicChecked(db(), corpusProjectId, parsed.input)
+    return NextResponse.json({ topic }, { status: 201 })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to create topic.'
+    const notFound = message === 'Corpus project not found.'
+    return NextResponse.json(
+      { error: { code: notFound ? 'NOT_FOUND' : 'VALIDATION_ERROR', message } },
+      { status: notFound ? 404 : 400 },
+    )
+  }
 }

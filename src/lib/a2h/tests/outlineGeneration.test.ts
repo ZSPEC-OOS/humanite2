@@ -56,7 +56,7 @@ function makeFirestore() {
 // need, without going through the admin UI's full multi-domain flow.
 async function createDraftProject(firestore: Firestore, domain: Domain, topicCount: number): Promise<string> {
   const project = await createCorpusProject(firestore, { name: 'Test Project' })
-  await updateProjectDraft(firestore, project.id, { domains: [domain], topicCountByDomain: { [domain]: topicCount } })
+  await updateProjectDraft(firestore, project.id, { domains: [domain], topicCountDefault: topicCount })
   return project.id
 }
 
@@ -204,9 +204,10 @@ describe('generateOutline', () => {
       .rejects.toThrow(/not found/i)
   })
 
-  it('throws when the domain has no configured topic count', async () => {
+  it('throws when the domain has no configured topic count — e.g. a domain not selected for this project', async () => {
     const { firestore } = makeFirestore()
     const project = await createCorpusProject(firestore, { name: 'Test Project' })
+    await updateProjectDraft(firestore, project.id, { domains: ['legal'] })
     await expect(generateOutline(firestore, { corpusProjectId: project.id, domainId: 'medical', client: stubClient(validOutlineJson(20)), model: 'stub' }))
       .rejects.toThrow(/set a topic count/i)
   })
@@ -346,7 +347,7 @@ describe('expandOutline', () => {
     const { firestore } = makeFirestore()
     const corpusProjectId = await createDraftProject(firestore, 'medical', 2)
     const initial = await generateOutline(firestore, { corpusProjectId, domainId: 'medical', client: stubClient(validOutlineJson(2)), model: 'stub' })
-    await updateProjectDraft(firestore, corpusProjectId, { topicCountByDomain: { medical: 5 } })
+    await updateProjectDraft(firestore, corpusProjectId, { topicCountDefault: 5 })
 
     const additionalJson = outlineJsonFromTitles(['New Topic A', 'New Topic B', 'New Topic C'])
     const appended = await expandOutline(firestore, { corpusProjectId, domainId: 'medical', client: stubClient(additionalJson), model: 'stub' })
@@ -367,7 +368,7 @@ describe('expandOutline', () => {
     const { firestore } = makeFirestore()
     const corpusProjectId = await createDraftProject(firestore, 'medical', 1)
     await generateOutline(firestore, { corpusProjectId, domainId: 'medical', client: stubClient(outlineJsonFromTitles(['Hypertension'])), model: 'stub' })
-    await updateProjectDraft(firestore, corpusProjectId, { topicCountByDomain: { medical: 2 } })
+    await updateProjectDraft(firestore, corpusProjectId, { topicCountDefault: 2 })
 
     await expect(expandOutline(firestore, { corpusProjectId, domainId: 'medical', client: stubClient(outlineJsonFromTitles(['hypertension'])), model: 'stub' }))
       .rejects.toThrow(/duplicates an existing topic/i)

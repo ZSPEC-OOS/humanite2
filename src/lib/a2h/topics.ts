@@ -1,8 +1,8 @@
 import type { Firestore, Query, DocumentData } from 'firebase-admin/firestore'
 import { DOMAINS, type Domain } from '@/lib/style/types'
-import { MAX_TOPICS_PER_DOMAIN, type BenchmarkTopic } from './types'
+import { MAX_TOPICS_PER_DOMAIN, A2H_COLLECTIONS, type BenchmarkTopic } from './types'
 
-const COLLECTION = 'a2hTopics'
+const COLLECTION = A2H_COLLECTIONS.topics
 
 export type CreateTopicInput = Omit<BenchmarkTopic, 'id' | 'enabled' | 'createdAt' | 'updatedAt'>
 

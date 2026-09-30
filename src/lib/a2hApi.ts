@@ -1,11 +1,11 @@
 import { apiFetch } from '@/lib/api'
-import type { BenchmarkTopic, CorpusSource, BenchmarkOutput, CorpusProject } from '@/lib/a2h/types'
+import type { BenchmarkTopic, CorpusSource, BenchmarkOutput, CorpusProject, CorpusManifest } from '@/lib/a2h/types'
 import type { CreateTopicInput } from '@/lib/a2h/topics'
-import type { ProjectDraftPatch } from '@/lib/a2h/corpusProject'
+import type { ProjectDraftPatch, FreezeValidationResult } from '@/lib/a2h/corpusProject'
 import type { DetectorResult } from '@/lib/a2h/baseline'
 import type { Domain } from '@/lib/style/types'
 
-export type { BenchmarkTopic, CorpusSource, BenchmarkOutput, CreateTopicInput, DetectorResult, CorpusProject, ProjectDraftPatch }
+export type { BenchmarkTopic, CorpusSource, BenchmarkOutput, CreateTopicInput, DetectorResult, CorpusProject, ProjectDraftPatch, CorpusManifest, FreezeValidationResult }
 
 // ── Corpus projects ──────────────────────────────────────────────────────
 
@@ -56,6 +56,20 @@ export async function apiDuplicateProject(projectId: string, name: string): Prom
     body: JSON.stringify({ name }),
   })
   return data.project
+}
+
+export async function apiFreezeCheck(projectId: string): Promise<FreezeValidationResult> {
+  const data = await apiFetch<{ validation: FreezeValidationResult }>(`/admin/a2h/projects/${projectId}/freeze-check`)
+  return data.validation
+}
+
+export async function apiGetManifest(projectId: string): Promise<CorpusManifest | null> {
+  try {
+    const data = await apiFetch<{ manifest: CorpusManifest }>(`/admin/a2h/projects/${projectId}/manifest`)
+    return data.manifest
+  } catch {
+    return null
+  }
 }
 
 // ── Topics (blueprint) ───────────────────────────────────────────────────

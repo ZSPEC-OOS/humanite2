@@ -5,19 +5,11 @@ import { useSearchParams } from 'next/navigation'
 import type { Domain } from '@/lib/style/types'
 import {
   apiGetProject, apiListTopics, apiListCorpus, apiGenerateSource, apiFreezeSource,
-  apiListBaselines, apiAcquireBaseline,
-  apiListOutputs, apiTransformSource, apiListPostScores, apiAcquirePostScore,
-  type BenchmarkTopic, type CorpusSource, type BenchmarkOutput, type DetectorResult, type CorpusProject,
+  apiFreezeCheck, apiFreezeProject,
+  type BenchmarkTopic, type CorpusSource, type CorpusProject, type FreezeValidationResult,
 } from '@/lib/a2hApi'
 import { Spinner } from '@/components/ui/Spinner'
-
-const INTENSITIES = Array.from({ length: 10 }, (_, i) => i + 1)
-
-const OUTPUT_CELL_STYLES: Record<string, string> = {
-  empty: 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600',
-  success: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
-  failed: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-}
+import { CorpusSteps } from '@/components/a2h/CorpusSteps'
 
 type CellKey = string
 function cellKey(topicId: string, targetWords: number): CellKey {
@@ -31,6 +23,12 @@ const CELL_STYLES: Record<string, string> = {
   frozen: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
 }
 
+// Corpus Matrix's job ends at the frozen source document: generate,
+// inspect, validate word count, regenerate a non-frozen cell, freeze a
+// cell, and show matrix completeness. Everything past that point —
+// intensity transformations, GPTZero baseline/post-transform calls — is
+// benchmark execution, not corpus preparation, and lives on its own
+// Benchmark Runs page instead.
 export default function A2HCorpusPage() {
   const searchParams = useSearchParams()
   const projectId = searchParams.get('project') ?? ''
@@ -39,15 +37,19 @@ export default function A2HCorpusPage() {
   const [domain, setDomain] = useState<Domain | null>(null)
   const [topics, setTopics] = useState<BenchmarkTopic[]>([])
   const [sources, setSources] = useState<Record<CellKey, CorpusSource>>({})
-  const [baselines, setBaselines] = useState<Record<string, DetectorResult>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<{ topic: BenchmarkTopic; targetWords: number } | null>(null)
   const [busy, setBusy] = useState(false)
-  const [outputs, setOutputs] = useState<Record<number, BenchmarkOutput>>({})
-  const [postScores, setPostScores] = useState<Record<string, DetectorResult>>({})
-  const [selectedIntensity, setSelectedIntensity] = useState<number | null>(null)
-  const [outputsLoading, setOutputsLoading] = useState(false)
+
+  const [bulkScope, setBulkScope] = useState<'all' | 'current'>('current')
+  const [bulkRunning, setBulkRunning] = useState(false)
+  const [bulkStatus, setBulkStatus] = useState<{ done: number; total: number } | null>(null)
+
+  const [validation, setValidation] = useState<FreezeValidationResult | null>(null)
+  const [validationLoading, setValidationLoading] = useState(false)
+  const [showProblems, setShowProblems] = useState(false)
+  const [freezing, setFreezing] = useState(false)
 
   useEffect(() => {
     if (!projectId) {
@@ -72,49 +74,27 @@ export default function A2HCorpusPage() {
     setLoading(true)
     setError(null)
     setSelected(null)
-    Promise.all([apiListTopics(projectId, domain), apiListCorpus(projectId, domain), apiListBaselines(projectId, domain)])
-      .then(([topicsData, sourcesData, baselinesData]) => {
+    Promise.all([apiListTopics(projectId, domain), apiListCorpus(projectId, domain)])
+      .then(([topicsData, sourcesData]) => {
         if (cancelled) return
         setTopics(topicsData)
         const map: Record<CellKey, CorpusSource> = {}
         for (const s of sourcesData) map[cellKey(s.topicId, s.targetWords)] = s
         setSources(map)
-        setBaselines(baselinesData)
       })
       .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load corpus data.') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [projectId, domain])
 
+  function refreshValidation() {
+    if (!projectId) return
+    setValidationLoading(true)
+    apiFreezeCheck(projectId).then(setValidation).catch(() => {}).finally(() => setValidationLoading(false))
+  }
+  useEffect(refreshValidation, [projectId, project?.status])
+
   const selectedSource = selected ? sources[cellKey(selected.topic.id, selected.targetWords)] : undefined
-  const selectedBaseline = selectedSource ? baselines[selectedSource.id] : undefined
-
-  useEffect(() => {
-    setOutputs({})
-    setPostScores({})
-    setSelectedIntensity(null)
-    if (!projectId || !selected || selectedSource?.status !== 'frozen') return
-    let cancelled = false
-    setOutputsLoading(true)
-    apiListOutputs(projectId, selected.topic.id, selected.targetWords)
-      .then(async outputsData => {
-        if (cancelled) return
-        const map: Record<number, BenchmarkOutput> = {}
-        for (const o of outputsData) map[o.intensity] = o
-        setOutputs(map)
-        if (outputsData.length > 0) {
-          const scores = await apiListPostScores(projectId, selected.topic.id, selected.targetWords)
-          if (!cancelled) setPostScores(scores)
-        }
-      })
-      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load outputs.') })
-      .finally(() => { if (!cancelled) setOutputsLoading(false) })
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, selected?.topic.id, selected?.targetWords, selectedSource?.status])
-
-  const selectedOutput = selectedIntensity != null ? outputs[selectedIntensity] : undefined
-  const selectedPostScore = selectedOutput ? postScores[selectedOutput.id] : undefined
 
   async function handleGenerate(force: boolean) {
     if (!selected) return
@@ -130,13 +110,14 @@ export default function A2HCorpusPage() {
     }
   }
 
-  async function handleFreeze() {
+  async function handleFreezeSource() {
     if (!selected) return
     setBusy(true)
     setError(null)
     try {
       const source = await apiFreezeSource(projectId, selected.topic.id, selected.targetWords)
       setSources(prev => ({ ...prev, [cellKey(source.topicId, source.targetWords)]: source }))
+      refreshValidation()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Freeze failed.')
     } finally {
@@ -144,50 +125,67 @@ export default function A2HCorpusPage() {
     }
   }
 
-  async function handleAcquireBaseline(force: boolean) {
-    if (!selected) return
-    setBusy(true)
+  // Targets only cells with no source yet — a validation_failed cell is a
+  // deliberate per-cell regenerate decision (via the cell inspector below),
+  // and a frozen cell is never touched. Because it only ever fills gaps,
+  // re-running it after a partial run or a failure naturally resumes
+  // exactly where it left off.
+  async function handleGenerateMissing() {
+    if (!project) return
+    setBulkRunning(true)
     setError(null)
     try {
-      const baseline = await apiAcquireBaseline(projectId, selected.topic.id, selected.targetWords, force)
-      setBaselines(prev => ({ ...prev, [baseline.sourceId]: baseline }))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Baseline acquisition failed.')
+      const domainsToFill = bulkScope === 'all' ? project.domains : domain ? [domain] : []
+      const cells: { topic: BenchmarkTopic; targetWords: number }[] = []
+      for (const d of domainsToFill) {
+        const domainTopics = d === domain ? topics : await apiListTopics(project.id, d)
+        const domainSources = d === domain ? sources : Object.fromEntries((await apiListCorpus(project.id, d)).map(s => [cellKey(s.topicId, s.targetWords), s]))
+        for (const topic of domainTopics) {
+          for (const len of project.lengthLadder) {
+            if (!domainSources[cellKey(topic.id, len)]) cells.push({ topic, targetWords: len })
+          }
+        }
+      }
+      setBulkStatus({ done: 0, total: cells.length })
+      for (let i = 0; i < cells.length; i++) {
+        const cell = cells[i]!
+        try {
+          const source = await apiGenerateSource(project.id, cell.topic.id, cell.targetWords, false)
+          if (cell.topic.domainId === domain) {
+            setSources(prev => ({ ...prev, [cellKey(source.topicId, source.targetWords)]: source }))
+          }
+        } catch {
+          // Continue past a single cell's failure — a transient model error
+          // on one cell shouldn't abort the whole run; the cell simply stays
+          // missing and can be retried by running this again or generating
+          // it individually.
+        }
+        setBulkStatus({ done: i + 1, total: cells.length })
+      }
+      refreshValidation()
     } finally {
-      setBusy(false)
+      setBulkRunning(false)
     }
   }
 
-  async function handleTransform(force: boolean) {
-    if (!selected || selectedIntensity == null) return
-    setBusy(true)
+  async function handleFreezeCorpus() {
+    if (!project) return
+    if (!window.confirm(`Freeze "${project.name}"? The entire source matrix becomes permanently immutable.`)) return
+    setFreezing(true)
     setError(null)
     try {
-      const output = await apiTransformSource(projectId, selected.topic.id, selected.targetWords, selectedIntensity, force)
-      setOutputs(prev => ({ ...prev, [output.intensity]: output }))
+      const updated = await apiFreezeProject(project.id)
+      setProject(updated)
+      refreshValidation()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Transformation failed.')
+      setError(err instanceof Error ? err.message : 'Freeze failed.')
     } finally {
-      setBusy(false)
-    }
-  }
-
-  async function handleAcquirePostScore(force: boolean) {
-    if (!selected || selectedIntensity == null) return
-    setBusy(true)
-    setError(null)
-    try {
-      const postScore = await apiAcquirePostScore(projectId, selected.topic.id, selected.targetWords, selectedIntensity, force)
-      setPostScores(prev => ({ ...prev, [postScore.outputId ?? postScore.id]: postScore }))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Post-score acquisition failed.')
-    } finally {
-      setBusy(false)
+      setFreezing(false)
     }
   }
 
   const ladder = project?.lengthLadder ?? []
-  const canGenerate = project != null && ['blueprint_locked', 'generating', 'frozen'].includes(project.status)
+  const canGenerate = project != null && ['blueprint_locked', 'generating'].includes(project.status)
 
   const counts = useMemo(() => {
     const values = Object.values(sources)
@@ -213,12 +211,20 @@ export default function A2HCorpusPage() {
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950 p-6">
       <div className="max-w-6xl mx-auto space-y-5">
-        <div>
-          <Link href={`/admin/a2h/corpus-design?project=${projectId}`} className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300">← {project?.name ?? 'A2H Benchmark'}</Link>
-          <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mt-1">Corpus Matrix</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {counts.frozen} frozen · {counts.validated} awaiting freeze · {counts.failed} validation issues · {counts.total} cells for {domain}
-          </p>
+        <div className="space-y-3">
+          <div>
+            <Link href={`/admin/a2h/corpus-design?project=${projectId}`} className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300">← {project?.name ?? 'A2H Benchmark'}</Link>
+            <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mt-1">Source Matrix</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {counts.frozen} frozen · {counts.validated} awaiting freeze · {counts.failed} validation issues · {counts.total} cells for {domain}
+            </p>
+          </div>
+          {project && <CorpusSteps status={project.status} current={project.status === 'frozen' ? 'freeze' : 'matrix'} />}
+          {project?.status === 'frozen' && (
+            <Link href={`/admin/a2h/benchmark?project=${projectId}`} className="inline-block text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">
+              Go to Benchmark Runs →
+            </Link>
+          )}
         </div>
 
         {project && (
@@ -243,11 +249,29 @@ export default function A2HCorpusPage() {
           <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-2.5">{error}</div>
         )}
 
+        {canGenerate && (
+          <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-gray-500 dark:text-gray-400">Generate Missing Sources for</span>
+              <select value={bulkScope} onChange={e => setBulkScope(e.target.value as 'all' | 'current')}
+                className="rounded-lg px-2 py-1 bg-white border border-gray-300 text-gray-700 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300">
+                <option value="current">Current domain</option>
+                <option value="all">All domains</option>
+              </select>
+              {bulkStatus && <span className="text-gray-400 dark:text-gray-500">{bulkStatus.done} / {bulkStatus.total}</span>}
+            </div>
+            <button onClick={handleGenerateMissing} disabled={bulkRunning}
+              className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">
+              {bulkRunning ? 'Generating…' : 'Generate Missing Sources'}
+            </button>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex justify-center py-12">
             <Spinner className="w-6 h-6 border-gray-200 border-t-gray-700 dark:border-gray-700 dark:border-t-gray-300" />
           </div>
-        ) : !canGenerate ? (
+        ) : !canGenerate && project?.status !== 'frozen' ? (
           <div className="text-sm text-gray-400 dark:text-gray-500 py-8 text-center">
             Lock the blueprint before generating corpus sources.{' '}
             <Link href={`/admin/a2h/corpus-design?project=${projectId}`} className="underline hover:text-gray-700 dark:hover:text-gray-300">Configure Corpus Design</Link>.
@@ -317,20 +341,20 @@ export default function A2HCorpusPage() {
                 )}
               </div>
               <div className="flex items-center gap-2">
-                {!selectedSource && (
+                {!selectedSource && canGenerate && (
                   <button onClick={() => handleGenerate(false)} disabled={busy}
                     className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">
                     {busy ? 'Generating…' : 'Generate'}
                   </button>
                 )}
-                {selectedSource && selectedSource.status !== 'frozen' && (
+                {selectedSource && selectedSource.status !== 'frozen' && canGenerate && (
                   <button onClick={() => handleGenerate(true)} disabled={busy}
                     className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
                     {busy ? 'Regenerating…' : 'Regenerate'}
                   </button>
                 )}
                 {selectedSource?.status === 'validated' && (
-                  <button onClick={handleFreeze} disabled={busy}
+                  <button onClick={handleFreezeSource} disabled={busy}
                     className="text-xs font-medium px-3.5 py-2 rounded-xl bg-green-600 text-white disabled:opacity-40">
                     {busy ? 'Freezing…' : 'Freeze'}
                   </button>
@@ -342,115 +366,62 @@ export default function A2HCorpusPage() {
                 {selectedSource.text}
               </div>
             )}
-
-            {selectedSource?.status === 'frozen' && (
-              <div className="border-t border-gray-200 dark:border-gray-800 pt-3 flex items-center justify-between">
-                <div>
-                  <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">GPTZero Baseline</h3>
-                  {selectedBaseline ? (
-                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                      {selectedBaseline.classification} · AI {formatPct(selectedBaseline.aiProbability)} · Human {formatPct(selectedBaseline.humanProbability)}
-                      {selectedBaseline.mixedProbability != null && ` · Mixed ${formatPct(selectedBaseline.mixedProbability)}`}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Not yet acquired</p>
-                  )}
-                </div>
-                <button onClick={() => handleAcquireBaseline(Boolean(selectedBaseline))} disabled={busy}
-                  className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40 shrink-0">
-                  {busy ? 'Working…' : selectedBaseline ? 'Re-acquire' : 'Acquire baseline'}
-                </button>
-              </div>
-            )}
-
-            {selectedSource?.status === 'frozen' && (
-              <div className="border-t border-gray-200 dark:border-gray-800 pt-3 space-y-3">
-                <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Intensity Transformations</h3>
-                {outputsLoading ? (
-                  <Spinner className="w-4 h-4 border-gray-200 border-t-gray-700 dark:border-gray-700 dark:border-t-gray-300" />
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {INTENSITIES.map(i => {
-                      const output = outputs[i]
-                      const state = output?.status ?? 'empty'
-                      return (
-                        <button
-                          key={i}
-                          onClick={() => setSelectedIntensity(i)}
-                          className={`w-9 h-9 rounded-lg text-[10px] font-semibold transition-all ${OUTPUT_CELL_STYLES[state]} ${
-                            selectedIntensity === i ? 'ring-2 ring-gray-900 dark:ring-gray-100' : ''
-                          }`}
-                          title={output ? `${output.status} · ${output.outputWords} words` : 'Not transformed'}
-                        >
-                          I{i}
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-
-                {selectedIntensity != null && (
-                  <div className="space-y-2 pl-0.5">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {selectedOutput
-                          ? `${selectedOutput.status} · ${selectedOutput.outputWords} words · ${selectedOutput.latencyMs}ms · ${selectedOutput.retryCount} retries`
-                          : `Intensity ${selectedIntensity} not yet transformed`}
-                      </p>
-                      <div className="flex items-center gap-2">
-                        {!selectedOutput && (
-                          <button onClick={() => handleTransform(false)} disabled={busy}
-                            className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">
-                            {busy ? 'Transforming…' : 'Transform'}
-                          </button>
-                        )}
-                        {selectedOutput && (
-                          <button onClick={() => handleTransform(true)} disabled={busy}
-                            className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
-                            {busy ? 'Working…' : 'Regenerate'}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {selectedOutput?.status === 'success' && (
-                      <div className="max-h-48 overflow-y-auto text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/50 rounded-xl p-3 whitespace-pre-wrap">
-                        {selectedOutput.outputText}
-                      </div>
-                    )}
-                    {selectedOutput?.status === 'failed' && (
-                      <p className="text-xs text-red-600 dark:text-red-400">{selectedOutput.errorMessage}</p>
-                    )}
-
-                    {selectedOutput?.status === 'success' && (
-                      <div className="flex items-center justify-between border-t border-gray-100 dark:border-gray-900 pt-2">
-                        <div>
-                          <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Post-transform GPTZero</p>
-                          {selectedPostScore ? (
-                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
-                              {selectedPostScore.classification} · AI {formatPct(selectedPostScore.aiProbability)} · Human {formatPct(selectedPostScore.humanProbability)}
-                            </p>
-                          ) : (
-                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Not yet acquired</p>
-                          )}
-                        </div>
-                        <button onClick={() => handleAcquirePostScore(Boolean(selectedPostScore))} disabled={busy}
-                          className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40 shrink-0">
-                          {busy ? 'Working…' : selectedPostScore ? 'Re-acquire' : 'Acquire score'}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         )}
+
+        {/* Whole-corpus freeze — the last step, and the strictest: every
+            expected topic/length cell must exist and be frozen already,
+            with nothing validated-only or validation_failed left behind. */}
+        <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-3">
+          <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Freeze Corpus</h2>
+          {validationLoading || !validation ? (
+            <Spinner className="w-4 h-4 border-gray-200 border-t-gray-700 dark:border-gray-700 dark:border-t-gray-300" />
+          ) : project?.status === 'frozen' ? (
+            <p className="text-sm text-green-700 dark:text-green-400">This corpus is frozen and immutable — {validation.actualSourceCount} source documents.</p>
+          ) : validation.ok ? (
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <p className="text-sm text-gray-600 dark:text-gray-400">Every expected cell is generated and frozen — {validation.expectedSourceCount} sources.</p>
+              <button onClick={handleFreezeCorpus} disabled={freezing}
+                className="text-xs font-medium px-3.5 py-2 rounded-xl bg-green-600 text-white disabled:opacity-40">
+                {freezing ? 'Freezing…' : 'Freeze Corpus'}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-amber-700 dark:text-amber-400">Cannot freeze corpus yet.</p>
+              <dl className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                <Stat label="Expected" value={validation.expectedSourceCount} />
+                <Stat label="Present" value={validation.actualSourceCount} />
+                <Stat label="Frozen" value={validation.frozenCount} />
+                <Stat label="Missing" value={validation.missingCells.length} warn />
+                <Stat label="Not frozen" value={validation.validatedNotFrozenCount + validation.validationFailedCount} warn />
+              </dl>
+              {(validation.missingCells.length > 0 || validation.problems.length > 0) && (
+                <button onClick={() => setShowProblems(v => !v)} className="text-xs text-gray-500 hover:text-gray-800 dark:hover:text-gray-300 underline">
+                  {showProblems ? 'Hide problems' : 'View Problems'}
+                </button>
+              )}
+              {showProblems && (
+                <div className="max-h-48 overflow-y-auto text-xs text-gray-600 dark:text-gray-400 space-y-1 bg-gray-50 dark:bg-gray-900/50 rounded-xl p-3">
+                  {validation.problems.map((p, i) => <p key={`p-${i}`}>{p}</p>)}
+                  {validation.missingCells.map((c, i) => (
+                    <p key={`m-${i}`}>Missing: {c.domainId} / {c.topicTitle} / {c.targetWords} words</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
 }
 
-function formatPct(value: number | null): string {
-  return value == null ? '—' : `${Math.round(value * 100)}%`
+function Stat({ label, value, warn = false }: { label: string; value: number; warn?: boolean }) {
+  return (
+    <div className="bg-gray-50 dark:bg-gray-900/50 rounded-xl px-3 py-2">
+      <dt className="text-gray-400 dark:text-gray-500">{label}</dt>
+      <dd className={`text-sm font-semibold tabular-nums ${warn && value > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-800 dark:text-gray-200'}`}>{value}</dd>
+    </div>
+  )
 }

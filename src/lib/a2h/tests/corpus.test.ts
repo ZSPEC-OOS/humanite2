@@ -56,9 +56,10 @@ function makeProject(id: string, overrides: Partial<CorpusProject> = {}): Corpus
     benchmarkVersion: 'A2H-BV001',
     corpusVersion: 'CORPUS-V001',
     domains: ['general', 'legal'],
+    topicCountDefault: 20,
+    topicCountOverrides: {},
     topicCountByDomain: {},
     lengthLadder: [100, 200],
-    intensities: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     status: 'blueprint_locked',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -159,7 +160,7 @@ describe('generateSource', () => {
     await expect(generateSource(firestore, {
       corpusProjectId: projectId, topic, targetWords: 100, temperature: null,
       client: stubClient(words(100)), model: 'stub-model', providerLabel: 'openai',
-    })).rejects.toThrow(/lock the blueprint/i)
+    })).rejects.toThrow(/blueprint must be locked/i)
   })
 
   it('refuses to generate for an archived project', async () => {
@@ -236,6 +237,38 @@ describe('generateSource', () => {
     })
     const doc = await firestore.collection('a2hCorpusProjects').doc(projectId).get()
     expect((doc.data() as CorpusProject).status).toBe('generating')
+  })
+
+  it('never regenerates a frozen source, even with forceOverwrite — the project itself may still be generating', async () => {
+    const { firestore } = makeFirestore()
+    const projectId = await seedProject(firestore, { status: 'blueprint_locked' })
+    const topic = makeTopic(projectId)
+    await generateSource(firestore, {
+      corpusProjectId: projectId, topic, targetWords: 100, temperature: null,
+      client: stubClient(words(100)), model: 'stub-model', providerLabel: 'openai',
+    })
+    await freezeSource(firestore, projectId, topic.id, 100)
+
+    await expect(generateSource(firestore, {
+      corpusProjectId: projectId, topic, targetWords: 100, temperature: null,
+      client: stubClient(words(105)), model: 'stub-model', providerLabel: 'openai',
+    }, true)).rejects.toThrow(/immutable/i)
+
+    const stillFrozen = await getSource(firestore, projectId, topic.id, 100)
+    expect(stillFrozen?.status).toBe('frozen')
+    expect(stillFrozen?.actualWords).toBe(100)
+  })
+
+  it('rejects a topic that does not belong to the given corpus project, even though both exist', async () => {
+    const { firestore } = makeFirestore()
+    const projectA = await seedProject(firestore, { id: 'project-a' })
+    const projectB = await seedProject(firestore, { id: 'project-b' })
+    const topicFromA = makeTopic(projectA)
+
+    await expect(generateSource(firestore, {
+      corpusProjectId: projectB, topic: topicFromA, targetWords: 100, temperature: null,
+      client: stubClient(words(100)), model: 'stub-model', providerLabel: 'openai',
+    })).rejects.toThrow(/does not belong to this corpus project/i)
   })
 })
 

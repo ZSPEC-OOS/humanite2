@@ -1,17 +1,22 @@
 import { describe, it, expect } from 'vitest'
 import type { Firestore } from 'firebase-admin/firestore'
+import { DEFAULT_LENGTH_LADDER, TOPICS_PER_DOMAIN } from '../types'
 import {
-  validateProjectName, validateDomains, validateTopicCountByDomain, validateLengthLadder, validateIntensities,
+  validateProjectName, validateDomains, validateTopicCountDefault, validateTopicCountOverrides, validateLengthLadder,
+  resolveTopicCountByDomain,
   createCorpusProject, getCorpusProject, listCorpusProjects, updateProjectDraft,
-  lockBlueprint, markGeneratingIfNeeded, freezeCorpusProject, archiveCorpusProject, duplicateCorpusProject,
+  lockBlueprint, markGeneratingIfNeeded, validateCorpusForFreeze, freezeCorpusProject, getCorpusManifest,
+  archiveCorpusProject, duplicateCorpusProject,
 } from '../corpusProject'
+import { generateSource, freezeSource } from '../corpus'
 import { createTopic, listTopics } from '../topics'
 import type { CreateTopicInput } from '../topics'
+import type OpenAI from 'openai'
 
 // A per-collection-name in-memory Firestore fake — corpusProject.ts touches
 // a2hCorpusProjects directly and, via topics.ts, a2hTopics too (duplicate
-// copies the topic roster), so these must stay in separate maps the way real
-// Firestore collections are.
+// copies the topic roster; freeze validation reads a2hCorpusSources), so
+// these must stay in separate maps the way real Firestore collections are.
 function makeFirestore() {
   const collections = new Map<string, Map<string, Record<string, unknown>>>()
   let counter = 0
@@ -50,6 +55,15 @@ function makeFirestore() {
   return { firestore: { collection } as unknown as Firestore }
 }
 
+function stubClient(content: string): OpenAI {
+  return {
+    chat: { completions: { create: async () => ({ choices: [{ message: { content } }] }) } },
+  } as unknown as OpenAI
+}
+function words(n: number): string {
+  return Array(n).fill('word').join(' ')
+}
+
 describe('validateProjectName', () => {
   it('rejects an empty or whitespace-only name', () => {
     expect(validateProjectName('')).toBeTruthy()
@@ -82,21 +96,52 @@ describe('validateDomains', () => {
   })
 })
 
-describe('validateTopicCountByDomain', () => {
+describe('validateTopicCountDefault', () => {
+  it('rejects a value outside 1..50', () => {
+    expect(validateTopicCountDefault(0)).toHaveProperty('error')
+    expect(validateTopicCountDefault(51)).toHaveProperty('error')
+    expect(validateTopicCountDefault('not a number')).toHaveProperty('error')
+  })
+
+  it('accepts a valid default', () => {
+    const result = validateTopicCountDefault(20)
+    expect('topicCountDefault' in result && result.topicCountDefault).toBe(20)
+  })
+})
+
+describe('validateTopicCountOverrides', () => {
   it('rejects a non-object value', () => {
-    expect(validateTopicCountByDomain(null, ['medical'])).toHaveProperty('error')
-    expect(validateTopicCountByDomain('5', ['medical'])).toHaveProperty('error')
+    expect(validateTopicCountOverrides(null, ['medical'])).toHaveProperty('error')
+    expect(validateTopicCountOverrides('5', ['medical'])).toHaveProperty('error')
   })
 
-  it('requires an entry for every selected domain, within 1..50', () => {
-    expect(validateTopicCountByDomain({}, ['medical'])).toHaveProperty('error')
-    expect(validateTopicCountByDomain({ medical: 0 }, ['medical'])).toHaveProperty('error')
-    expect(validateTopicCountByDomain({ medical: 51 }, ['medical'])).toHaveProperty('error')
+  it('rejects an override for a domain that is not selected', () => {
+    expect(validateTopicCountOverrides({ legal: 10 }, ['medical'])).toHaveProperty('error')
   })
 
-  it('accepts a valid count per selected domain, ignoring domains not selected', () => {
-    const result = validateTopicCountByDomain({ medical: 20, legal: 15 }, ['medical'])
-    expect('topicCountByDomain' in result && result.topicCountByDomain).toEqual({ medical: 20 })
+  it('rejects an out-of-range override', () => {
+    expect(validateTopicCountOverrides({ medical: 0 }, ['medical'])).toHaveProperty('error')
+    expect(validateTopicCountOverrides({ medical: 51 }, ['medical'])).toHaveProperty('error')
+  })
+
+  it('accepts an empty object — overrides are optional', () => {
+    const result = validateTopicCountOverrides({}, ['medical'])
+    expect('topicCountOverrides' in result && result.topicCountOverrides).toEqual({})
+  })
+
+  it('accepts a valid override for a selected domain', () => {
+    const result = validateTopicCountOverrides({ medical: 30 }, ['medical', 'legal'])
+    expect('topicCountOverrides' in result && result.topicCountOverrides).toEqual({ medical: 30 })
+  })
+})
+
+describe('resolveTopicCountByDomain', () => {
+  it('uses the default for every domain with no override', () => {
+    expect(resolveTopicCountByDomain(['medical', 'legal'], 20, {})).toEqual({ medical: 20, legal: 20 })
+  })
+
+  it('lets an explicit override win over the default', () => {
+    expect(resolveTopicCountByDomain(['medical', 'legal'], 20, { medical: 30 })).toEqual({ medical: 30, legal: 20 })
   })
 })
 
@@ -122,28 +167,18 @@ describe('validateLengthLadder', () => {
   })
 })
 
-describe('validateIntensities', () => {
-  it('rejects a value outside 1..10 or a duplicate', () => {
-    expect(validateIntensities([0, 1])).toHaveProperty('error')
-    expect(validateIntensities([1, 11])).toHaveProperty('error')
-    expect(validateIntensities([1, 1])).toHaveProperty('error')
-  })
-
-  it('sorts ascending', () => {
-    const result = validateIntensities([5, 1, 3])
-    expect('intensities' in result && result.intensities).toEqual([1, 3, 5])
-  })
-})
-
 describe('createCorpusProject', () => {
-  it('starts in draft with every domain pre-selected and no topic counts or ladder yet', async () => {
+  it('starts in draft with the standard six-domain, 20-topic, 10-length A2H defaults', async () => {
     const { firestore } = makeFirestore()
     const project = await createCorpusProject(firestore, { name: 'A2H Standard Corpus' })
     expect(project.status).toBe('draft')
     expect(project.domains.length).toBe(6)
-    expect(project.topicCountByDomain).toEqual({})
-    expect(project.lengthLadder).toEqual([])
-    expect(project.intensities.length).toBe(10)
+    expect(project.topicCountDefault).toBe(TOPICS_PER_DOMAIN)
+    expect(project.topicCountDefault).toBe(20)
+    expect(project.topicCountOverrides).toEqual({})
+    for (const d of project.domains) expect(project.topicCountByDomain[d]).toBe(20)
+    expect(project.lengthLadder).toEqual([...DEFAULT_LENGTH_LADDER])
+    expect(project.lengthLadder).toEqual([100, 200, 300, 500, 750, 1000, 1250, 1500, 1750, 2000])
     expect(project.frozenAt).toBeNull()
     expect(project.createdAt).toBe(project.updatedAt)
   })
@@ -174,7 +209,7 @@ describe('updateProjectDraft', () => {
   it('throws once the project is no longer draft', async () => {
     const { firestore } = makeFirestore()
     const project = await createCorpusProject(firestore, { name: 'Test' })
-    await updateProjectDraft(firestore, project.id, { domains: ['medical'], topicCountByDomain: { medical: 1 }, lengthLadder: [100] })
+    await updateProjectDraft(firestore, project.id, { domains: ['medical'], topicCountDefault: 1, lengthLadder: [100] })
     await createTopic(firestore, {
       corpusProjectId: project.id, domainId: 'medical', topicNumber: 1, title: 'T', description: 'd',
       intendedAudience: 'a', writingType: 'w', coreConcepts: ['c'], generationPromptVersion: 'GEN-V001',
@@ -193,12 +228,38 @@ describe('updateProjectDraft', () => {
     expect(updated.createdAt).toBe(project.createdAt)
   })
 
-  it('drops topicCountByDomain entries for domains removed from the selection', async () => {
+  it('raising the shared default propagates to every domain without its own override', async () => {
     const { firestore } = makeFirestore()
     const project = await createCorpusProject(firestore, { name: 'Test' })
-    await updateProjectDraft(firestore, project.id, { domains: ['medical', 'legal', 'general'] })
-    await updateProjectDraft(firestore, project.id, { topicCountByDomain: { medical: 10, legal: 5, general: 8 } })
+    await updateProjectDraft(firestore, project.id, { domains: ['medical', 'legal', 'general'], topicCountOverrides: { legal: 15 } })
+    const updated = await updateProjectDraft(firestore, project.id, { topicCountDefault: 30 })
+    expect(updated.topicCountByDomain).toEqual({ medical: 30, legal: 15, general: 30 })
+  })
+
+  it('a domain override survives a later reload, independent of the default', async () => {
+    const { firestore } = makeFirestore()
+    const project = await createCorpusProject(firestore, { name: 'Test' })
+    await updateProjectDraft(firestore, project.id, { domains: ['medical', 'legal'], topicCountOverrides: { medical: 40 } })
+    const reloaded = await getCorpusProject(firestore, project.id)
+    expect(reloaded?.topicCountOverrides).toEqual({ medical: 40 })
+    expect(reloaded?.topicCountByDomain).toEqual({ medical: 40, legal: TOPICS_PER_DOMAIN })
+  })
+
+  it('resetting an override (omitting it from the patch) falls back to the default', async () => {
+    const { firestore } = makeFirestore()
+    const project = await createCorpusProject(firestore, { name: 'Test' })
+    await updateProjectDraft(firestore, project.id, { domains: ['medical', 'legal'], topicCountOverrides: { medical: 40 } })
+    const reset = await updateProjectDraft(firestore, project.id, { topicCountOverrides: {} })
+    expect(reset.topicCountOverrides).toEqual({})
+    expect(reset.topicCountByDomain).toEqual({ medical: TOPICS_PER_DOMAIN, legal: TOPICS_PER_DOMAIN })
+  })
+
+  it('drops overrides for domains removed from the selection', async () => {
+    const { firestore } = makeFirestore()
+    const project = await createCorpusProject(firestore, { name: 'Test' })
+    await updateProjectDraft(firestore, project.id, { domains: ['medical', 'legal', 'general'], topicCountOverrides: { medical: 10, legal: 5, general: 8 } })
     const shrunk = await updateProjectDraft(firestore, project.id, { domains: ['medical', 'legal'] })
+    expect(shrunk.topicCountOverrides).toEqual({ medical: 10, legal: 5 })
     expect(shrunk.topicCountByDomain).toEqual({ medical: 10, legal: 5 })
   })
 
@@ -215,7 +276,7 @@ async function buildLockableProject(firestore: Firestore): Promise<string> {
   const project = await createCorpusProject(firestore, { name: 'Lockable' })
   await updateProjectDraft(firestore, project.id, {
     domains: ['medical'],
-    topicCountByDomain: { medical: 2 },
+    topicCountDefault: 2,
     lengthLadder: [100, 200],
   })
   await createTopic(firestore, {
@@ -245,7 +306,7 @@ describe('lockBlueprint', () => {
   it('throws when a domain has not generated its full configured topic count', async () => {
     const { firestore } = makeFirestore()
     const project = await createCorpusProject(firestore, { name: 'Incomplete' })
-    await updateProjectDraft(firestore, project.id, { domains: ['medical'], topicCountByDomain: { medical: 5 }, lengthLadder: [100] })
+    await updateProjectDraft(firestore, project.id, { domains: ['medical'], topicCountDefault: 5, lengthLadder: [100] })
     await createTopic(firestore, {
       corpusProjectId: project.id, domainId: 'medical', topicNumber: 1, title: 'T1', description: 'd',
       intendedAudience: 'a', writingType: 'w', coreConcepts: ['c'], generationPromptVersion: 'GEN-V001',
@@ -279,6 +340,88 @@ describe('markGeneratingIfNeeded', () => {
   })
 })
 
+// Freezes two topics x [100, 200] = 4 cells for a locked project, letting
+// each test decide how many of those 4 make it all the way to frozen.
+async function freezeAllCells(firestore: Firestore, projectId: string, topicIds: string[], lengths: number[]): Promise<void> {
+  for (const topicId of topicIds) {
+    for (const targetWords of lengths) {
+      await generateSource(firestore, {
+        corpusProjectId: projectId,
+        topic: { id: topicId, corpusProjectId: projectId, domainId: 'medical', topicNumber: 1, title: 't', description: 'd', intendedAudience: 'a', writingType: 'w', coreConcepts: ['c'], generationPromptVersion: 'GEN-V001', enabled: true, createdAt: '', updatedAt: '' },
+        targetWords,
+        temperature: null,
+        client: stubClient(words(targetWords)),
+        model: 'stub',
+        providerLabel: 'openai',
+      })
+      await freezeSource(firestore, projectId, topicId, targetWords)
+    }
+  }
+}
+
+describe('validateCorpusForFreeze', () => {
+  it('reports every expected cell missing for a freshly-locked project with no sources yet', async () => {
+    const { firestore } = makeFirestore()
+    const id = await buildLockableProject(firestore)
+    await lockBlueprint(firestore, id)
+    const project = await getCorpusProject(firestore, id)
+    const validation = await validateCorpusForFreeze(firestore, project!)
+    expect(validation.ok).toBe(false)
+    expect(validation.expectedSourceCount).toBe(4) // 2 topics x 2 lengths
+    expect(validation.missingCells).toHaveLength(4)
+  })
+
+  it('is ok once every expected cell is frozen', async () => {
+    const { firestore } = makeFirestore()
+    const id = await buildLockableProject(firestore)
+    await lockBlueprint(firestore, id)
+    const topics = await listTopics(firestore, id, 'medical')
+    await freezeAllCells(firestore, id, topics.map(t => t.id), [100, 200])
+
+    const project = await getCorpusProject(firestore, id)
+    const validation = await validateCorpusForFreeze(firestore, project!)
+    expect(validation.ok).toBe(true)
+    expect(validation.frozenCount).toBe(4)
+    expect(validation.missingCells).toHaveLength(0)
+  })
+
+  it('is not ok when a source exists but is only validated, not frozen', async () => {
+    const { firestore } = makeFirestore()
+    const id = await buildLockableProject(firestore)
+    await lockBlueprint(firestore, id)
+    const topics = await listTopics(firestore, id, 'medical')
+    // Freeze 3 of the 4 expected cells; leave the 4th generated but not frozen.
+    await freezeAllCells(firestore, id, [topics[0]!.id], [100, 200])
+    await generateSource(firestore, {
+      corpusProjectId: id,
+      topic: { id: topics[1]!.id, corpusProjectId: id, domainId: 'medical', topicNumber: 2, title: 't2', description: 'd', intendedAudience: 'a', writingType: 'w', coreConcepts: ['c'], generationPromptVersion: 'GEN-V001', enabled: true, createdAt: '', updatedAt: '' },
+      targetWords: 100,
+      temperature: null,
+      client: stubClient(words(100)),
+      model: 'stub',
+      providerLabel: 'openai',
+    })
+    await freezeSource(firestore, id, topics[1]!.id, 100)
+    await generateSource(firestore, {
+      corpusProjectId: id,
+      topic: { id: topics[1]!.id, corpusProjectId: id, domainId: 'medical', topicNumber: 2, title: 't2', description: 'd', intendedAudience: 'a', writingType: 'w', coreConcepts: ['c'], generationPromptVersion: 'GEN-V001', enabled: true, createdAt: '', updatedAt: '' },
+      targetWords: 200,
+      temperature: null,
+      client: stubClient(words(200)),
+      model: 'stub',
+      providerLabel: 'openai',
+    })
+    // topics[1] @ 200 stays 'validated' — never frozen.
+
+    const project = await getCorpusProject(firestore, id)
+    const validation = await validateCorpusForFreeze(firestore, project!)
+    expect(validation.ok).toBe(false)
+    expect(validation.validatedNotFrozenCount).toBe(1)
+    expect(validation.frozenCount).toBe(3)
+    expect(validation.missingCells).toHaveLength(0)
+  })
+})
+
 describe('freezeCorpusProject', () => {
   it('throws for a nonexistent project', async () => {
     const { firestore } = makeFirestore()
@@ -291,13 +434,81 @@ describe('freezeCorpusProject', () => {
     await expect(freezeCorpusProject(firestore, id)).rejects.toThrow(/lock the blueprint/i)
   })
 
-  it('freezes a blueprint_locked or generating project and sets frozenAt', async () => {
+  it('fails if even one expected source is missing', async () => {
     const { firestore } = makeFirestore()
     const id = await buildLockableProject(firestore)
     await lockBlueprint(firestore, id)
+    const topics = await listTopics(firestore, id, 'medical')
+    // Freeze only 3 of the 4 expected cells.
+    await freezeAllCells(firestore, id, [topics[0]!.id], [100, 200])
+    await generateSource(firestore, {
+      corpusProjectId: id,
+      topic: { id: topics[1]!.id, corpusProjectId: id, domainId: 'medical', topicNumber: 2, title: 't2', description: 'd', intendedAudience: 'a', writingType: 'w', coreConcepts: ['c'], generationPromptVersion: 'GEN-V001', enabled: true, createdAt: '', updatedAt: '' },
+      targetWords: 100,
+      temperature: null,
+      client: stubClient(words(100)),
+      model: 'stub',
+      providerLabel: 'openai',
+    })
+    await freezeSource(firestore, id, topics[1]!.id, 100)
+    // topics[1] @ 200 words is left entirely missing.
+
+    await expect(freezeCorpusProject(firestore, id)).rejects.toThrow(/cannot freeze corpus/i)
+    expect((await getCorpusProject(firestore, id))?.status).not.toBe('frozen')
+  })
+
+  it('fails if a source is validated but not yet frozen', async () => {
+    const { firestore } = makeFirestore()
+    const id = await buildLockableProject(firestore)
+    await lockBlueprint(firestore, id)
+    const topics = await listTopics(firestore, id, 'medical')
+    await freezeAllCells(firestore, id, topics.map(t => t.id), [100, 200])
+    // Generate a replacement source directly in the fake store's collection,
+    // bypassing corpus.ts's own frozen-immutability guard, to simulate a
+    // cell that regressed to validated-but-not-frozen — the state
+    // freezeCorpusProject must still catch regardless of how it arose.
+    await firestore.collection('a2hCorpusSources').doc(`${id}__${topics[0]!.id}__100`).update({ status: 'validated', frozenAt: null })
+
+    await expect(freezeCorpusProject(firestore, id)).rejects.toThrow(/cannot freeze corpus/i)
+  })
+
+  it('succeeds only once the whole matrix is frozen, and writes an immutable manifest', async () => {
+    const { firestore } = makeFirestore()
+    const id = await buildLockableProject(firestore)
+    await lockBlueprint(firestore, id)
+    const topics = await listTopics(firestore, id, 'medical')
+    await freezeAllCells(firestore, id, topics.map(t => t.id), [100, 200])
+
     const frozen = await freezeCorpusProject(firestore, id)
     expect(frozen.status).toBe('frozen')
     expect(frozen.frozenAt).not.toBeNull()
+
+    const manifest = await getCorpusManifest(firestore, id)
+    expect(manifest).not.toBeNull()
+    expect(manifest?.corpusProjectId).toBe(id)
+    expect(manifest?.expectedSourceCount).toBe(4)
+    expect(manifest?.actualSourceCount).toBe(4)
+    expect(Object.keys(manifest?.sourceHashes ?? {})).toHaveLength(4)
+    expect(manifest?.manifestHash).toHaveLength(64)
+  })
+
+  it('a frozen project can never generate another source, even with force', async () => {
+    const { firestore } = makeFirestore()
+    const id = await buildLockableProject(firestore)
+    await lockBlueprint(firestore, id)
+    const topics = await listTopics(firestore, id, 'medical')
+    await freezeAllCells(firestore, id, topics.map(t => t.id), [100, 200])
+    await freezeCorpusProject(firestore, id)
+
+    await expect(generateSource(firestore, {
+      corpusProjectId: id,
+      topic: { id: topics[0]!.id, corpusProjectId: id, domainId: 'medical', topicNumber: 1, title: 't', description: 'd', intendedAudience: 'a', writingType: 'w', coreConcepts: ['c'], generationPromptVersion: 'GEN-V001', enabled: true, createdAt: '', updatedAt: '' },
+      targetWords: 100,
+      temperature: null,
+      client: stubClient(words(100)),
+      model: 'stub',
+      providerLabel: 'openai',
+    }, true)).rejects.toThrow(/must not yet be frozen/i)
   })
 })
 
@@ -316,7 +527,7 @@ describe('archiveCorpusProject', () => {
 })
 
 describe('duplicateCorpusProject', () => {
-  it('copies configuration and the topic roster into a new project starting at draft', async () => {
+  it('copies configuration (including default/overrides) and the topic roster into a new project starting at draft', async () => {
     const { firestore } = makeFirestore()
     const id = await buildLockableProject(firestore)
     await lockBlueprint(firestore, id)
@@ -327,6 +538,7 @@ describe('duplicateCorpusProject', () => {
     expect(copy.status).toBe('draft')
     expect(copy.frozenAt).toBeNull()
     expect(copy.domains).toEqual(['medical'])
+    expect(copy.topicCountDefault).toBe(2)
     expect(copy.topicCountByDomain).toEqual({ medical: 2 })
     expect(copy.lengthLadder).toEqual([100, 200])
 
