@@ -3,7 +3,7 @@ import { requireA2HAdmin } from '@/lib/require-a2h-admin'
 import { isAuthFailure } from '@/lib/require-auth'
 import { db } from '@/lib/firestore'
 import { DOMAINS, type Domain } from '@/lib/style/types'
-import { getDomainConfig, saveDomainTopicCount, lockDomainTopicCount, unlockDomainTopicCount } from '@/lib/a2h/domainConfig'
+import { getDomainConfig, saveDomainTopicCount, lockDomainTopicCount, unlockDomainTopicCount, raiseDomainTopicCount } from '@/lib/a2h/domainConfig'
 import { listTopics } from '@/lib/a2h/topics'
 
 function parseDomainId(value: string): Domain | null {
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest, { params }: { params: { domainId: st
 }
 
 interface PatchBody {
-  action?: 'save' | 'lock' | 'unlock'
+  action?: 'save' | 'lock' | 'unlock' | 'raise'
   topicCount?: number
 }
 
@@ -61,7 +61,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { domainId: 
       const config = await unlockDomainTopicCount(db(), domainId, existingTopics.length)
       return NextResponse.json({ config })
     }
-    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'action must be one of: save, lock, unlock' } }, { status: 400 })
+    if (body.action === 'raise') {
+      if (typeof body.topicCount !== 'number') {
+        return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'topicCount is required to raise.' } }, { status: 400 })
+      }
+      const config = await raiseDomainTopicCount(db(), domainId, body.topicCount)
+      return NextResponse.json({ config })
+    }
+    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'action must be one of: save, lock, unlock, raise' } }, { status: 400 })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Request failed.'
     return NextResponse.json({ error: { code: 'CONFLICT', message } }, { status: 409 })

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Firestore } from 'firebase-admin/firestore'
-import { getDomainConfig, saveDomainTopicCount, lockDomainTopicCount, unlockDomainTopicCount, validateTopicCount } from '../domainConfig'
+import { getDomainConfig, saveDomainTopicCount, lockDomainTopicCount, unlockDomainTopicCount, raiseDomainTopicCount, validateTopicCount } from '../domainConfig'
 
 function makeFirestore() {
   const docs = new Map<string, Record<string, unknown>>()
@@ -122,5 +122,40 @@ describe('unlockDomainTopicCount', () => {
   it('throws when there is no configuration to unlock', async () => {
     const { firestore } = makeFirestore()
     await expect(unlockDomainTopicCount(firestore, 'medical', 0)).rejects.toThrow(/no topic-count configuration/i)
+  })
+})
+
+describe('raiseDomainTopicCount', () => {
+  it('raises an already-locked count while staying locked', async () => {
+    const { firestore } = makeFirestore()
+    const original = await lockDomainTopicCount(firestore, 'medical', 20)
+    const raised = await raiseDomainTopicCount(firestore, 'medical', 30)
+    expect(raised.topicCount).toBe(30)
+    expect(raised.locked).toBe(true)
+    expect(raised.lockedAt).toBe(original.lockedAt)
+  })
+
+  it('refuses to raise an unlocked domain', async () => {
+    const { firestore } = makeFirestore()
+    await saveDomainTopicCount(firestore, 'medical', 20)
+    await expect(raiseDomainTopicCount(firestore, 'medical', 30)).rejects.toThrow(/lock a topic count/i)
+  })
+
+  it('refuses a new count that is not strictly greater than the current one', async () => {
+    const { firestore } = makeFirestore()
+    await lockDomainTopicCount(firestore, 'medical', 20)
+    await expect(raiseDomainTopicCount(firestore, 'medical', 20)).rejects.toThrow(/must be greater than/i)
+    await expect(raiseDomainTopicCount(firestore, 'medical', 10)).rejects.toThrow(/must be greater than/i)
+  })
+
+  it('rejects an out-of-range new count', async () => {
+    const { firestore } = makeFirestore()
+    await lockDomainTopicCount(firestore, 'medical', 20)
+    await expect(raiseDomainTopicCount(firestore, 'medical', 51)).rejects.toThrow(/between 1 and/)
+  })
+
+  it('throws when there is no configuration at all', async () => {
+    const { firestore } = makeFirestore()
+    await expect(raiseDomainTopicCount(firestore, 'medical', 30)).rejects.toThrow(/lock a topic count/i)
   })
 })

@@ -1,8 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { Firestore } from 'firebase-admin/firestore'
 import type OpenAI from 'openai'
-import { buildOutlinePrompt, outlineMaxTokensFor, parseOutlineResponse, generateOutline } from '../outlineGeneration'
-import { lockDomainTopicCount } from '../domainConfig'
+import {
+  buildOutlinePrompt, buildExpandPrompt, outlineMaxTokensFor, parseOutlineResponse,
+  normalizeTopicTitle, generateOutline, expandOutline,
+} from '../outlineGeneration'
+import { lockDomainTopicCount, raiseDomainTopicCount } from '../domainConfig'
 import { listTopics, createTopic } from '../topics'
 import type { CreateTopicInput } from '../topics'
 
@@ -76,12 +79,36 @@ function validOutlineJson(count: number): string {
   })
 }
 
+function outlineJsonFromTitles(titles: string[]): string {
+  return JSON.stringify({
+    topics: titles.map(title => ({
+      title,
+      writingType: 'Clinical overview',
+      description: 'A one-sentence description.',
+      intendedAudience: 'Clinicians',
+      coreConcepts: ['causes', 'symptoms', 'diagnosis', 'treatment'],
+    })),
+  })
+}
+
 describe('buildOutlinePrompt', () => {
   it('includes the domain and the requested topic count', () => {
     const prompt = buildOutlinePrompt('medical', 20)
     expect(prompt).toContain('medical')
     expect(prompt).toContain('20')
     expect(prompt).toContain('"topics"')
+  })
+})
+
+describe('normalizeTopicTitle', () => {
+  it('collapses case, punctuation, and whitespace differences to the same key', () => {
+    expect(normalizeTopicTitle('Hypertension')).toBe(normalizeTopicTitle('hypertension'))
+    expect(normalizeTopicTitle('Hypertension')).toBe(normalizeTopicTitle('Hypertension.'))
+    expect(normalizeTopicTitle('Type 2  Diabetes')).toBe(normalizeTopicTitle('type 2 diabetes'))
+  })
+
+  it('does not collapse genuinely different titles', () => {
+    expect(normalizeTopicTitle('Type 2 Diabetes')).not.toBe(normalizeTopicTitle('Type 1 Diabetes'))
   })
 })
 
@@ -128,6 +155,36 @@ describe('parseOutlineResponse', () => {
     const raw = JSON.parse(validOutlineJson(5))
     const result = parseOutlineResponse(raw, 3)
     expect('topics' in result && result.topics).toHaveLength(3)
+  })
+
+  it('rejects an internally duplicated title — case/punctuation-insensitive', () => {
+    const raw = JSON.parse(outlineJsonFromTitles(['Hypertension', 'Asthma', 'hypertension.']))
+    const result = parseOutlineResponse(raw, 3)
+    expect(result).toHaveProperty('error')
+    expect('error' in result && result.error).toMatch(/duplicate/i)
+  })
+
+  it('rejects a title that duplicates an existing topic already in the roster', () => {
+    const raw = JSON.parse(outlineJsonFromTitles(['Asthma', 'Migraine']))
+    const result = parseOutlineResponse(raw, 2, ['Hypertension', 'ASTHMA'])
+    expect(result).toHaveProperty('error')
+    expect('error' in result && result.error).toMatch(/duplicates an existing topic/i)
+  })
+
+  it('accepts distinct titles against a non-overlapping existing roster', () => {
+    const raw = JSON.parse(outlineJsonFromTitles(['Asthma', 'Migraine']))
+    const result = parseOutlineResponse(raw, 2, ['Hypertension', 'Diabetes'])
+    expect('topics' in result && result.topics).toHaveLength(2)
+  })
+})
+
+describe('buildExpandPrompt', () => {
+  it('lists the existing titles and requests the additional count', () => {
+    const prompt = buildExpandPrompt('medical', 10, ['Hypertension', 'Asthma'])
+    expect(prompt).toContain('10 additional')
+    expect(prompt).toContain('Hypertension')
+    expect(prompt).toContain('Asthma')
+    expect(prompt).toMatch(/do not repeat/i)
   })
 })
 
@@ -236,5 +293,61 @@ describe('generateOutline — response robustness', () => {
     const { client } = stubClientWithOptions('{"topics": [{"title": "Incomple', { finishReason: 'length' })
     await expect(generateOutline(firestore, { domainId: 'medical', client, model: 'stub' }))
       .rejects.toThrow(/cut off before completing/i)
+  })
+})
+
+describe('expandOutline', () => {
+  it('throws when the domain has no locked topic-count configuration', async () => {
+    const { firestore } = makeFirestore()
+    await expect(expandOutline(firestore, { domainId: 'medical', client: stubClient(validOutlineJson(5)), model: 'stub' }))
+      .rejects.toThrow(/lock a topic count/i)
+  })
+
+  it('throws when no topics exist yet — generateOutline is the initial-roster path', async () => {
+    const { firestore } = makeFirestore()
+    await lockDomainTopicCount(firestore, 'medical', 20)
+    await expect(expandOutline(firestore, { domainId: 'medical', client: stubClient(validOutlineJson(20)), model: 'stub' }))
+      .rejects.toThrow(/no topics exist yet/i)
+  })
+
+  it('throws when the locked count has not actually been raised past the existing roster', async () => {
+    const { firestore } = makeFirestore()
+    await lockDomainTopicCount(firestore, 'medical', 2)
+    await generateOutline(firestore, { domainId: 'medical', client: stubClient(validOutlineJson(2)), model: 'stub' })
+    await expect(expandOutline(firestore, { domainId: 'medical', client: stubClient(validOutlineJson(2)), model: 'stub' }))
+      .rejects.toThrow(/meets or exceeds/i)
+  })
+
+  it('appends only the additional topics needed, leaving the existing roster untouched', async () => {
+    const { firestore } = makeFirestore()
+    await lockDomainTopicCount(firestore, 'medical', 2)
+    const initial = await generateOutline(firestore, { domainId: 'medical', client: stubClient(validOutlineJson(2)), model: 'stub' })
+    await raiseDomainTopicCount(firestore, 'medical', 5)
+
+    const additionalJson = outlineJsonFromTitles(['New Topic A', 'New Topic B', 'New Topic C'])
+    const appended = await expandOutline(firestore, { domainId: 'medical', client: stubClient(additionalJson), model: 'stub' })
+
+    expect(appended).toHaveLength(3)
+    expect(appended.map(t => t.topicNumber).sort((a, b) => a - b)).toEqual([3, 4, 5])
+
+    const stored = await listTopics(firestore, 'medical')
+    expect(stored).toHaveLength(5)
+    // The original two topics are byte-for-byte the same records — never
+    // regenerated by expandOutline.
+    for (const original of initial) {
+      expect(stored.find(t => t.id === original.id)).toEqual(original)
+    }
+  })
+
+  it('rejects an additional topic that duplicates one already in the roster', async () => {
+    const { firestore } = makeFirestore()
+    await lockDomainTopicCount(firestore, 'medical', 1)
+    await generateOutline(firestore, { domainId: 'medical', client: stubClient(outlineJsonFromTitles(['Hypertension'])), model: 'stub' })
+    await raiseDomainTopicCount(firestore, 'medical', 2)
+
+    await expect(expandOutline(firestore, { domainId: 'medical', client: stubClient(outlineJsonFromTitles(['hypertension'])), model: 'stub' }))
+      .rejects.toThrow(/duplicates an existing topic/i)
+
+    expect(await listTopics(firestore, 'medical')).toHaveLength(1)
   })
 })

@@ -66,6 +66,30 @@ export async function lockDomainTopicCount(
   return config
 }
 
+// Raises an already-locked count — the safe direction for growing a
+// domain's roster (append-only "expand outline" workflow in
+// outlineGeneration.ts), since new topic slots are additive and never
+// invalidate a topic already generated at an existing slot number. Stays
+// locked throughout; never toggles `locked` false. Rejects a new count that
+// isn't strictly greater — lowering the count is not this function's job
+// (it would orphan topics beyond the new count) and re-saving the same
+// count is a no-op the caller shouldn't need.
+export async function raiseDomainTopicCount(firestore: Firestore, domainId: Domain, newCount: number): Promise<DomainOutlineConfig> {
+  const existing = await getDomainConfig(firestore, domainId)
+  if (!existing || !existing.locked) {
+    throw new Error('Lock a topic count for this domain before raising it.')
+  }
+  const error = validateTopicCount(newCount)
+  if (error) throw new Error(error)
+  if (newCount <= existing.topicCount) {
+    throw new Error(`New count (${newCount}) must be greater than the current locked count (${existing.topicCount}).`)
+  }
+
+  const config: DomainOutlineConfig = { ...existing, topicCount: newCount, updatedAt: new Date().toISOString() }
+  await firestore.collection(COLLECTION).doc(domainId).set(config)
+  return config
+}
+
 // Only reversible before any topics exist for the domain — once outline
 // generation (or manual entry) has produced topics against a locked count,
 // changing that count would leave existing topics referencing slot numbers

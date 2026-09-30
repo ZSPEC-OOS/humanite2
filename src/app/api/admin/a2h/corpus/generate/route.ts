@@ -7,7 +7,8 @@ import { getUserApiConfig } from '@/lib/userApiConfig'
 import { resolveProvider } from '@/lib/providerResolution'
 import { getTopic } from '@/lib/a2h/topics'
 import { generateSource } from '@/lib/a2h/corpus'
-import { LENGTH_LADDER, DEFAULT_CORPUS_VERSION } from '@/lib/a2h/types'
+import { getLengthLadderConfig } from '@/lib/a2h/lengthLadder'
+import { DEFAULT_CORPUS_VERSION } from '@/lib/a2h/types'
 
 // Generation is one model call per cell, driven interactively by the admin
 // (not a batch job this route kicks off) — see the corpus matrix UI, which
@@ -38,9 +39,21 @@ export async function POST(req: NextRequest) {
   if (!topicId || typeof topicId !== 'string') {
     return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'topicId is required.' } }, { status: 400 })
   }
-  if (!targetWords || !LENGTH_LADDER.includes(targetWords)) {
+
+  // The length ladder must be locked before any source is generated against
+  // it — same "settle the dimension first" rule topic counts already
+  // follow — so targetWords is validated against the actual locked ladder,
+  // never a hardcoded default.
+  const ladderConfig = await getLengthLadderConfig(db())
+  if (!ladderConfig || !ladderConfig.locked) {
     return NextResponse.json(
-      { error: { code: 'VALIDATION_ERROR', message: `targetWords must be one of: ${LENGTH_LADDER.join(', ')}` } },
+      { error: { code: 'LADDER_NOT_LOCKED', message: 'Lock a length ladder (Corpus Design) before generating corpus documents.' } },
+      { status: 409 },
+    )
+  }
+  if (!targetWords || !ladderConfig.ladder.includes(targetWords)) {
+    return NextResponse.json(
+      { error: { code: 'VALIDATION_ERROR', message: `targetWords must be one of: ${ladderConfig.ladder.join(', ')}` } },
       { status: 400 },
     )
   }

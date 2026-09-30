@@ -1,10 +1,11 @@
 import type { Domain } from '@/lib/style/types'
 
-// The 10 matched document lengths every topic family generates independently
-// — see §6.2 of the A2H spec. Order matters for UI display (the corpus
-// matrix renders columns in this order); membership matters for validation
-// (targetWords must be one of these, not an arbitrary number).
-export const LENGTH_LADDER: readonly number[] = [100, 200, 300, 500, 750, 1000, 1250, 1500, 1750, 2000]
+// The seed value shown before an admin has ever saved a length ladder — see
+// §6.2 of the A2H spec for where these 10 default lengths come from. This is
+// a starting suggestion only; the ladder actually in effect is the locked
+// LengthLadderConfig (lengthLadder.ts), which can hold any admin-chosen set
+// of lengths, not just this default 10.
+export const DEFAULT_LENGTH_LADDER: readonly number[] = [100, 200, 300, 500, 750, 1000, 1250, 1500, 1750, 2000]
 
 // The suggested default shown in the topic-count input before an admin
 // locks in a domain's own count — not a hard limit; see MAX_TOPICS_PER_DOMAIN
@@ -36,6 +37,19 @@ export const DOMAIN_CODE: Record<Domain, string> = {
 export interface DomainOutlineConfig {
   domainId: Domain
   topicCount: number
+  locked: boolean
+  lockedAt: string | null
+  updatedAt: string
+}
+
+// The length ladder is global — one shared set of target word counts across
+// every domain (§6.2), unlike topic counts, which are set per domain. A
+// single admin-managed singleton document, not one per domain. Growable
+// once locked (expandLengthLadder appends new lengths); never shrinkable,
+// since a source may already exist — and be frozen — at any length already
+// in the ladder.
+export interface LengthLadderConfig {
+  ladder: number[]
   locked: boolean
   lockedAt: string | null
   updatedAt: string

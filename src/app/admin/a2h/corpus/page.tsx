@@ -2,12 +2,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { DOMAINS, type Domain } from '@/lib/style/types'
-import { LENGTH_LADDER, DEFAULT_CORPUS_VERSION } from '@/lib/a2h/types'
+import { DEFAULT_CORPUS_VERSION } from '@/lib/a2h/types'
 import {
   apiListTopics, apiListCorpus, apiGenerateSource, apiFreezeSource,
   apiListBaselines, apiAcquireBaseline,
   apiListOutputs, apiTransformSource, apiListPostScores, apiAcquirePostScore,
-  type BenchmarkTopic, type CorpusSource, type BenchmarkOutput, type DetectorResult,
+  apiGetLengthLadder,
+  type BenchmarkTopic, type CorpusSource, type BenchmarkOutput, type DetectorResult, type LengthLadderConfig,
 } from '@/lib/a2hApi'
 import { Spinner } from '@/components/ui/Spinner'
 
@@ -36,6 +37,7 @@ export default function A2HCorpusPage() {
   const [topics, setTopics] = useState<BenchmarkTopic[]>([])
   const [sources, setSources] = useState<Record<CellKey, CorpusSource>>({})
   const [baselines, setBaselines] = useState<Record<string, DetectorResult>>({})
+  const [ladderConfig, setLadderConfig] = useState<LengthLadderConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<{ topic: BenchmarkTopic; targetWords: number } | null>(null)
@@ -50,14 +52,15 @@ export default function A2HCorpusPage() {
     setLoading(true)
     setError(null)
     setSelected(null)
-    Promise.all([apiListTopics(domain), apiListCorpus(domain, DEFAULT_CORPUS_VERSION), apiListBaselines(domain, DEFAULT_CORPUS_VERSION)])
-      .then(([topicsData, sourcesData, baselinesData]) => {
+    Promise.all([apiListTopics(domain), apiListCorpus(domain, DEFAULT_CORPUS_VERSION), apiListBaselines(domain, DEFAULT_CORPUS_VERSION), apiGetLengthLadder()])
+      .then(([topicsData, sourcesData, baselinesData, ladder]) => {
         if (cancelled) return
         setTopics(topicsData)
         const map: Record<CellKey, CorpusSource> = {}
         for (const s of sourcesData) map[cellKey(s.topicId, s.targetWords)] = s
         setSources(map)
         setBaselines(baselinesData)
+        setLadderConfig(ladder)
       })
       .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load corpus data.') })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -164,15 +167,17 @@ export default function A2HCorpusPage() {
     }
   }
 
+  const ladder = ladderConfig?.locked ? ladderConfig.ladder : []
+
   const counts = useMemo(() => {
     const values = Object.values(sources)
     return {
       frozen: values.filter(s => s.status === 'frozen').length,
       validated: values.filter(s => s.status === 'validated').length,
       failed: values.filter(s => s.status === 'validation_failed').length,
-      total: topics.length * LENGTH_LADDER.length,
+      total: topics.length * ladder.length,
     }
-  }, [sources, topics])
+  }, [sources, topics, ladder.length])
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950 p-6">
@@ -209,6 +214,11 @@ export default function A2HCorpusPage() {
           <div className="flex justify-center py-12">
             <Spinner className="w-6 h-6 border-gray-200 border-t-gray-700 dark:border-gray-700 dark:border-t-gray-300" />
           </div>
+        ) : !ladderConfig?.locked ? (
+          <div className="text-sm text-gray-400 dark:text-gray-500 py-8 text-center">
+            No length ladder locked yet.{' '}
+            <Link href="/admin/a2h/corpus-design" className="underline hover:text-gray-700 dark:hover:text-gray-300">Configure Corpus Design</Link>.
+          </div>
         ) : topics.length === 0 ? (
           <div className="text-sm text-gray-400 dark:text-gray-500 py-8 text-center">
             No topics defined for {domain} yet.{' '}
@@ -220,7 +230,7 @@ export default function A2HCorpusPage() {
               <thead>
                 <tr className="border-b border-gray-200 dark:border-gray-800">
                   <th className="text-left px-3 py-2 text-gray-400 dark:text-gray-500 font-medium sticky left-0 bg-white dark:bg-gray-950">Topic</th>
-                  {LENGTH_LADDER.map(len => (
+                  {ladder.map(len => (
                     <th key={len} className="px-2 py-2 text-gray-400 dark:text-gray-500 font-medium text-center">{len}</th>
                   ))}
                 </tr>
@@ -231,7 +241,7 @@ export default function A2HCorpusPage() {
                     <td className="px-3 py-1.5 text-gray-700 dark:text-gray-300 whitespace-nowrap sticky left-0 bg-white dark:bg-gray-950">
                       <span className="text-gray-400 dark:text-gray-600 mr-1.5">#{topic.topicNumber}</span>{topic.title}
                     </td>
-                    {LENGTH_LADDER.map(len => {
+                    {ladder.map(len => {
                       const source = sources[cellKey(topic.id, len)]
                       const state = source?.status ?? 'empty'
                       const isSelected = selected?.topic.id === topic.id && selected.targetWords === len

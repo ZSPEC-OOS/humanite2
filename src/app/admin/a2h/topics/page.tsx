@@ -5,7 +5,8 @@ import { DOMAINS, type Domain } from '@/lib/style/types'
 import { TOPICS_PER_DOMAIN, MAX_TOPICS_PER_DOMAIN, DOMAIN_CODE, DEFAULT_GENERATION_PROMPT_VERSION } from '@/lib/a2h/types'
 import {
   apiListTopics, apiCreateTopic, apiUpdateTopic,
-  apiGetDomainConfig, apiSaveDomainTopicCount, apiLockDomain, apiUnlockDomain, apiGenerateOutline,
+  apiGetDomainConfig, apiSaveDomainTopicCount, apiLockDomain, apiUnlockDomain,
+  apiGenerateOutline, apiExpandOutline, apiRaiseDomainTopicCount,
   type BenchmarkTopic, type DomainOutlineConfig,
 } from '@/lib/a2hApi'
 import { Spinner } from '@/components/ui/Spinner'
@@ -51,6 +52,7 @@ export default function A2HTopicsPage() {
   const [topics, setTopics] = useState<BenchmarkTopic[]>([])
   const [domainConfig, setDomainConfig] = useState<DomainOutlineConfig | null>(null)
   const [countInput, setCountInput] = useState(String(TOPICS_PER_DOMAIN))
+  const [raiseInput, setRaiseInput] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -72,6 +74,7 @@ export default function A2HTopicsPage() {
         setTopics(topicsData)
         setDomainConfig(config)
         setCountInput(String(config?.topicCount ?? TOPICS_PER_DOMAIN))
+        setRaiseInput(String((config?.topicCount ?? TOPICS_PER_DOMAIN) + 10))
       })
       .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load topics.') })
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -130,6 +133,35 @@ export default function A2HTopicsPage() {
       setError(err instanceof Error ? err.message : 'Outline generation failed.')
     } finally {
       setOutlineBusy(false)
+    }
+  }
+
+  // Appends new topics up to the (already-raised) locked count — never
+  // touches the existing roster, unlike handleGenerateOutline(true) which
+  // wipes and rerolls everything.
+  async function handleExpandOutline() {
+    setOutlineBusy(true)
+    setError(null)
+    try {
+      const additional = await apiExpandOutline(domain)
+      setTopics(prev => [...prev, ...additional].sort((a, b) => a.topicNumber - b.topicNumber))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Outline expansion failed.')
+    } finally {
+      setOutlineBusy(false)
+    }
+  }
+
+  async function handleRaiseCount() {
+    setCountBusy(true)
+    setError(null)
+    try {
+      const config = await apiRaiseDomainTopicCount(domain, Number(raiseInput))
+      setDomainConfig(config)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Raise failed.')
+    } finally {
+      setCountBusy(false)
     }
   }
 
@@ -221,7 +253,7 @@ export default function A2HTopicsPage() {
         <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
-              <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Sections per outline</h2>
+              <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Unique topic outlines per domain</h2>
               {domainConfig?.locked ? (
                 <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">{domainConfig.topicCount} · locked</p>
               ) : (
@@ -259,19 +291,56 @@ export default function A2HTopicsPage() {
           </div>
 
           {domainConfig?.locked && (
-            <div className="border-t border-gray-200 dark:border-gray-800 pt-3 flex items-center justify-between flex-wrap gap-3">
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {topics.length === 0
-                  ? `Generate ${domainConfig.topicCount} topic families for ${domain} in one call.`
-                  : `${topics.length} topics generated for ${domain}.`}
-              </p>
-              <button
-                onClick={() => handleGenerateOutline(topics.length > 0)}
-                disabled={outlineBusy}
-                className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40"
-              >
-                {outlineBusy ? 'Generating…' : topics.length === 0 ? 'Generate Outline' : 'Regenerate Outline'}
-              </button>
+            <div className="border-t border-gray-200 dark:border-gray-800 pt-3 space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {topics.length === 0
+                    ? `Generate ${domainConfig.topicCount} topic families for ${domain} in one call.`
+                    : topics.length < domainConfig.topicCount
+                      ? `${topics.length} of ${domainConfig.topicCount} generated — ${domainConfig.topicCount - topics.length} additional needed.`
+                      : `${topics.length} topics generated for ${domain}.`}
+                </p>
+                <div className="flex items-center gap-2">
+                  {topics.length < domainConfig.topicCount && (
+                    <button
+                      onClick={topics.length === 0 ? () => handleGenerateOutline(false) : handleExpandOutline}
+                      disabled={outlineBusy}
+                      className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40"
+                    >
+                      {outlineBusy
+                        ? 'Generating…'
+                        : topics.length === 0
+                          ? `Generate ${domainConfig.topicCount} Unique Topics`
+                          : `Generate ${domainConfig.topicCount - topics.length} Additional Topics`}
+                    </button>
+                  )}
+                  {topics.length > 0 && (
+                    <button
+                      onClick={() => handleGenerateOutline(true)}
+                      disabled={outlineBusy}
+                      className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40"
+                    >
+                      {outlineBusy ? 'Working…' : 'Regenerate All'}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400 dark:text-gray-500">Raise count to</span>
+                <input
+                  type="number" min={domainConfig.topicCount + 1} max={MAX_TOPICS_PER_DOMAIN} value={raiseInput}
+                  onChange={e => setRaiseInput(e.target.value)}
+                  className="w-20 text-sm rounded-xl px-3 py-1.5 bg-white border border-gray-300 text-gray-700 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300 focus:outline-none focus:border-gray-900 dark:focus:border-gray-100"
+                />
+                <button
+                  onClick={handleRaiseCount}
+                  disabled={countBusy || !(Number(raiseInput) > domainConfig.topicCount)}
+                  className="text-xs font-medium px-3 py-1.5 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40"
+                >
+                  {countBusy ? 'Working…' : 'Raise'}
+                </button>
+              </div>
             </div>
           )}
         </div>
