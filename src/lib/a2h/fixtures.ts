@@ -10,11 +10,13 @@ import { validateNumericUnitFixtureExpected, extractNumericUnitCandidates } from
 import { validateModalityFixtureExpected, extractModalityCandidates } from './a2h09'
 import { validateProtectedTermFixtureExpected, extractProtectedTermCandidates } from './a2h10'
 import { validateTerminologyFixtureExpected } from './a2h13'
+import { validateGrammarRepairFixtureExpected, proposeGrammarRepairCandidates } from './a2h06'
+import { validateFactualRepairFixtureExpected, proposeFactualRepairCandidates } from './a2h12'
 
 const SETS = A2H_COLLECTIONS.fixtureSets
 const FIXTURES = A2H_COLLECTIONS.fixtures
 
-const VALID_TYPES: A2HFixtureType[] = ['citation', 'numeric_unit', 'modality', 'protected_term', 'terminology']
+const VALID_TYPES: A2HFixtureType[] = ['citation', 'numeric_unit', 'modality', 'protected_term', 'terminology', 'grammar_repair', 'factual_repair']
 
 function validateExpectedShape(type: A2HFixtureType, expected: Record<string, unknown>): string[] {
   switch (type) {
@@ -23,6 +25,8 @@ function validateExpectedShape(type: A2HFixtureType, expected: Record<string, un
     case 'modality': return validateModalityFixtureExpected(expected)
     case 'protected_term': return validateProtectedTermFixtureExpected(expected)
     case 'terminology': return validateTerminologyFixtureExpected(expected)
+    case 'grammar_repair': return validateGrammarRepairFixtureExpected(expected)
+    case 'factual_repair': return validateFactualRepairFixtureExpected(expected)
   }
 }
 
@@ -92,6 +96,7 @@ export interface CreateFixtureInput {
   sourceEnd?: number | null
   sourceText?: string | null
   notes?: string | null
+  corruptionGeneratorVersion?: string | null
 }
 
 function assertMutable(set: FixtureSet | null): asserts set is FixtureSet {
@@ -139,6 +144,7 @@ export async function createFixture(firestore: Firestore, input: CreateFixtureIn
     sourceEnd: input.sourceEnd ?? null,
     sourceText: input.sourceText ?? null,
     notes: input.notes ?? null,
+    corruptionGeneratorVersion: input.corruptionGeneratorVersion ?? null,
     createdAt: now,
     updatedAt: now,
   }
@@ -172,6 +178,11 @@ export async function deleteFixture(firestore: Firestore, fixtureId: string): Pr
   const set = await getFixtureSet(firestore, fixture.fixtureSetId)
   assertMutable(set)
   await firestore.collection(FIXTURES).doc(fixtureId).delete()
+}
+
+export async function getFixture(firestore: Firestore, fixtureId: string): Promise<BenchmarkFixture | null> {
+  const doc = await firestore.collection(FIXTURES).doc(fixtureId).get()
+  return doc.exists ? (doc.data() as BenchmarkFixture) : null
 }
 
 // One query per (fixtureSetId, sourceId) pair — the shared index every
@@ -230,7 +241,7 @@ export async function validateFixtureSet(firestore: Firestore, fixtureSetId: str
 
   const seenId = new Set<string>()
   const seenOrdinal = new Set<string>()
-  const byType: Record<A2HFixtureType, number> = { citation: 0, numeric_unit: 0, modality: 0, protected_term: 0, terminology: 0 }
+  const byType: Record<A2HFixtureType, number> = { citation: 0, numeric_unit: 0, modality: 0, protected_term: 0, terminology: 0, grammar_repair: 0, factual_repair: 0 }
 
   for (const fixture of allFixtures) {
     if (seenId.has(fixture.id)) errors.push(`Duplicate fixture id ${fixture.id}.`)

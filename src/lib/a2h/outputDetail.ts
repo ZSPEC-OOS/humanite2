@@ -1,6 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore'
 import {
-  DEFAULT_DETECTOR_CONFIG_ID, FIXTURE_REQUIRING_TESTS,
+  DEFAULT_DETECTOR_CONFIG_ID,
   type BenchmarkOutput, type BenchmarkTopic, type CorpusSource, type DetectorResult, type BenchmarkTestResult, type A2HTestCode,
 } from './types'
 import { getSourceById } from './corpus'
@@ -17,6 +17,13 @@ import { getTestResult } from './testResults'
 // adds `preservation` — the fixture-backed test results for this exact
 // output, keyed by test code — on top of this same shape rather than
 // replacing it (§36).
+// Every output-SCOPED test result this drilldown can show — the
+// fixture-backed preservation tests (A2H-04/05/09/10/13) plus A2H-08's
+// grammar-damage result (§40). A2H-06/A2H-12 are deliberately excluded:
+// they are fixture-scoped (keyed by fixtureId, not outputId — see
+// testResults.ts), so they have no per-output row to look up here.
+const OUTPUT_SCOPED_TEST_CODES: A2HTestCode[] = ['A2H-04', 'A2H-05', 'A2H-09', 'A2H-10', 'A2H-13', 'A2H-08']
+
 export interface OutputDetail {
   output: BenchmarkOutput
   source: CorpusSource
@@ -41,7 +48,7 @@ export async function getOutputDetail(firestore: Firestore, runId: string, outpu
   const [baseline, postScore, preservationEntries] = await Promise.all([
     getBaseline(firestore, output.sourceId, detectorConfigId),
     getPostScore(firestore, output.id, detectorConfigId),
-    Promise.all(FIXTURE_REQUIRING_TESTS.map(async code => [code, await getTestResult(firestore, runId, output.id, code, run.testVersion)] as const)),
+    Promise.all(OUTPUT_SCOPED_TEST_CODES.map(async code => [code, await getTestResult(firestore, runId, output.id, null, code, run.testVersion)] as const)),
   ])
 
   const preservation: Partial<Record<A2HTestCode, BenchmarkTestResult>> = {}

@@ -15,6 +15,9 @@ import type { A2H05Report, A2H05Filters } from '@/lib/a2h/a2h05'
 import type { A2H09Report, A2H09Filters } from '@/lib/a2h/a2h09'
 import type { A2H10Report, A2H10Filters } from '@/lib/a2h/a2h10'
 import type { A2H13Report, A2H13Filters } from '@/lib/a2h/a2h13'
+import type { A2H06Report } from '@/lib/a2h/a2h06'
+import type { A2H08Report, A2H08Filters } from '@/lib/a2h/a2h08'
+import type { A2H12Report } from '@/lib/a2h/a2h12'
 import type { CreateFixtureInput, FixtureUpdatePatch, FixtureSetValidationResult, LockFixtureSetResult, FixtureCandidates } from '@/lib/a2h/fixtures'
 import type { OutputDetail } from '@/lib/a2h/outputDetail'
 import type { Domain } from '@/lib/style/types'
@@ -24,6 +27,7 @@ export type {
   BenchmarkRun, BenchmarkRunSource, RunDraftPatch, RunValidationResult, RunProgress, ExecuteBatchResult, FixtureTestEligibility,
   A2H01Report, A2H01Filters, A2H02Report, A2H02Filters, A2H03Report, A2H03Filters, A2H03Stratum, OutputDetail,
   A2H04Report, A2H04Filters, A2H05Report, A2H05Filters, A2H09Report, A2H09Filters, A2H10Report, A2H10Filters, A2H13Report, A2H13Filters,
+  A2H06Report, A2H08Report, A2H08Filters, A2H12Report,
   FixtureSet, BenchmarkFixture, A2HFixtureType, CreateFixtureInput, FixtureUpdatePatch, FixtureSetValidationResult, LockFixtureSetResult, FixtureCandidates,
 }
 
@@ -300,6 +304,20 @@ export async function apiGetA2H13Report(runId: string, filters?: A2H13Filters): 
   return apiFetch<A2H13Report>(`/admin/a2h/runs/${runId}/tests/a2h-13${toQuery({ ...filters })}`)
 }
 
+// Fixture-scoped (§9/§17) — no domain/length/intensity filters, unlike the
+// output-scoped reports above.
+export async function apiGetA2H06Report(runId: string): Promise<A2H06Report> {
+  return apiFetch<A2H06Report>(`/admin/a2h/runs/${runId}/tests/a2h-06`)
+}
+
+export async function apiGetA2H08Report(runId: string, filters?: A2H08Filters): Promise<A2H08Report> {
+  return apiFetch<A2H08Report>(`/admin/a2h/runs/${runId}/tests/a2h-08${toQuery({ ...filters })}`)
+}
+
+export async function apiGetA2H12Report(runId: string): Promise<A2H12Report> {
+  return apiFetch<A2H12Report>(`/admin/a2h/runs/${runId}/tests/a2h-12`)
+}
+
 // ── Fixture sets & fixtures ──────────────────────────────────────────────
 
 export async function apiListFixtureSets(corpusProjectId: string): Promise<FixtureSet[]> {
@@ -361,4 +379,14 @@ export async function apiScanSourceForCandidates(fixtureSetId: string, sourceId:
     body: JSON.stringify({ sourceId }),
   })
   return data.candidates
+}
+
+// Bulk-imports the curated grammar_repair/factual_repair seed set (§7/§20,
+// §29-30) onto a chosen source — nothing is auto-locked.
+export async function apiSeedRepairFixtures(fixtureSetId: string, sourceId: string, kind: 'grammar_repair' | 'factual_repair'): Promise<BenchmarkFixture[]> {
+  const data = await apiFetch<{ fixtures: BenchmarkFixture[] }>(`/admin/a2h/fixture-sets/${fixtureSetId}/seed-repair-fixtures`, {
+    method: 'POST',
+    body: JSON.stringify({ sourceId, kind }),
+  })
+  return data.fixtures
 }

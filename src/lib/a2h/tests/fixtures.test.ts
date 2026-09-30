@@ -13,6 +13,8 @@ import type { CreateTopicInput } from '../topics'
 import { generateSource, freezeSource } from '../corpus'
 import { createRun, updateRunDraft, validateRun } from '../runs'
 import { A2H_COLLECTIONS } from '../types'
+import { INITIAL_GRAMMAR_FIXTURES } from '../a2h06'
+import { INITIAL_FACTUAL_FIXTURES } from '../a2h12'
 
 function makeFirestore() {
   const collections = new Map<string, Map<string, Record<string, unknown>>>()
@@ -304,5 +306,103 @@ describe('listFixturesForSource / listFixturesForSet', () => {
 
     const forSet = await listFixturesForSet(firestore, set.id)
     expect(forSet).toHaveLength(2)
+  })
+})
+
+// §56: persistence rules specifically for the two controlled-derivative
+// fixture types (grammar_repair/factual_repair) added in Phase 3 — the
+// same ownership/immutability rules already proven generically above, but
+// verified explicitly for these types since they carry the extra
+// clean/corrupted text provenance (§4) the others don't.
+describe('grammar_repair / factual_repair fixture persistence (§56)', () => {
+  const GRAMMAR_FIXTURE = INITIAL_GRAMMAR_FIXTURES[0]!
+  const FACTUAL_FIXTURE = INITIAL_FACTUAL_FIXTURES[0]!
+
+  it('a grammar_repair fixture cannot reference a source in another project', async () => {
+    const { firestore } = makeFirestore()
+    const { projectId } = await buildFrozenSource(firestore)
+    const other = await buildFrozenSource(firestore)
+    const set = await createFixtureSet(firestore, { corpusProjectId: projectId, name: 'Fixtures' })
+    await expect(createFixture(firestore, { fixtureSetId: set.id, sourceId: other.sourceId, type: 'grammar_repair', expected: GRAMMAR_FIXTURE as unknown as Record<string, unknown> }))
+      .rejects.toThrow(/does not belong/i)
+  })
+
+  it('a factual_repair fixture cannot reference a source in another project', async () => {
+    const { firestore } = makeFirestore()
+    const { projectId } = await buildFrozenSource(firestore)
+    const other = await buildFrozenSource(firestore)
+    const set = await createFixtureSet(firestore, { corpusProjectId: projectId, name: 'Fixtures' })
+    await expect(createFixture(firestore, { fixtureSetId: set.id, sourceId: other.sourceId, type: 'factual_repair', expected: FACTUAL_FIXTURE as unknown as Record<string, unknown> }))
+      .rejects.toThrow(/does not belong/i)
+  })
+
+  it('locked fixture set blocks mutation of grammar_repair/factual_repair fixtures too', async () => {
+    const { firestore } = makeFirestore()
+    const { projectId, sourceId } = await buildFrozenSource(firestore)
+    const set = await createFixtureSet(firestore, { corpusProjectId: projectId, name: 'Fixtures' })
+    const grammarFixture = await createFixture(firestore, { fixtureSetId: set.id, sourceId, type: 'grammar_repair', expected: GRAMMAR_FIXTURE as unknown as Record<string, unknown> })
+    await createFixture(firestore, { fixtureSetId: set.id, sourceId, type: 'factual_repair', expected: FACTUAL_FIXTURE as unknown as Record<string, unknown> })
+
+    const { result } = await lockFixtureSet(firestore, set.id)
+    expect(result.ok).toBe(true)
+
+    await expect(updateFixture(firestore, grammarFixture.id, { notes: 'x' })).rejects.toThrow(/locked/i)
+    await expect(deleteFixture(firestore, grammarFixture.id)).rejects.toThrow(/locked/i)
+    await expect(createFixture(firestore, { fixtureSetId: set.id, sourceId, type: 'grammar_repair', expected: INITIAL_GRAMMAR_FIXTURES[1]! as unknown as Record<string, unknown> }))
+      .rejects.toThrow(/locked/i)
+  })
+
+  it('persists cleanText/corruptedText exactly as given, for both fixture types', async () => {
+    const { firestore } = makeFirestore()
+    const { projectId, sourceId } = await buildFrozenSource(firestore)
+    const set = await createFixtureSet(firestore, { corpusProjectId: projectId, name: 'Fixtures' })
+
+    const grammarFixture = await createFixture(firestore, { fixtureSetId: set.id, sourceId, type: 'grammar_repair', expected: GRAMMAR_FIXTURE as unknown as Record<string, unknown> })
+    const factualFixture = await createFixture(firestore, { fixtureSetId: set.id, sourceId, type: 'factual_repair', expected: FACTUAL_FIXTURE as unknown as Record<string, unknown> })
+
+    const [reloadedGrammar] = await listFixturesForSource(firestore, set.id, sourceId).then(fx => fx.filter(f => f.id === grammarFixture.id))
+    const [reloadedFactual] = (await listFixturesForSource(firestore, set.id, sourceId)).filter(f => f.id === factualFixture.id)
+    expect((reloadedGrammar!.expected as unknown as typeof GRAMMAR_FIXTURE).cleanText).toBe(GRAMMAR_FIXTURE.cleanText)
+    expect((reloadedGrammar!.expected as unknown as typeof GRAMMAR_FIXTURE).corruptedText).toBe(GRAMMAR_FIXTURE.corruptedText)
+    expect((reloadedFactual!.expected as unknown as typeof FACTUAL_FIXTURE).cleanText).toBe(FACTUAL_FIXTURE.cleanText)
+    expect((reloadedFactual!.expected as unknown as typeof FACTUAL_FIXTURE).corruptedText).toBe(FACTUAL_FIXTURE.corruptedText)
+  })
+
+  it('a run enabling A2H-06/A2H-12 requires the fixture set to have that fixture type (§27 coverage > 0)', async () => {
+    const { firestore } = makeFirestore()
+    const { projectId, sourceId } = await buildFrozenSource(firestore)
+    const set = await createFixtureSet(firestore, { corpusProjectId: projectId, name: 'Fixtures' })
+    // Only a factual_repair fixture — no grammar_repair.
+    await createFixture(firestore, { fixtureSetId: set.id, sourceId, type: 'factual_repair', expected: FACTUAL_FIXTURE as unknown as Record<string, unknown> })
+    const { set: locked, result: lockResult } = await lockFixtureSet(firestore, set.id)
+    expect(lockResult.ok).toBe(true)
+
+    const run = await createRun(firestore, { corpusProjectId: projectId, name: 'Run', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await updateRunDraft(firestore, run.id, { enabledTests: ['A2H-06'], fixtureSetId: locked.id })
+    const { result } = await validateRun(firestore, run.id, { hasModelConfig: true, hasDetectorConfig: true })
+    expect(result.ok).toBe(false)
+    expect(result.errors.some(e => /zero grammar_repair fixtures/i.test(e))).toBe(true)
+  })
+
+  it("fixture version remains immutable on an already-validated run even after a newer fixture-set version is created", async () => {
+    const { firestore } = makeFirestore()
+    const { projectId, sourceId } = await buildFrozenSource(firestore)
+    const setV1 = await createFixtureSet(firestore, { corpusProjectId: projectId, name: 'V1' })
+    await createFixture(firestore, { fixtureSetId: setV1.id, sourceId, type: 'grammar_repair', expected: GRAMMAR_FIXTURE as unknown as Record<string, unknown> })
+    const { set: lockedV1, result } = await lockFixtureSet(firestore, setV1.id)
+    expect(result.ok).toBe(true)
+
+    const run = await createRun(firestore, { corpusProjectId: projectId, name: 'Run', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await updateRunDraft(firestore, run.id, { enabledTests: ['A2H-06'], fixtureSetId: lockedV1.id })
+    const { run: validated } = await validateRun(firestore, run.id, { hasModelConfig: true, hasDetectorConfig: true })
+    expect(validated.fixtureVersion).toBe('FIXTURE-V001')
+
+    // A corrected V2 comes along later — the already-validated run's own
+    // snapshot must not change.
+    const setV2 = await createFixtureSet(firestore, { corpusProjectId: projectId, name: 'V2' })
+    expect(setV2.fixtureVersion).toBe('FIXTURE-V002')
+
+    const reloadedRun = await validateRun(firestore, run.id, { hasModelConfig: true, hasDetectorConfig: true })
+    expect(reloadedRun.run.fixtureVersion).toBe('FIXTURE-V001')
   })
 })

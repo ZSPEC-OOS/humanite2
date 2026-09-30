@@ -24,6 +24,13 @@ export function postScoreJobId(runId: string, outputId: string, detectorConfigId
 export function testEvaluationJobId(runId: string, outputId: string, benchmarkCode: A2HTestCode, testVersion: string): string {
   return jobId('test_evaluation', [runId, outputId, benchmarkCode, testVersion])
 }
+// Keyed by fixture, not output (§23) — repairConfigVersion (not testVersion)
+// disambiguates, matching BenchmarkRepairAttempt's own identity, since a
+// repair_evaluation job's job is literally "produce/reuse that attempt and
+// score it."
+export function repairEvaluationJobId(runId: string, fixtureId: string, benchmarkCode: A2HTestCode, repairConfigVersion: string): string {
+  return jobId('repair_evaluation', [runId, fixtureId, benchmarkCode, repairConfigVersion])
+}
 
 export interface CreateJobParams {
   id: string
@@ -32,6 +39,7 @@ export interface CreateJobParams {
   stage: BenchmarkJobStage
   sourceId: string
   outputId?: string | null
+  fixtureId?: string | null
   intensity?: number | null
   benchmarkCode?: A2HTestCode | null
 }
@@ -53,6 +61,7 @@ export async function getOrCreateJob(firestore: Firestore, params: CreateJobPara
     stage: params.stage,
     sourceId: params.sourceId,
     outputId: params.outputId ?? null,
+    fixtureId: params.fixtureId ?? null,
     intensity: params.intensity ?? null,
     benchmarkCode: params.benchmarkCode ?? null,
     status: 'queued',

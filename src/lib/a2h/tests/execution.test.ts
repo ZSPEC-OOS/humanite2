@@ -13,6 +13,9 @@ import { getA2H02Rows } from '../a2h02'
 import { getA2H03Report } from '../a2h03'
 import { listJobsForRun } from '../jobs'
 import { createFixtureSet, createFixture, lockFixtureSet } from '../fixtures'
+import { INITIAL_GRAMMAR_FIXTURES } from '../a2h06'
+import { INITIAL_FACTUAL_FIXTURES } from '../a2h12'
+import { listRepairAttemptsForRun } from '../repairAttempts'
 import type { A2HTestCode } from '../types'
 
 function makeFirestore() {
@@ -426,5 +429,92 @@ describe('dry-run acceptance (§46): fixture-backed deterministic tests', () => 
     const after = await listTestResultsForRun(firestore, runId, 'A2H-04')
     expect(after).toHaveLength(before.length)
     expect(after.map(r => r.id).sort()).toEqual(idsBefore)
+  })
+})
+
+// §57's integration test: 2 grammar_repair fixtures, 2 factual_repair
+// fixtures, and A2H-08 exercised on the run's one normal output — proving
+// the repair_evaluation stage plugs into the existing engine (no second
+// execution path), persists both BenchmarkTestResult rows AND
+// BenchmarkRepairAttempt rows, and never duplicates a paid repair call on
+// resume/retry.
+describe('dry-run acceptance (§57): grammar/factual repair + grammar damage', () => {
+  const REPAIR_CODES: A2HTestCode[] = ['A2H-06', 'A2H-08', 'A2H-12']
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  async function buildRunWithRepairFixtures(firestore: Firestore) {
+    const projectId = await buildFrozenCorpus(firestore, { domains: ['general'], topicsPerDomain: 1, lengths: [100] })
+    const topics = await listTopics(firestore, projectId)
+    const source = await getSource(firestore, projectId, topics[0]!.id, 100)
+
+    const fixtureSet = await createFixtureSet(firestore, { corpusProjectId: projectId, name: 'Repair Fixtures' })
+    for (const g of INITIAL_GRAMMAR_FIXTURES.slice(0, 2)) {
+      await createFixture(firestore, { fixtureSetId: fixtureSet.id, sourceId: source!.id, type: 'grammar_repair', expected: g as unknown as Record<string, unknown> })
+    }
+    for (const f of INITIAL_FACTUAL_FIXTURES.slice(0, 2)) {
+      await createFixture(firestore, { fixtureSetId: fixtureSet.id, sourceId: source!.id, type: 'factual_repair', expected: f as unknown as Record<string, unknown> })
+    }
+    const { set: locked, result } = await lockFixtureSet(firestore, fixtureSet.id)
+    expect(result.ok).toBe(true)
+
+    const run = await createRun(firestore, { corpusProjectId: projectId, name: 'Repair Run', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await updateRunDraft(firestore, run.id, { intensities: [5], enabledTests: REPAIR_CODES, fixtureSetId: locked.id })
+    return run.id
+  }
+
+  it('executes A2H-06/A2H-08/A2H-12, persists results and repair attempts, and never double-enqueues on resume', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => jsonResponse(200, { classification: 'ai', class_probabilities: { human: 0.05, ai: 0.9, mixed: 0.05 } })))
+
+    const { firestore } = makeFirestore()
+    const runId = await buildRunWithRepairFixtures(firestore)
+
+    const { result } = await validateRun(firestore, runId, { hasModelConfig: true, hasDetectorConfig: true })
+    expect(result.ok).toBe(true)
+
+    await startRun(firestore, runId)
+    await runToCompletion(firestore, runId, humanizeStubClient())
+
+    const finalRun = await getRun(firestore, runId)
+    expect(finalRun?.status).toBe('completed')
+
+    const jobs = await listJobsForRun(firestore, runId)
+    expect(jobs.filter(j => j.stage === 'repair_evaluation' && j.benchmarkCode === 'A2H-06')).toHaveLength(2)
+    expect(jobs.filter(j => j.stage === 'repair_evaluation' && j.benchmarkCode === 'A2H-12')).toHaveLength(2)
+    expect(jobs.filter(j => j.stage === 'test_evaluation' && j.benchmarkCode === 'A2H-08')).toHaveLength(1) // 1 source x 1 intensity
+    expect(jobs.every(j => j.status === 'completed')).toBe(true)
+
+    const a2h06Results = await listTestResultsForRun(firestore, runId, 'A2H-06')
+    const a2h12Results = await listTestResultsForRun(firestore, runId, 'A2H-12')
+    const a2h08Results = await listTestResultsForRun(firestore, runId, 'A2H-08')
+    expect(a2h06Results).toHaveLength(2)
+    expect(a2h12Results).toHaveLength(2)
+    expect(a2h08Results).toHaveLength(1)
+    expect(a2h06Results.every(r => r.outputId === null && r.fixtureId != null)).toBe(true)
+    expect(a2h12Results.every(r => r.outputId === null && r.fixtureId != null)).toBe(true)
+    expect(a2h08Results.every(r => r.outputId != null && r.fixtureId === null)).toBe(true)
+
+    const grammarAttempts = await listRepairAttemptsForRun(firestore, runId, 'A2H-06')
+    const factualAttempts = await listRepairAttemptsForRun(firestore, runId, 'A2H-12')
+    expect(grammarAttempts).toHaveLength(2)
+    expect(factualAttempts).toHaveLength(2)
+    expect(grammarAttempts.every(a => a.status === 'success')).toBe(true)
+    expect(factualAttempts.every(a => a.status === 'success')).toBe(true)
+
+    // Idempotency: re-running must not duplicate jobs, results, or paid
+    // repair attempts — nor make any new model calls at all.
+    const client2 = humanizeStubClient()
+    const rerunResult = await executeRunBatch(firestore, runId, { ...EXECUTE_OPTIONS, client: client2 })
+    expect(rerunResult.processed).toBe(0)
+    expect(rerunResult.stage).toBe('idle')
+    expect((client2.chat.completions.create as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
+
+    const jobsAfterResume = await listJobsForRun(firestore, runId)
+    expect(jobsAfterResume).toHaveLength(jobs.length)
+    const attemptsAfterResume = await listRepairAttemptsForRun(firestore, runId, 'A2H-06')
+    expect(attemptsAfterResume).toHaveLength(2)
+    expect(attemptsAfterResume.map(a => a.id).sort()).toEqual(grammarAttempts.map(a => a.id).sort())
   })
 })
