@@ -12,6 +12,7 @@ const COLLECTION = 'a2hDetectorResults'
 // post-transform score (keyed by the BenchmarkOutput's own id).
 export interface DetectorResult {
   id: string
+  corpusProjectId: string
   sourceId: string
   outputId: string | null
   detector: 'gptzero'
@@ -92,7 +93,7 @@ export async function acquireBaseline(
   }
 
   const scored = await runGPTZero(source.text, apiKey)
-  const baseline: DetectorResult = { id: source.id, sourceId: source.id, outputId: null, ...scored }
+  const baseline: DetectorResult = { id: source.id, corpusProjectId: source.corpusProjectId, sourceId: source.id, outputId: null, ...scored }
   await firestore.collection(COLLECTION).doc(source.id).set(baseline)
   return baseline
 }
@@ -115,7 +116,7 @@ export async function acquirePostScore(
   }
 
   const scored = await runGPTZero(output.outputText, apiKey)
-  const postScore: DetectorResult = { id: output.id, sourceId: output.sourceId, outputId: output.id, ...scored }
+  const postScore: DetectorResult = { id: output.id, corpusProjectId: output.corpusProjectId, sourceId: output.sourceId, outputId: output.id, ...scored }
   await firestore.collection(COLLECTION).doc(output.id).set(postScore)
   return postScore
 }

@@ -4,6 +4,7 @@ import type { BenchmarkTopic } from '../types'
 
 const TOPIC: BenchmarkTopic = {
   id: 'topic-1',
+  corpusProjectId: 'project-1',
   domainId: 'medical',
   topicNumber: 3,
   title: 'Managing Type 2 Diabetes',

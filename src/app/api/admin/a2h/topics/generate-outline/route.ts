@@ -15,6 +15,7 @@ import { DOMAINS, type Domain } from '@/lib/style/types'
 export const maxDuration = 60
 
 interface GenerateOutlineBody {
+  corpusProjectId?: string
   domainId?: string
   force?: boolean
 }
@@ -30,7 +31,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' } }, { status: 400 })
   }
 
-  const domainId = body.domainId
+  const { corpusProjectId, domainId } = body
+  if (!corpusProjectId) {
+    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'corpusProjectId is required.' } }, { status: 400 })
+  }
   if (!domainId || !(DOMAINS as readonly string[]).includes(domainId)) {
     return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: `domainId must be one of: ${DOMAINS.join(', ')}` } }, { status: 400 })
   }
@@ -46,11 +50,11 @@ export async function POST(req: NextRequest) {
   const client = new OpenAI({ apiKey, baseURL })
 
   try {
-    const topics = await generateOutline(db(), { domainId: domainId as Domain, client, model }, Boolean(body.force))
+    const topics = await generateOutline(db(), { corpusProjectId, domainId: domainId as Domain, client, model }, Boolean(body.force))
     return NextResponse.json({ topics })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Outline generation failed.'
-    const conflict = message.includes('already exist') || message.includes('Lock a topic count')
+    const conflict = message.includes('already exist') || message.includes('Set a topic count') || message.includes('project is')
     return NextResponse.json(
       { error: { code: conflict ? 'CONFLICT' : 'OUTLINE_GENERATION_FAILED', message } },
       { status: conflict ? 409 : 502 },

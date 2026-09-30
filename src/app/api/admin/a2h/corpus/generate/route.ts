@@ -7,8 +7,6 @@ import { getUserApiConfig } from '@/lib/userApiConfig'
 import { resolveProvider } from '@/lib/providerResolution'
 import { getTopic } from '@/lib/a2h/topics'
 import { generateSource } from '@/lib/a2h/corpus'
-import { getLengthLadderConfig } from '@/lib/a2h/lengthLadder'
-import { DEFAULT_CORPUS_VERSION } from '@/lib/a2h/types'
 
 // Generation is one model call per cell, driven interactively by the admin
 // (not a batch job this route kicks off) — see the corpus matrix UI, which
@@ -17,9 +15,9 @@ import { DEFAULT_CORPUS_VERSION } from '@/lib/a2h/types'
 export const maxDuration = 120
 
 interface GenerateBody {
+  corpusProjectId?: string
   topicId?: string
   targetWords?: number
-  corpusVersion?: string
   temperature?: number | null
   force?: boolean
 }
@@ -35,27 +33,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' } }, { status: 400 })
   }
 
-  const { topicId, targetWords } = body
+  const { corpusProjectId, topicId, targetWords } = body
+  if (!corpusProjectId) {
+    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'corpusProjectId is required.' } }, { status: 400 })
+  }
   if (!topicId || typeof topicId !== 'string') {
     return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'topicId is required.' } }, { status: 400 })
   }
-
-  // The length ladder must be locked before any source is generated against
-  // it — same "settle the dimension first" rule topic counts already
-  // follow — so targetWords is validated against the actual locked ladder,
-  // never a hardcoded default.
-  const ladderConfig = await getLengthLadderConfig(db())
-  if (!ladderConfig || !ladderConfig.locked) {
-    return NextResponse.json(
-      { error: { code: 'LADDER_NOT_LOCKED', message: 'Lock a length ladder (Corpus Design) before generating corpus documents.' } },
-      { status: 409 },
-    )
-  }
-  if (!targetWords || !ladderConfig.ladder.includes(targetWords)) {
-    return NextResponse.json(
-      { error: { code: 'VALIDATION_ERROR', message: `targetWords must be one of: ${ladderConfig.ladder.join(', ')}` } },
-      { status: 400 },
-    )
+  if (!targetWords) {
+    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'targetWords is required.' } }, { status: 400 })
   }
 
   const topic = await getTopic(db(), topicId)
@@ -82,7 +68,7 @@ export async function POST(req: NextRequest) {
     const source = await generateSource(
       db(),
       {
-        corpusVersion: body.corpusVersion ?? DEFAULT_CORPUS_VERSION,
+        corpusProjectId,
         topic,
         targetWords,
         temperature: body.temperature ?? null,
@@ -95,10 +81,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ source })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Generation failed.'
-    const alreadyAccepted = message.includes('already')
+    if (message === 'Corpus project not found.') {
+      return NextResponse.json({ error: { code: 'NOT_FOUND', message } }, { status: 404 })
+    }
+    if (message.startsWith('targetWords must be one of')) {
+      return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message } }, { status: 400 })
+    }
+    const conflict = message.includes('already') || message.includes('Lock the blueprint') || message.includes('archived project')
     return NextResponse.json(
-      { error: { code: alreadyAccepted ? 'ALREADY_ACCEPTED' : 'GENERATION_FAILED', message } },
-      { status: alreadyAccepted ? 409 : 502 },
+      { error: { code: conflict ? 'CONFLICT' : 'GENERATION_FAILED', message } },
+      { status: conflict ? 409 : 502 },
     )
   }
 }

@@ -3,17 +3,18 @@ import { requireA2HAdmin } from '@/lib/require-a2h-admin'
 import { isAuthFailure } from '@/lib/require-auth'
 import { db } from '@/lib/firestore'
 import { freezeSource } from '@/lib/a2h/corpus'
-import { DEFAULT_CORPUS_VERSION } from '@/lib/a2h/types'
 
 interface FreezeBody {
+  corpusProjectId?: string
   topicId?: string
   targetWords?: number
-  corpusVersion?: string
 }
 
 // Freezing is its own explicit call (never a side effect of generation) per
 // §23: "Corpus freezing should require an explicit confirmation step because
-// downstream benchmark comparability depends on immutability."
+// downstream benchmark comparability depends on immutability." This freezes
+// one source cell — see /api/admin/a2h/projects/[projectId]/freeze for the
+// whole-project milestone.
 export async function POST(req: NextRequest) {
   const auth = await requireA2HAdmin(req)
   if (isAuthFailure(auth)) return auth
@@ -25,12 +26,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' } }, { status: 400 })
   }
 
-  if (!body.topicId || !body.targetWords) {
-    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'topicId and targetWords are required.' } }, { status: 400 })
+  if (!body.corpusProjectId || !body.topicId || !body.targetWords) {
+    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'corpusProjectId, topicId, and targetWords are required.' } }, { status: 400 })
   }
 
   try {
-    const source = await freezeSource(db(), body.corpusVersion ?? DEFAULT_CORPUS_VERSION, body.topicId, body.targetWords)
+    const source = await freezeSource(db(), body.corpusProjectId, body.topicId, body.targetWords)
     return NextResponse.json({ source })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Freeze failed.'

@@ -1,23 +1,18 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { DOMAINS, type Domain } from '@/lib/style/types'
-import { DEFAULT_LENGTH_LADDER } from '@/lib/a2h/types'
+import { DEFAULT_LENGTH_LADDER, TOPICS_PER_DOMAIN, MAX_TOPICS_PER_DOMAIN } from '@/lib/a2h/types'
 import {
-  apiGetLengthLadder, apiSaveLengthLadder, apiLockLengthLadder, apiExpandLengthLadder,
-  apiGetDomainConfig,
-  type LengthLadderConfig, type DomainOutlineConfig,
+  apiGetProject, apiUpdateProjectDraft, apiLockBlueprint, apiFreezeProject,
+  apiListTopics,
+  type CorpusProject,
 } from '@/lib/a2hApi'
 import { Spinner } from '@/components/ui/Spinner'
 
 const INTENSITY_COUNT = 10
 
-// The draft is held as strings, one per chip, so a chip can be edited
-// in-place (cleared, retyped) without the array collapsing to a parsed
-// number mid-edit — parseLadderDraft is what turns it into the validated,
-// sorted number[] actually sent to the server. lengthCount is never a
-// separate field anywhere in this flow: it's always draft.length or
-// parsedDraft.values.length, derived, never stored.
 function parseLadderDraft(draft: string[]): { values: number[] } | { error: string } {
   if (draft.length === 0) return { error: 'Add at least one length.' }
   const values: number[] = []
@@ -36,115 +31,162 @@ function parseLadderDraft(draft: string[]): { values: number[] } | { error: stri
 }
 
 export default function A2HCorpusDesignPage() {
-  const [ladderConfig, setLadderConfig] = useState<LengthLadderConfig | null>(null)
-  const [ladderDraft, setLadderDraft] = useState<string[]>(DEFAULT_LENGTH_LADDER.map(String))
-  const [newLength, setNewLength] = useState('')
-  const [ladderBusy, setLadderBusy] = useState(false)
-  const [domainConfigs, setDomainConfigs] = useState<Partial<Record<Domain, DomainOutlineConfig | null>>>({})
+  const projectId = useSearchParams().get('project')
+
+  const [project, setProject] = useState<CorpusProject | null>(null)
+  const [topicsByDomain, setTopicsByDomain] = useState<Partial<Record<Domain, number>>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const [draftDomains, setDraftDomains] = useState<Domain[]>([...DOMAINS])
+  const [draftCounts, setDraftCounts] = useState<Partial<Record<Domain, string>>>({})
+  const [draftLadder, setDraftLadder] = useState<string[]>(DEFAULT_LENGTH_LADDER.map(String))
+  const [newLength, setNewLength] = useState('')
 
   useEffect(() => {
+    if (!projectId) { setLoading(false); return }
     let cancelled = false
     setLoading(true)
     setError(null)
-    Promise.all([apiGetLengthLadder(), ...DOMAINS.map(d => apiGetDomainConfig(d))])
-      .then(([ladder, ...configs]) => {
+    Promise.all([apiGetProject(projectId), apiListTopics(projectId)])
+      .then(([p, topics]) => {
         if (cancelled) return
-        setLadderConfig(ladder)
-        setLadderDraft((ladder?.ladder ?? DEFAULT_LENGTH_LADDER).map(String))
-        const map: Partial<Record<Domain, DomainOutlineConfig | null>> = {}
-        DOMAINS.forEach((d, i) => { map[d] = configs[i] as DomainOutlineConfig | null })
-        setDomainConfigs(map)
+        setProject(p)
+        setDraftDomains(p.domains)
+        const counts: Partial<Record<Domain, string>> = {}
+        for (const d of p.domains) counts[d] = String(p.topicCountByDomain[d] ?? '')
+        setDraftCounts(counts)
+        setDraftLadder(p.lengthLadder.length > 0 ? p.lengthLadder.map(String) : DEFAULT_LENGTH_LADDER.map(String))
+        const byDomain: Partial<Record<Domain, number>> = {}
+        for (const t of topics) byDomain[t.domainId] = (byDomain[t.domainId] ?? 0) + 1
+        setTopicsByDomain(byDomain)
       })
-      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load corpus design.') })
+      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load corpus project.') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [])
+  }, [projectId])
 
-  function applyPreset() {
-    setLadderDraft(DEFAULT_LENGTH_LADDER.map(String))
+  const isDraft = project?.status === 'draft'
+
+  function toggleDomain(d: Domain) {
+    setDraftDomains(prev => (prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]))
   }
 
+  function applyPreset() {
+    setDraftLadder(DEFAULT_LENGTH_LADDER.map(String))
+  }
   function addDraftLength() {
     const trimmed = newLength.trim()
     if (!trimmed) return
-    setLadderDraft(prev => [...prev, trimmed])
+    setDraftLadder(prev => [...prev, trimmed])
     setNewLength('')
   }
-
-  function updateDraftValue(index: number, value: string) {
-    setLadderDraft(prev => prev.map((v, i) => (i === index ? value : v)))
+  function updateDraftLength(index: number, value: string) {
+    setDraftLadder(prev => prev.map((v, i) => (i === index ? value : v)))
+  }
+  function removeDraftLength(index: number) {
+    setDraftLadder(prev => prev.filter((_, i) => i !== index))
   }
 
-  function removeDraftIndex(index: number) {
-    setLadderDraft(prev => prev.filter((_, i) => i !== index))
-  }
+  const parsedLadder = parseLadderDraft(draftLadder)
 
-  const parsedDraft = parseLadderDraft(ladderDraft)
-
-  async function handleSaveLadder() {
-    if ('error' in parsedDraft) return
-    setLadderBusy(true)
+  async function handleSaveDraft() {
+    if (!project) return
+    if ('error' in parsedLadder) { setError(parsedLadder.error); return }
+    if (draftDomains.length === 0) { setError('Select at least one domain.'); return }
+    const topicCountByDomain: Record<string, number> = {}
+    for (const d of draftDomains) {
+      const n = Number(draftCounts[d])
+      if (!Number.isInteger(n) || n < 1) { setError(`Set a valid topic count for ${d}.`); return }
+      topicCountByDomain[d] = n
+    }
+    setBusy(true)
     setError(null)
     try {
-      setLadderConfig(await apiSaveLengthLadder(parsedDraft.values))
+      const updated = await apiUpdateProjectDraft(project.id, {
+        domains: draftDomains,
+        topicCountByDomain,
+        lengthLadder: parsedLadder.values,
+      })
+      setProject(updated)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed.')
     } finally {
-      setLadderBusy(false)
+      setBusy(false)
     }
   }
 
-  async function handleLockLadder() {
-    if ('error' in parsedDraft) return
-    setLadderBusy(true)
+  async function handleLockBlueprint() {
+    if (!project) return
+    if (!window.confirm('Lock the blueprint? Domains, topic counts, and the length ladder become permanent, and the topic roster can no longer change.')) return
+    setBusy(true)
     setError(null)
     try {
-      setLadderConfig(await apiLockLengthLadder(parsedDraft.values))
+      setProject(await apiLockBlueprint(project.id))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Lock failed.')
     } finally {
-      setLadderBusy(false)
+      setBusy(false)
     }
   }
 
-  async function handleExpandLadder() {
-    const n = Number(newLength)
-    if (!Number.isInteger(n) || n <= 0) {
-      setError('Enter a positive whole number to add.')
-      return
-    }
-    setLadderBusy(true)
+  async function handleFreeze() {
+    if (!project) return
+    if (!window.confirm(`Freeze "${project.name}"? This marks the corpus build complete.`)) return
+    setBusy(true)
     setError(null)
     try {
-      const config = await apiExpandLengthLadder([n])
-      setLadderConfig(config)
-      setLadderDraft(config.ladder.map(String))
-      setNewLength('')
+      setProject(await apiFreezeProject(project.id))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Expand failed.')
+      setError(err instanceof Error ? err.message : 'Freeze failed.')
     } finally {
-      setLadderBusy(false)
+      setBusy(false)
     }
   }
 
-  const activeLadder = ladderConfig?.locked ? ladderConfig.ladder : ladderDraft
-  const perDomainCounts = DOMAINS.map(d => domainConfigs[d]?.topicCount ?? 0)
-  const totalTopics = perDomainCounts.reduce((a, b) => a + b, 0)
-  const totalSources = totalTopics * activeLadder.length
+  const totalTopics = draftDomains.reduce((sum, d) => sum + (Number(draftCounts[d]) || 0), 0)
+  const ladderLength = 'values' in parsedLadder ? parsedLadder.values.length : draftLadder.length
+  const totalSources = totalTopics * ladderLength
   const totalOutputs = totalSources * INTENSITY_COUNT
   const totalGptZero = totalSources + totalOutputs
+
+  if (!projectId) {
+    return (
+      <div className="min-h-screen bg-white dark:bg-gray-950 flex items-center justify-center p-6">
+        <div className="text-center space-y-2">
+          <p className="text-sm text-gray-500 dark:text-gray-400">No corpus project selected.</p>
+          <Link href="/admin/a2h" className="text-sm underline text-gray-500 hover:text-gray-800 dark:hover:text-gray-300">Choose a corpus project</Link>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950 p-6">
       <div className="max-w-3xl mx-auto space-y-5">
-        <div>
-          <Link href="/admin/a2h" className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300">← A2H Benchmark</Link>
-          <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mt-1">Corpus Design</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Sources = Σ(unique topics per domain) × length ladder. Configure each independently below.
-          </p>
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <Link href="/admin/a2h" className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300">← A2H Benchmark</Link>
+            <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mt-1">{project?.name ?? 'Corpus Design'}</h1>
+            {project && (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {project.status} · {project.corpusVersion}
+              </p>
+            )}
+          </div>
+          {project && (
+            <div className="flex items-center gap-2">
+              <Link href={`/admin/a2h/topics?project=${project.id}`}
+                className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">
+                Manage Topic Blueprint
+              </Link>
+              <Link href={`/admin/a2h/corpus?project=${project.id}`}
+                className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">
+                Corpus Matrix
+              </Link>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -155,116 +197,119 @@ export default function A2HCorpusDesignPage() {
           <div className="flex justify-center py-12">
             <Spinner className="w-6 h-6 border-gray-200 border-t-gray-700 dark:border-gray-700 dark:border-t-gray-300" />
           </div>
+        ) : !project ? (
+          <p className="text-sm text-gray-400 dark:text-gray-500">Corpus project not found.</p>
         ) : (
           <>
-            {/* Length ladder */}
+            {/* Domains */}
             <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-3">
-              <div>
-                <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Length Ladder</h2>
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                  {ladderConfig?.locked ? `${ladderConfig.ladder.length} lengths · locked` : `${ladderDraft.length} lengths (draft) — lock before generating corpus`}
-                </p>
+              <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Domains</h2>
+              <div className="flex flex-wrap gap-1.5">
+                {DOMAINS.map(d => {
+                  const active = isDraft ? draftDomains.includes(d) : project.domains.includes(d)
+                  return (
+                    <button
+                      key={d}
+                      onClick={() => isDraft && toggleDomain(d)}
+                      disabled={!isDraft}
+                      className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors capitalize disabled:cursor-default ${
+                        active
+                          ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
+                          : 'border-gray-200 text-gray-400 dark:border-gray-700 dark:text-gray-600'
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  )
+                })}
               </div>
 
-              {ladderConfig?.locked ? (
+              {/* Topic counts per domain */}
+              <div className="space-y-1.5 pt-1">
+                {(isDraft ? draftDomains : project.domains).map(d => (
+                  <div key={d} className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600 dark:text-gray-400 capitalize">{d}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400 dark:text-gray-500">
+                        {topicsByDomain[d] ?? 0} generated
+                      </span>
+                      {isDraft ? (
+                        <input
+                          type="number" min={1} max={MAX_TOPICS_PER_DOMAIN}
+                          value={draftCounts[d] ?? ''}
+                          onChange={e => setDraftCounts(prev => ({ ...prev, [d]: e.target.value }))}
+                          placeholder={String(TOPICS_PER_DOMAIN)}
+                          className="w-16 text-sm rounded-xl px-2.5 py-1 bg-white border border-gray-300 text-gray-700 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300 focus:outline-none focus:border-gray-900 dark:focus:border-gray-100"
+                        />
+                      ) : (
+                        <span className="text-sm text-gray-700 dark:text-gray-300 w-16 text-right">{project.topicCountByDomain[d] ?? '—'}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Length ladder */}
+            <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-3">
+              <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Length Ladder</h2>
+
+              {isDraft ? (
                 <div className="flex flex-wrap gap-1.5">
-                  {ladderConfig.ladder.map(len => (
-                    <span key={len}
-                      className="inline-flex items-center text-xs font-medium px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                      {len}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {ladderDraft.map((val, i) => (
-                    <span key={i}
-                      className="inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-800 pl-2 pr-1 py-0.5">
+                  {draftLadder.map((val, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-800 pl-2 pr-1 py-0.5">
                       <input
                         type="text" inputMode="numeric" value={val}
-                        onChange={e => updateDraftValue(i, e.target.value)}
+                        onChange={e => updateDraftLength(i, e.target.value)}
                         className="w-14 text-xs font-medium bg-transparent text-gray-700 dark:text-gray-300 py-1 focus:outline-none"
                       />
-                      <button onClick={() => removeDraftIndex(i)}
+                      <button onClick={() => removeDraftLength(i)}
                         className="w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:text-gray-800 hover:bg-gray-200 dark:hover:text-gray-100 dark:hover:bg-gray-700">
                         ×
                       </button>
                     </span>
                   ))}
                 </div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {project.lengthLadder.map(len => (
+                    <span key={len} className="inline-flex items-center text-xs font-medium px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                      {len}
+                    </span>
+                  ))}
+                </div>
               )}
 
-              {!ladderConfig?.locked && 'error' in parsedDraft && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">{parsedDraft.error}</p>
+              {isDraft && 'error' in parsedLadder && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">{parsedLadder.error}</p>
               )}
 
-              <div className="flex items-center gap-2 pt-1">
-                <input
-                  type="number" min={1} placeholder="e.g. 400" value={newLength}
-                  onChange={e => setNewLength(e.target.value)}
-                  className="w-24 text-sm rounded-xl px-3 py-1.5 bg-white border border-gray-300 text-gray-700 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300 focus:outline-none focus:border-gray-900 dark:focus:border-gray-100"
-                />
-                {ladderConfig?.locked ? (
-                  <button onClick={handleExpandLadder} disabled={ladderBusy}
-                    className="text-xs font-medium px-3 py-1.5 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
-                    {ladderBusy ? 'Working…' : '+ Add Length'}
+              {isDraft && (
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="number" min={1} placeholder="e.g. 400" value={newLength}
+                    onChange={e => setNewLength(e.target.value)}
+                    className="w-24 text-sm rounded-xl px-3 py-1.5 bg-white border border-gray-300 text-gray-700 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300 focus:outline-none focus:border-gray-900 dark:focus:border-gray-100"
+                  />
+                  <button onClick={addDraftLength}
+                    className="text-xs font-medium px-3 py-1.5 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">
+                    + Add Length
                   </button>
-                ) : (
-                  <>
-                    <button onClick={addDraftLength}
-                      className="text-xs font-medium px-3 py-1.5 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">
-                      + Add Length
-                    </button>
-                    <button onClick={applyPreset}
-                      className="text-xs font-medium px-3 py-1.5 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">
-                      Restore Defaults
-                    </button>
-                  </>
-                )}
-              </div>
-
-              {!ladderConfig?.locked && (
-                <div className="flex items-center gap-2 pt-1 border-t border-gray-100 dark:border-gray-900">
-                  <button onClick={handleSaveLadder} disabled={ladderBusy || 'error' in parsedDraft}
-                    className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40 mt-2">
-                    Save
-                  </button>
-                  <button onClick={handleLockLadder} disabled={ladderBusy || 'error' in parsedDraft}
-                    className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40 mt-2">
-                    {ladderBusy ? 'Working…' : 'Lock'}
+                  <button onClick={applyPreset}
+                    className="text-xs font-medium px-3 py-1.5 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">
+                    Restore Defaults
                   </button>
                 </div>
               )}
-            </div>
-
-            {/* Per-domain topic counts */}
-            <div className="border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-800">
-                <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Unique Topic Outlines</h2>
-              </div>
-              {DOMAINS.map(d => {
-                const config = domainConfigs[d]
-                return (
-                  <div key={d} className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 dark:border-gray-900 last:border-b-0">
-                    <span className="text-sm text-gray-700 dark:text-gray-300 capitalize">{d}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm text-gray-500 dark:text-gray-400">
-                        {config ? `${config.topicCount}${config.locked ? ' · locked' : ' · draft'}` : 'not set'}
-                      </span>
-                      <Link href="/admin/a2h/topics" className="text-xs text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 underline">Edit</Link>
-                    </div>
-                  </div>
-                )
-              })}
             </div>
 
             {/* Live calculation */}
             <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4">
               <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-3">Experiment Size</h2>
               <dl className="space-y-1.5 text-sm">
-                <Row label="Domains" value={DOMAINS.length} />
+                <Row label="Domains" value={(isDraft ? draftDomains : project.domains).length} />
                 <Row label="Unique topics (total)" value={totalTopics} />
-                <Row label="Lengths" value={activeLadder.length} />
+                <Row label="Lengths" value={ladderLength} />
                 <Row label="Source documents" value={totalSources} emphasized />
                 <Row label="Intensity levels" value={INTENSITY_COUNT} />
                 <Row label="Humanite outputs" value={totalOutputs} emphasized />
@@ -272,6 +317,28 @@ export default function A2HCorpusDesignPage() {
                 <Row label="GPTZero post-transform calls" value={totalOutputs} />
                 <Row label="Total GPTZero analyses" value={totalGptZero} emphasized />
               </dl>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-2">
+              {isDraft && (
+                <>
+                  <button onClick={handleSaveDraft} disabled={busy}
+                    className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
+                    {busy ? 'Saving…' : 'Save Draft'}
+                  </button>
+                  <button onClick={handleLockBlueprint} disabled={busy}
+                    className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">
+                    {busy ? 'Working…' : 'Lock Blueprint'}
+                  </button>
+                </>
+              )}
+              {(project.status === 'blueprint_locked' || project.status === 'generating') && (
+                <button onClick={handleFreeze} disabled={busy}
+                  className="text-xs font-medium px-3.5 py-2 rounded-xl bg-green-600 text-white disabled:opacity-40">
+                  {busy ? 'Working…' : 'Freeze Corpus'}
+                </button>
+              )}
             </div>
           </>
         )}

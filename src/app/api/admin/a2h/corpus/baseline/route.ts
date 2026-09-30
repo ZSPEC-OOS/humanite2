@@ -5,7 +5,6 @@ import { db } from '@/lib/firestore'
 import { getUserApiConfig } from '@/lib/userApiConfig'
 import { getSource, listSources } from '@/lib/a2h/corpus'
 import { acquireBaseline, listBaselines } from '@/lib/a2h/baseline'
-import { DEFAULT_CORPUS_VERSION } from '@/lib/a2h/types'
 import { DOMAINS, type Domain } from '@/lib/style/types'
 
 // One GPTZero call per frozen source, driven interactively by the admin —
@@ -14,9 +13,9 @@ import { DOMAINS, type Domain } from '@/lib/style/types'
 export const maxDuration = 60
 
 interface BaselineBody {
+  corpusProjectId?: string
   topicId?: string
   targetWords?: number
-  corpusVersion?: string
   force?: boolean
 }
 
@@ -24,11 +23,14 @@ export async function GET(req: NextRequest) {
   const auth = await requireA2HAdmin(req)
   if (isAuthFailure(auth)) return auth
 
-  const corpusVersion = req.nextUrl.searchParams.get('corpusVersion') ?? DEFAULT_CORPUS_VERSION
+  const corpusProjectId = req.nextUrl.searchParams.get('corpusProjectId')
+  if (!corpusProjectId) {
+    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'corpusProjectId is required.' } }, { status: 400 })
+  }
   const domainParam = req.nextUrl.searchParams.get('domainId')
   const domainId = domainParam && (DOMAINS as readonly string[]).includes(domainParam) ? (domainParam as Domain) : undefined
 
-  const sources = await listSources(db(), corpusVersion, domainId)
+  const sources = await listSources(db(), corpusProjectId, domainId)
   const baselines = await listBaselines(db(), sources.map(s => s.id))
   return NextResponse.json({ baselines })
 }
@@ -44,11 +46,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' } }, { status: 400 })
   }
 
-  if (!body.topicId || !body.targetWords) {
-    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'topicId and targetWords are required.' } }, { status: 400 })
+  if (!body.corpusProjectId || !body.topicId || !body.targetWords) {
+    return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'corpusProjectId, topicId, and targetWords are required.' } }, { status: 400 })
   }
 
-  const source = await getSource(db(), body.corpusVersion ?? DEFAULT_CORPUS_VERSION, body.topicId, body.targetWords)
+  const source = await getSource(db(), body.corpusProjectId, body.topicId, body.targetWords)
   if (!source) {
     return NextResponse.json({ error: { code: 'NOT_FOUND', message: 'No source exists for this cell.' } }, { status: 404 })
   }
