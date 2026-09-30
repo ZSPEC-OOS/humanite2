@@ -8,7 +8,7 @@ function fixture(partial: Partial<TerminologyFixtureExpected> & { preferredTerm:
   return {
     id: `fx-${++ordinal}`, fixtureSetId: 'set-1', corpusProjectId: 'proj-1', sourceId: 'src-1',
     type: 'terminology', ordinal, expected: expected as unknown as Record<string, unknown>,
-    sourceStart: null, sourceEnd: null, sourceText: null, notes: null,
+    sourceStart: null, sourceEnd: null, sourceText: null, notes: null, corruptionGeneratorVersion: null,
     createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-01T00:00:00.000Z',
   }
 }

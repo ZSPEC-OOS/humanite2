@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import {
   apiGetProject, apiListCorpus,
   apiListFixtureSets, apiCreateFixtureSet, apiGetFixtureSet, apiValidateFixtureSet, apiLockFixtureSet,
-  apiListFixtures, apiCreateFixture, apiDeleteFixture, apiScanSourceForCandidates,
+  apiListFixtures, apiCreateFixture, apiDeleteFixture, apiScanSourceForCandidates, apiSeedRepairFixtures,
   type CorpusProject, type CorpusSource, type FixtureSet, type BenchmarkFixture, type A2HFixtureType,
   type FixtureSetValidationResult, type FixtureCandidates,
 } from '@/lib/a2hApi'
@@ -17,6 +17,8 @@ const FIXTURE_TYPE_LABEL: Record<A2HFixtureType, string> = {
   modality: 'Modality',
   protected_term: 'Protected Term',
   terminology: 'Terminology',
+  grammar_repair: 'Grammar Repair',
+  factual_repair: 'Factual Repair',
 }
 
 // Fixture-set administration (§23-24) for a Corpus Project's A2H-04/05/09/
@@ -152,6 +154,20 @@ export default function A2HFixturesPage() {
     }
   }
 
+  async function handleSeedRepairFixtures(kind: 'grammar_repair' | 'factual_repair') {
+    if (!selectedSetId || !selectedSourceId) return
+    setBusy(true)
+    setError(null)
+    try {
+      await apiSeedRepairFixtures(selectedSetId, selectedSourceId, kind)
+      await refreshFixtures()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to seed fixtures.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function handleApprove(type: A2HFixtureType, expected: Record<string, unknown>) {
     if (!selectedSetId || !selectedSourceId) return
     setBusy(true)
@@ -219,7 +235,7 @@ export default function A2HFixturesPage() {
     )
   }
 
-  const byType: Record<A2HFixtureType, number> = { citation: 0, numeric_unit: 0, modality: 0, protected_term: 0, terminology: 0 }
+  const byType: Record<A2HFixtureType, number> = { citation: 0, numeric_unit: 0, modality: 0, protected_term: 0, terminology: 0, grammar_repair: 0, factual_repair: 0 }
   for (const f of allFixtures) byType[f.type]++
   const sourcesWithAnyFixture = new Set(allFixtures.map(f => f.sourceId)).size
 
@@ -363,6 +379,20 @@ export default function A2HFixturesPage() {
                             </label>
                             <button onClick={handleAddTerminology} disabled={busy || !termForm.preferredTerm.trim()}
                               className="text-xs px-3 py-1.5 rounded-lg bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">Add Terminology Fixture</button>
+                          </div>
+
+                          <div className="pt-2 border-t border-gray-100 dark:border-gray-900 space-y-1.5">
+                            <p className="text-xs text-gray-400 dark:text-gray-500">Seed the curated grammar/factual repair regression set onto this source (review before locking):</p>
+                            <div className="flex gap-2">
+                              <button onClick={() => handleSeedRepairFixtures('grammar_repair')} disabled={busy}
+                                className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
+                                Seed Grammar Fixtures
+                              </button>
+                              <button onClick={() => handleSeedRepairFixtures('factual_repair')} disabled={busy}
+                                className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
+                                Seed Factual Fixtures
+                              </button>
+                            </div>
                           </div>
                         </div>
                       )}

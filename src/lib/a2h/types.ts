@@ -50,6 +50,7 @@ export const A2H_COLLECTIONS = {
   testResults: 'a2hBenchmarkTestResults',
   fixtureSets: 'a2hFixtureSets',
   fixtures: 'a2hBenchmarkFixtures',
+  repairAttempts: 'a2hBenchmarkRepairAttempts',
 } as const
 
 // This deployment has exactly one detector integration path for A2H
@@ -234,7 +235,10 @@ export type A2HTestCode =
 // remain unimplemented — the type carries every code now so the generic
 // BenchmarkTestResult/BenchmarkJob/DeterministicEvaluator architecture never
 // needs another schema migration as later phases fill them in.
-export const IMPLEMENTED_A2H_TESTS: readonly A2HTestCode[] = ['A2H-01', 'A2H-02', 'A2H-03', 'A2H-04', 'A2H-05', 'A2H-09', 'A2H-10', 'A2H-13']
+export const IMPLEMENTED_A2H_TESTS: readonly A2HTestCode[] = [
+  'A2H-01', 'A2H-02', 'A2H-03', 'A2H-04', 'A2H-05', 'A2H-09', 'A2H-10', 'A2H-13',
+  'A2H-06', 'A2H-08', 'A2H-12',
+]
 
 // A new run defaults to the detector-based tests only (§4's "almost no
 // configuration" standard case) — the fixture-backed tests below are valid
@@ -274,7 +278,16 @@ export const DEFAULT_TEST_VERSION = 'A2H-TV001'
 // the corpus/benchmark version; once locked it is immutable, and a
 // correction becomes a new fixture-set version (FIXTURE-V002, ...) rather
 // than a mutation of locked benchmark truth (§2/§26).
-export type A2HFixtureType = 'citation' | 'numeric_unit' | 'modality' | 'protected_term' | 'terminology'
+// Phase 3 adds two CONTROLLED DERIVATIVE fixture types — grammar_repair and
+// factual_repair. Unlike citation/numeric_unit/modality/protected_term/
+// terminology (which annotate expectations about a frozen source's own
+// text), these two fixtures carry a deliberately corrupted derivative of a
+// source excerpt alongside its known-clean ground truth (§1-4) — never
+// persisted as a CorpusSource, and never mutating the frozen source they're
+// derived from.
+export type A2HFixtureType =
+  | 'citation' | 'numeric_unit' | 'modality' | 'protected_term' | 'terminology'
+  | 'grammar_repair' | 'factual_repair'
 export type FixtureSetStatus = 'draft' | 'validated' | 'locked' | 'archived'
 
 export const DEFAULT_FIXTURE_VERSION = 'FIXTURE-V001'
@@ -282,12 +295,17 @@ export const DEFAULT_FIXTURE_VERSION = 'FIXTURE-V001'
 // Which BenchmarkOutput-consuming test each fixture type backs — the same
 // mapping run validation (§27), execution (§7/§28), and eligibility
 // reporting (§29) all key off of.
+// A2H-08 is deliberately absent — it scores ordinary Humanite outputs
+// directly via the grammar engine and never requires a fixture set (§27,
+// §47).
 export const FIXTURE_TYPE_FOR_TEST: Partial<Record<A2HTestCode, A2HFixtureType>> = {
   'A2H-04': 'citation',
   'A2H-05': 'numeric_unit',
   'A2H-09': 'modality',
   'A2H-10': 'protected_term',
   'A2H-13': 'terminology',
+  'A2H-06': 'grammar_repair',
+  'A2H-12': 'factual_repair',
 }
 
 export const FIXTURE_REQUIRING_TESTS: readonly A2HTestCode[] = Object.keys(FIXTURE_TYPE_FOR_TEST) as A2HTestCode[]
@@ -326,6 +344,31 @@ export interface BenchmarkFixture {
   notes: string | null
   createdAt: string
   updatedAt: string
+  // Set only for grammar_repair/factual_repair fixtures whose corrupted
+  // derivative was produced by a deterministic corruption generator (§4,
+  // §29-30) rather than hand-authored — versioned separately from the
+  // fixture set's own FIXTURE-Vnnn so a generator change never silently
+  // reinterprets an already-locked fixture's provenance. Null for every
+  // other fixture type, and for manually-authored derivative fixtures.
+  corruptionGeneratorVersion: string | null
+}
+
+// A documented common shape every controlled-derivative fixture's `expected`
+// conforms to (§3) — GrammarRepairFixtureExpected (a2h06.ts) and
+// FactualRepairFixtureExpected (a2h12.ts) are its two concrete, narrower
+// specializations (each fixing `corruptionCategory` to its own closed enum
+// via a differently-named field); this interface exists for documentation
+// and cross-module reference, not as a type either module imports directly.
+export interface ControlledDerivativeFixtureExpected {
+  cleanText: string
+  corruptedText: string
+  corruptionCategory: string
+  targetStart?: number | null
+  targetEnd?: number | null
+  incorrectText?: string | null
+  expectedCorrection?: string | null
+  anchorText?: string | null
+  metadata?: Record<string, unknown>
 }
 
 // A named, versioned execution against a frozen corpus. Every field that
@@ -356,6 +399,12 @@ export interface BenchmarkRun {
   // with fixtureSetId set always has fixtureVersion set, and vice versa.
   fixtureSetId: string | null
   fixtureVersion: string | null
+  // Snapshotted at creation time (§24, §41-42) — V1 ships exactly one fixed
+  // configuration of each, so these are always set (never null) rather than
+  // resolved lazily like fixtureVersion, which genuinely depends on an
+  // admin's later choice of fixture set.
+  repairConfigVersion: string
+  grammarEngineConfigVersion: string
   concurrency: number
   status: BenchmarkRunStatus
   createdAt: string
@@ -425,6 +474,11 @@ export interface BenchmarkTestResult {
   runId: string
   sourceId: string
   outputId: string | null
+  // Set for fixture-scoped tests (A2H-06/A2H-12 — one row per controlled
+  // derivative fixture, since there is no BenchmarkOutput to key on), null
+  // for every output-scoped test (A2H-01/02/04/05/08/09/10/13). Exactly one
+  // of outputId/fixtureId is ever non-null.
+  fixtureId: string | null
   benchmarkCode: A2HTestCode
   testVersion: string
   passed: boolean | null
@@ -445,7 +499,12 @@ export interface BenchmarkTestResult {
 // creating "the same" job twice — from a page refresh, a retried click, or a
 // resumed run — always resolves to the same row instead of duplicating
 // tracked (and potentially billable) work.
-export type BenchmarkJobStage = 'baseline_gptzero' | 'humanite_transform' | 'post_gptzero' | 'test_evaluation'
+// 'repair_evaluation' (Phase 3) is operationally distinct from
+// 'test_evaluation': it makes paid model calls (a targeted repair attempt
+// via repairChunk/repairGrammar) rather than pure local computation, so
+// it's kept as its own stage even though both stages ultimately write a
+// BenchmarkTestResult (§25).
+export type BenchmarkJobStage = 'baseline_gptzero' | 'humanite_transform' | 'post_gptzero' | 'test_evaluation' | 'repair_evaluation'
 export type BenchmarkJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'retrying' | 'cancelled'
 
 // ── Deterministic evaluator contract (Phase 2, §8) ──────────────────────
@@ -475,6 +534,9 @@ export interface BenchmarkJob {
   stage: BenchmarkJobStage
   sourceId: string
   outputId: string | null
+  // Set only for 'repair_evaluation' jobs — which controlled derivative
+  // fixture (grammar_repair or factual_repair) this job repairs and scores.
+  fixtureId: string | null
   intensity: number | null
   benchmarkCode: A2HTestCode | null
   status: BenchmarkJobStatus
@@ -484,4 +546,87 @@ export interface BenchmarkJob {
   completedAt: string | null
   errorCode: string | null
   errorMessage: string | null
+}
+
+// ── Repair attempts (Phase 3) ────────────────────────────────────────────
+//
+// A2H-06/A2H-12 invoke a targeted, paid repair call against a controlled
+// derivative fixture rather than the ordinary source×intensity Humanize
+// pipeline — this is deliberately NOT a BenchmarkOutput (§22): it has no
+// intensity, no domain-matched candidate selection, and its identity is
+// (run, fixture, benchmarkCode, repairConfigVersion), not
+// (run, source, intensity).
+export const DEFAULT_REPAIR_CONFIG_VERSION = 'REPAIR-V001'
+
+// V1 ships exactly one fixed repair configuration (§24) — no per-run
+// customization yet. Documented here so a later version bump has a place to
+// register what changed; the concrete values live next to repairChunk/
+// repairGrammar in evaluation/repair.ts.
+export interface RepairConfigSnapshot {
+  repairVersion: string
+  modelProvider: string
+  model: string
+  tone: string
+  domainHandling: string
+  maxRetries: number
+}
+
+export type BenchmarkRepairStatus = 'success' | 'failed'
+
+export interface BenchmarkRepairAttempt {
+  id: string
+  runId: string
+  corpusProjectId: string
+  fixtureSetId: string
+  fixtureId: string
+  benchmarkCode: 'A2H-06' | 'A2H-12'
+  sourceId: string
+  corruptedInput: string
+  repairedOutput: string | null
+  modelProvider: string
+  model: string
+  latencyMs: number
+  modelCalls: number | null
+  retryCount: number
+  inputTokens: number | null
+  outputTokens: number | null
+  estimatedCostUsd: number | null
+  status: BenchmarkRepairStatus
+  errorCode: string | null
+  errorMessage: string | null
+  createdAt: string
+  // §51's minimal audit trail: the default (idempotent) path always writes
+  // attemptNumber 1 with supersedesAttemptId null and reuses that same doc
+  // on every later resume/retry. An explicit admin regeneration (never the
+  // automatic job pipeline) creates a NEW doc with an incremented
+  // attemptNumber pointing at the one it supersedes — the prior attempt's
+  // paid evidence is never overwritten or deleted.
+  attemptNumber: number
+  supersedesAttemptId: string | null
+}
+
+// ── Grammar engine (Phase 3, §13-14) ─────────────────────────────────────
+//
+// A fixed, versioned, deterministic (non-LLM) grammar/spelling detector —
+// see grammarEngine.ts for the concrete rule set. Every A2H-08 result (and
+// every A2H-06 classification) must be reproducible from this exact
+// engine/version/rule configuration; a later rule change requires a new
+// version, and historical results stay tied to whichever version produced
+// them (§41).
+export interface GrammarEngineConfig {
+  engine: string
+  version: string
+  language: string
+  disabledRules: string[]
+  configHash: string
+}
+
+export interface GrammarFinding {
+  ruleId: string
+  category: string
+  message: string
+  start: number
+  end: number
+  text: string
+  suggestions: string[]
 }

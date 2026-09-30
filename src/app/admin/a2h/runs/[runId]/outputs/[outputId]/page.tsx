@@ -6,7 +6,7 @@ import { apiGetOutputDetail, type OutputDetail } from '@/lib/a2hApi'
 import { A2H_TEST_LABELS, type A2HTestCode } from '@/lib/a2h/types'
 import { Spinner } from '@/components/ui/Spinner'
 
-const PRESERVATION_CODES: A2HTestCode[] = ['A2H-04', 'A2H-05', 'A2H-09', 'A2H-10', 'A2H-13']
+const PRESERVATION_CODES: A2HTestCode[] = ['A2H-04', 'A2H-05', 'A2H-09', 'A2H-10', 'A2H-13', 'A2H-08']
 
 function pct(n: number | null | undefined): string {
   return n == null ? '—' : `${(n * 100).toFixed(1)}%`
@@ -101,9 +101,9 @@ export default function OutputDrilldownPage() {
           {deltaAi != null && <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">Δ AI probability: {(deltaAi * 100).toFixed(1)} points</p>}
         </Section>
 
-        <Section title="Preservation">
+        <Section title="Preservation & Grammar">
           {PRESERVATION_CODES.every(code => !detail.preservation[code]) ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500">No fixture-backed test results for this output.</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500">No fixture-backed or grammar-damage results for this output.</p>
           ) : (
             PRESERVATION_CODES.map(code => {
               const result = detail.preservation[code]
@@ -114,7 +114,20 @@ export default function OutputDrilldownPage() {
                 <div key={code} className="border-t border-gray-100 dark:border-gray-900 pt-2 first:border-t-0 first:pt-0">
                   <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">{A2H_TEST_LABELS[code]}</p>
                   {!eligible ? (
-                    <p className="text-xs text-gray-400 dark:text-gray-500 italic">Not eligible — no fixtures for this source.</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 italic">{code === 'A2H-08' ? 'Not eligible — empty source or output text.' : 'Not eligible — no fixtures for this source.'}</p>
+                  ) : code === 'A2H-08' ? (
+                    <div className="space-y-1 text-xs">
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                        <span className="text-gray-500 dark:text-gray-400">Source errors / 1000 words</span>
+                        <span className="text-gray-700 dark:text-gray-300 tabular-nums">{(measurements['sourceErrorsPer1000'] as number).toFixed(2)}</span>
+                        <span className="text-gray-500 dark:text-gray-400">Output errors / 1000 words</span>
+                        <span className="text-gray-700 dark:text-gray-300 tabular-nums">{(measurements['outputErrorsPer1000'] as number).toFixed(2)}</span>
+                        <span className="text-gray-500 dark:text-gray-400">New errors / 1000 words</span>
+                        <span className={`tabular-nums ${(measurements['newErrorsPer1000'] as number) > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-700 dark:text-green-400'}`}>{(measurements['newErrorsPer1000'] as number).toFixed(2)}</span>
+                        <span className="text-gray-500 dark:text-gray-400">Resolved / New (count)</span>
+                        <span className="text-gray-700 dark:text-gray-300 tabular-nums">{measurements['resolvedErrorCount'] as number} / {measurements['newErrorCount'] as number}</span>
+                      </div>
+                    </div>
                   ) : code === 'A2H-13' ? (
                     <div className="space-y-0.5">
                       {(measurements['terminology'] as Array<{ preferredTerm: string; consistentCount: number; controlledCount: number; forbiddenVariantCount: number; unexpectedVariantCount: number }>).map((t, i) => (

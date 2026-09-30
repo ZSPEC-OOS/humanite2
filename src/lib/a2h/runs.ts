@@ -1,7 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore'
 import {
   A2H_COLLECTIONS, IMPLEMENTED_A2H_TESTS, DEFAULT_ENABLED_TESTS, DEFAULT_TEST_VERSION, DEFAULT_DETECTOR_CONFIG_ID,
-  FIXTURE_TYPE_FOR_TEST, FIXTURE_REQUIRING_TESTS,
+  DEFAULT_REPAIR_CONFIG_VERSION, FIXTURE_TYPE_FOR_TEST, FIXTURE_REQUIRING_TESTS,
   type BenchmarkRun, type BenchmarkRunSource, type A2HTestCode,
   type BenchmarkJobStage, type BenchmarkJobStatus,
 } from './types'
@@ -9,8 +9,15 @@ import { getCorpusProject, getCorpusManifest } from './corpusProject'
 import { listTopics, getTopic } from './topics'
 import { getSource } from './corpus'
 import { getHumaniteVersion, getGitCommit } from './buildInfo'
-import { getOrCreateJob, listJobsForRun, cancelQueuedJobs, baselineJobId } from './jobs'
-import { getFixtureSet, listFixturesForSource } from './fixtures'
+import { getOrCreateJob, listJobsForRun, cancelQueuedJobs, baselineJobId, repairEvaluationJobId } from './jobs'
+import { getFixtureSet, listFixturesForSource, listFixturesForSet } from './fixtures'
+import { GRAMMAR_ENGINE_VERSION } from './grammarEngine'
+
+// Tests whose enablement requires a locked fixture set AND makes a paid
+// targeted-repair model call per fixture (§22-26), rather than a pure local
+// computation — enqueued via their own repair_evaluation jobs in startRun,
+// never through the test_evaluation stage.
+const REPAIR_TEST_CODES: readonly A2HTestCode[] = ['A2H-06', 'A2H-12']
 
 const COLLECTION = A2H_COLLECTIONS.runs
 const COHORT_COLLECTION = A2H_COLLECTIONS.runSources
@@ -65,6 +72,8 @@ export async function createRun(firestore: Firestore, params: CreateRunParams): 
     enabledTests: [...DEFAULT_ENABLED_TESTS],
     fixtureSetId: null,
     fixtureVersion: null,
+    repairConfigVersion: DEFAULT_REPAIR_CONFIG_VERSION,
+    grammarEngineConfigVersion: GRAMMAR_ENGINE_VERSION,
     concurrency: params.concurrency && params.concurrency > 0 ? Math.floor(params.concurrency) : 3,
     status: 'draft',
     createdAt: now,
@@ -246,6 +255,23 @@ export async function checkRunValidity(
       } else {
         if (fixtureSet.corpusProjectId !== run.corpusProjectId) errors.push('The selected fixture set does not belong to this corpus project.')
         if (fixtureSet.status !== 'locked') errors.push(`The selected fixture set is ${fixtureSet.status}, not locked.`)
+
+        // §27: A2H-06/A2H-12 additionally require at least one fixture of
+        // their own type to exist in the set — a locked-but-empty set is
+        // not enough. A2H-08 is deliberately exempt (§27: "do not require
+        // fixture coverage for A2H-08").
+        if (fixtureSet.status === 'locked' && fixtureSet.corpusProjectId === run.corpusProjectId) {
+          const enabledRepairTests = run.enabledTests.filter(t => REPAIR_TEST_CODES.includes(t))
+          if (enabledRepairTests.length > 0) {
+            const allFixtures = await listFixturesForSet(firestore, run.fixtureSetId)
+            for (const code of enabledRepairTests) {
+              const fixtureType = FIXTURE_TYPE_FOR_TEST[code]!
+              if (!allFixtures.some(f => f.type === fixtureType)) {
+                errors.push(`${code} is enabled but the fixture set has zero ${fixtureType} fixtures.`)
+              }
+            }
+          }
+        }
       }
     }
   }
@@ -378,6 +404,35 @@ export async function startRun(firestore: Firestore, runId: string): Promise<Ben
     sourceId: row.sourceId,
   })))
 
+  // A2H-06/A2H-12 (§22-26) enqueue independently of the baseline/transform/
+  // post-score pipeline above — they operate on fixtures, not outputs, so
+  // there is nothing to wait on. One repair_evaluation job per (cohort
+  // source's fixture of the relevant type), keyed by the run's own
+  // repairConfigVersion snapshot.
+  const enabledRepairTests = run.enabledTests.filter(t => REPAIR_TEST_CODES.includes(t))
+  if (enabledRepairTests.length > 0 && run.fixtureSetId) {
+    const fixtureSetId = run.fixtureSetId
+    await Promise.all(cohort.map(async row => {
+      const sourceFixtures = await listFixturesForSource(firestore, fixtureSetId, row.sourceId)
+      const jobsForRow: Promise<unknown>[] = []
+      for (const code of enabledRepairTests) {
+        const fixtureType = FIXTURE_TYPE_FOR_TEST[code]!
+        for (const fixture of sourceFixtures.filter(f => f.type === fixtureType)) {
+          jobsForRow.push(getOrCreateJob(firestore, {
+            id: repairEvaluationJobId(runId, fixture.id, code, run.repairConfigVersion),
+            runId,
+            corpusProjectId: run.corpusProjectId,
+            stage: 'repair_evaluation',
+            sourceId: row.sourceId,
+            fixtureId: fixture.id,
+            benchmarkCode: code,
+          }))
+        }
+      }
+      await Promise.all(jobsForRow)
+    }))
+  }
+
   const now = new Date().toISOString()
   const updated: BenchmarkRun = { ...run, status: 'running', startedAt: run.startedAt ?? now, updatedAt: now }
   await firestore.collection(COLLECTION).doc(runId).set(updated)
@@ -451,6 +506,12 @@ export interface RunProgress {
   // phase and existing UI already reads directly) rather than folding
   // everything into one map and breaking that shape.
   deterministicResultsCompleted: Partial<Record<A2HTestCode, number>>
+  // A2H-06/A2H-12 repair-attempt job counts (§49) — kept separate from
+  // deterministicResultsCompleted since these are paid, fixture-scoped
+  // repair_evaluation jobs, not free test_evaluation ones, and their total
+  // is the fixture count for that test, not sources x intensities.
+  repairJobsTotal: Partial<Record<A2HTestCode, number>>
+  repairJobsCompleted: Partial<Record<A2HTestCode, number>>
   failedJobs: number
   queuedJobs: number
 }
@@ -474,8 +535,16 @@ export async function getRunProgress(firestore: Firestore, runId: string): Promi
   const testResultsTotal = outputsTotal * testCodesForEvaluation.length
 
   const deterministicResultsCompleted: Partial<Record<A2HTestCode, number>> = {}
-  for (const code of run.enabledTests.filter(t => FIXTURE_REQUIRING_TESTS.includes(t))) {
+  for (const code of run.enabledTests.filter(t => FIXTURE_REQUIRING_TESTS.includes(t) && !REPAIR_TEST_CODES.includes(t))) {
     deterministicResultsCompleted[code] = jobs.filter(j => j.stage === 'test_evaluation' && j.status === 'completed' && j.benchmarkCode === code).length
+  }
+
+  const repairJobsTotal: Partial<Record<A2HTestCode, number>> = {}
+  const repairJobsCompleted: Partial<Record<A2HTestCode, number>> = {}
+  for (const code of run.enabledTests.filter(t => REPAIR_TEST_CODES.includes(t))) {
+    const repairJobsForCode = jobs.filter(j => j.stage === 'repair_evaluation' && j.benchmarkCode === code)
+    repairJobsTotal[code] = repairJobsForCode.length
+    repairJobsCompleted[code] = repairJobsForCode.filter(j => j.status === 'completed').length
   }
 
   return {
@@ -490,6 +559,8 @@ export async function getRunProgress(firestore: Firestore, runId: string): Promi
     a2h01ResultsCompleted: jobs.filter(j => j.stage === 'test_evaluation' && j.status === 'completed' && j.benchmarkCode === 'A2H-01').length,
     a2h02ResultsCompleted: jobs.filter(j => j.stage === 'test_evaluation' && j.status === 'completed' && j.benchmarkCode === 'A2H-02').length,
     deterministicResultsCompleted,
+    repairJobsTotal,
+    repairJobsCompleted,
     failedJobs: jobs.filter(j => j.status === 'failed').length,
     queuedJobs: jobs.filter(j => j.status === 'queued' || j.status === 'retrying').length,
   }

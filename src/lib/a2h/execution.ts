@@ -15,8 +15,18 @@ import { getOutputById, transformSource } from './outputs'
 import { computeA2H01Measurements, A2H01_CODE } from './a2h01'
 import { computeA2H02Measurements, A2H02_CODE } from './a2h02'
 import { DETERMINISTIC_EVALUATORS } from './deterministicEvaluators'
-import { listFixturesForSource } from './fixtures'
+import { listFixturesForSource, getFixture } from './fixtures'
+import { getOrCreateRepairAttempt } from './repairAttempts'
+import { repairGrammar, repairChunk } from '@/lib/evaluation/repair'
+import { classifyGrammarRepair, A2H06_CODE, type GrammarRepairFixtureExpected, type GrammarRepairFixtureResult } from './a2h06'
+import { classifyFactualRepair, A2H12_CODE, type FactualRepairFixtureExpected, type FactualRepairFixtureResult } from './a2h12'
 import { upsertTestResult } from './testResults'
+
+// V1's one fixed repair configuration (§24) — tone is held constant, the
+// same posture outputs.ts's FIXED_TONE uses for the ordinary Humanite
+// pipeline, since repair configuration is a run-snapshotted constant, not a
+// per-fixture choice.
+const REPAIR_TONE = 'balanced'
 
 export interface ExecuteBatchOptions {
   client: OpenAI
@@ -33,7 +43,11 @@ export interface ExecuteBatchResult {
 }
 
 const DEFAULT_MAX_JOBS_PER_STAGE = 5
-const STAGE_ORDER: readonly BenchmarkJobStage[] = ['baseline_gptzero', 'humanite_transform', 'post_gptzero', 'test_evaluation']
+// 'repair_evaluation' (A2H-06/A2H-12) has no dependency on the earlier
+// stages — it operates on fixtures, not outputs — but is still drained in
+// its own turn per call, after any humanite/post-score/test-evaluation work
+// still queued, rather than interleaved with it.
+const STAGE_ORDER: readonly BenchmarkJobStage[] = ['baseline_gptzero', 'humanite_transform', 'post_gptzero', 'test_evaluation', 'repair_evaluation']
 
 function chunkArray<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = []
@@ -105,6 +119,8 @@ async function processJob(
       await runPostScoreJob(firestore, run, job, detectorConfigId, options)
     } else if (job.stage === 'test_evaluation') {
       await runTestEvaluationJob(firestore, run, job, detectorConfigId, fixtureCache)
+    } else if (job.stage === 'repair_evaluation') {
+      await runRepairEvaluationJob(firestore, run, job, options)
     }
     await markJobCompleted(firestore, job.id)
   } catch (err) {
@@ -241,17 +257,24 @@ async function runTestEvaluationJob(
   // don't need postScore at all, unlike A2H-01/02 below.
   const evaluator = DETERMINISTIC_EVALUATORS[job.benchmarkCode]
   if (evaluator) {
-    if (!FIXTURE_TYPE_FOR_TEST[job.benchmarkCode]) throw new Error(`No fixture type mapped for ${job.benchmarkCode}.`)
-    if (!run.fixtureSetId) throw new Error(`Run ${run.id} has no fixtureSetId but enables fixture-backed test ${job.benchmarkCode}.`)
     const source = await getSourceById(firestore, output.sourceId)
     if (!source) throw new Error(`Source ${output.sourceId} not found.`)
-    const fixtures = await getCachedFixtures(firestore, fixtureCache, run.fixtureSetId, output.sourceId)
+    // A2H-08 has no fixture type at all (§27/§47) — it scores the ordinary
+    // output directly, so it gets an empty fixtures array rather than
+    // requiring a fixture set like the other deterministic tests.
+    const fixtureType = FIXTURE_TYPE_FOR_TEST[job.benchmarkCode]
+    let fixtures: BenchmarkFixture[] = []
+    if (fixtureType) {
+      if (!run.fixtureSetId) throw new Error(`Run ${run.id} has no fixtureSetId but enables fixture-backed test ${job.benchmarkCode}.`)
+      fixtures = await getCachedFixtures(firestore, fixtureCache, run.fixtureSetId, output.sourceId)
+    }
     const evaluation = evaluator({ run, source, output, fixtures })
     await upsertTestResult(firestore, {
       runId: run.id,
       corpusProjectId: run.corpusProjectId,
       sourceId: output.sourceId,
       outputId: output.id,
+      fixtureId: null,
       benchmarkCode: job.benchmarkCode,
       testVersion: run.testVersion,
       passed: evaluation.passed,
@@ -274,6 +297,7 @@ async function runTestEvaluationJob(
       corpusProjectId: run.corpusProjectId,
       sourceId: output.sourceId,
       outputId: output.id,
+      fixtureId: null,
       benchmarkCode: A2H01_CODE,
       testVersion: run.testVersion,
       passed: measurements.convertedAiToHuman,
@@ -293,6 +317,7 @@ async function runTestEvaluationJob(
       corpusProjectId: run.corpusProjectId,
       sourceId: output.sourceId,
       outputId: output.id,
+      fixtureId: null,
       benchmarkCode: A2H02_CODE,
       testVersion: run.testVersion,
       passed: null,
@@ -304,4 +329,108 @@ async function runTestEvaluationJob(
   }
 
   throw new Error(`Test evaluation for ${job.benchmarkCode} is not implemented.`)
+}
+
+// A2H-06/A2H-12 (§21-26): unlike every other job stage, this one makes a
+// targeted, paid repair call against a controlled derivative FIXTURE, not
+// an ordinary source×intensity output. getOrCreateRepairAttempt (§50) is
+// what makes this idempotent — a resumed run or a retried job reuses the
+// already-persisted attempt instead of paying for the repair call again.
+async function runRepairEvaluationJob(
+  firestore: Firestore,
+  run: BenchmarkRun,
+  job: BenchmarkJob,
+  options: ExecuteBatchOptions,
+): Promise<void> {
+  if (!job.fixtureId || !job.benchmarkCode) throw new Error(`Repair evaluation job ${job.id} is missing fixtureId/benchmarkCode.`)
+  if (!run.fixtureSetId) throw new Error(`Run ${run.id} has no fixtureSetId but has a queued repair_evaluation job.`)
+  const fixture = await getFixture(firestore, job.fixtureId)
+  if (!fixture) throw new Error(`Fixture ${job.fixtureId} not found.`)
+  const source = await getSourceById(firestore, fixture.sourceId)
+  if (!source) throw new Error(`Source ${fixture.sourceId} not found.`)
+
+  const now = new Date().toISOString()
+  const fixtureSetId = run.fixtureSetId
+
+  if (job.benchmarkCode === A2H06_CODE) {
+    const expected = fixture.expected as unknown as GrammarRepairFixtureExpected
+    const attempt = await getOrCreateRepairAttempt(firestore, {
+      runId: run.id, corpusProjectId: run.corpusProjectId, fixtureSetId, fixtureId: fixture.id,
+      benchmarkCode: A2H06_CODE, sourceId: fixture.sourceId, corruptedInput: expected.corruptedText,
+      repairConfigVersion: run.repairConfigVersion,
+      repair: async () => {
+        const start = Date.now()
+        try {
+          const repairedOutput = await repairGrammar(options.client, options.model, expected.corruptedText)
+          return {
+            repairedOutput, modelProvider: options.modelProvider, model: options.model, latencyMs: Date.now() - start,
+            modelCalls: 1, retryCount: 0, inputTokens: null, outputTokens: null, estimatedCostUsd: null,
+            status: 'success', errorCode: null, errorMessage: null,
+          }
+        } catch (err) {
+          return {
+            repairedOutput: null, modelProvider: options.modelProvider, model: options.model, latencyMs: Date.now() - start,
+            modelCalls: 1, retryCount: 0, inputTokens: null, outputTokens: null, estimatedCostUsd: null,
+            status: 'failed', errorCode: err instanceof Error ? err.constructor.name : 'UnknownError',
+            errorMessage: err instanceof Error ? err.message : 'Grammar repair failed.',
+          }
+        }
+      },
+    })
+    const { status, targetErrorCorrected, newErrorIntroduced } = classifyGrammarRepair(expected, attempt.repairedOutput)
+    const result: GrammarRepairFixtureResult = {
+      fixtureId: fixture.id, category: expected.category, status, targetErrorCorrected, newErrorIntroduced,
+      repairAttemptId: attempt.id, repairedText: attempt.repairedOutput,
+    }
+    await upsertTestResult(firestore, {
+      runId: run.id, corpusProjectId: run.corpusProjectId, sourceId: fixture.sourceId, outputId: null, fixtureId: fixture.id,
+      benchmarkCode: A2H06_CODE, testVersion: run.testVersion, passed: null, score: status === 'corrected' ? 1 : 0,
+      measurements: result as unknown as Record<string, unknown>, evaluatedAt: now,
+    })
+    return
+  }
+
+  if (job.benchmarkCode === A2H12_CODE) {
+    const expected = fixture.expected as unknown as FactualRepairFixtureExpected
+    const attempt = await getOrCreateRepairAttempt(firestore, {
+      runId: run.id, corpusProjectId: run.corpusProjectId, fixtureSetId, fixtureId: fixture.id,
+      benchmarkCode: A2H12_CODE, sourceId: fixture.sourceId, corruptedInput: expected.corruptedText,
+      repairConfigVersion: run.repairConfigVersion,
+      repair: async () => {
+        const start = Date.now()
+        try {
+          // repairChunk is the SAME fact-ledger-gated targeted repair the
+          // production Humanize pipeline already uses (§21) — cleanText is
+          // the ground truth, corruptedText is the (wrong) "output" it
+          // verifies/repairs against.
+          const repairResult = await repairChunk(options.client, options.model, expected.cleanText, expected.corruptedText, REPAIR_TONE, source.domainId)
+          return {
+            repairedOutput: repairResult.text, modelProvider: options.modelProvider, model: options.model, latencyMs: Date.now() - start,
+            modelCalls: repairResult.attempted ? 1 : 0, retryCount: 0, inputTokens: null, outputTokens: null, estimatedCostUsd: null,
+            status: 'success', errorCode: null, errorMessage: null,
+          }
+        } catch (err) {
+          return {
+            repairedOutput: null, modelProvider: options.modelProvider, model: options.model, latencyMs: Date.now() - start,
+            modelCalls: 0, retryCount: 0, inputTokens: null, outputTokens: null, estimatedCostUsd: null,
+            status: 'failed', errorCode: err instanceof Error ? err.constructor.name : 'UnknownError',
+            errorMessage: err instanceof Error ? err.message : 'Factual repair failed.',
+          }
+        }
+      },
+    })
+    const { status, presentGroundTruth, presentCorrupted } = classifyFactualRepair(expected, attempt.repairedOutput)
+    const result: FactualRepairFixtureResult = {
+      fixtureId: fixture.id, category: expected.category, status, presentGroundTruth, presentCorrupted,
+      repairAttemptId: attempt.id, repairedText: attempt.repairedOutput,
+    }
+    await upsertTestResult(firestore, {
+      runId: run.id, corpusProjectId: run.corpusProjectId, sourceId: fixture.sourceId, outputId: null, fixtureId: fixture.id,
+      benchmarkCode: A2H12_CODE, testVersion: run.testVersion, passed: null, score: status === 'fully_repaired' ? 1 : 0,
+      measurements: result as unknown as Record<string, unknown>, evaluatedAt: now,
+    })
+    return
+  }
+
+  throw new Error(`Repair evaluation for ${job.benchmarkCode} is not implemented.`)
 }

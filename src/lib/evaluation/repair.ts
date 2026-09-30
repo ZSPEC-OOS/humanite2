@@ -132,3 +132,28 @@ export async function repairChunk(
     sentencesRepaired: verification.passed ? replacements.size : 0,
   }
 }
+
+// ── Grammar repair (A2H-06) ──────────────────────────────────────────────
+//
+// repairChunk above is deliberately fact-ledger-gated — it no-ops on text
+// whose facts already validate, which is exactly what a purely
+// grammatical defect looks like (no fact is missing or misbound). A2H-06's
+// controlled grammar-corruption fixtures need a repair call that always
+// attempts a correction given known-corrupted text, without that gate —
+// this sibling function reuses this module's calling conventions (a single
+// targeted completion, minimal-change instruction) for that purpose.
+const GRAMMAR_REPAIR_SYSTEM_PROMPT = `You are a precise copy editor. Fix ONLY grammatical errors in the sentence you are given — subject-verb agreement, verb tense, articles, prepositions, pronoun/number agreement, sentence fragments, run-ons, punctuation, modifier placement, and parallelism. Preserve the original meaning, facts, numbers, and wording as closely as possible; change only what grammar requires. Output ONLY the corrected sentence — no preamble, no commentary, no surrounding quotation marks.`
+
+export async function repairGrammar(client: OpenAI, model: string, corruptedText: string): Promise<string | null> {
+  const completion = await client.chat.completions.create({
+    model,
+    messages: [
+      { role: 'system', content: GRAMMAR_REPAIR_SYSTEM_PROMPT },
+      { role: 'user', content: `Correct the grammar in this sentence, changing as little else as possible:\n\n${corruptedText}` },
+    ],
+    max_tokens: 512,
+    temperature: 0.3,
+  })
+  const text = completion.choices[0]?.message?.content?.trim()
+  return text || null
+}
