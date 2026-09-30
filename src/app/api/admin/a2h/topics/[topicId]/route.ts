@@ -2,16 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireA2HAdmin } from '@/lib/require-a2h-admin'
 import { isAuthFailure } from '@/lib/require-auth'
 import { db } from '@/lib/firestore'
-import { getTopic, updateTopic, parseTopicPatch } from '@/lib/a2h/topics'
+import { parseTopicPatch } from '@/lib/a2h/topics'
+import { updateTopicChecked } from '@/lib/a2h/topicMutations'
 
 export async function PATCH(req: NextRequest, { params }: { params: { topicId: string } }) {
   const auth = await requireA2HAdmin(req)
   if (isAuthFailure(auth)) return auth
-
-  const existing = await getTopic(db(), params.topicId)
-  if (!existing) {
-    return NextResponse.json({ error: { code: 'NOT_FOUND', message: 'Topic not found.' } }, { status: 404 })
-  }
 
   let body: Record<string, unknown>
   try {
@@ -21,6 +17,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { topicId: s
   }
 
   const patch = parseTopicPatch(body)
-  await updateTopic(db(), params.topicId, patch)
-  return NextResponse.json({ topic: { ...existing, ...patch } })
+
+  try {
+    const topic = await updateTopicChecked(db(), params.topicId, patch)
+    return NextResponse.json({ topic })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to update topic.'
+    const notFound = message === 'Topic not found.' || message === 'Corpus project not found.'
+    return NextResponse.json(
+      { error: { code: notFound ? 'NOT_FOUND' : 'VALIDATION_ERROR', message } },
+      { status: notFound ? 404 : 400 },
+    )
+  }
 }

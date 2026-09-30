@@ -19,7 +19,6 @@ export const MAX_TOPICS_PER_DOMAIN = 50
 export const DEFAULT_CORPUS_VERSION = 'CORPUS-V001'
 export const DEFAULT_BENCHMARK_VERSION = 'A2H-BV001'
 export const DEFAULT_GENERATION_PROMPT_VERSION = 'GEN-V001'
-export const DEFAULT_INTENSITIES: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 // Short display prefixes for topic ids (e.g. "MED-01") — cosmetic only,
 // never used as a storage key.
@@ -32,30 +31,78 @@ export const DOMAIN_CODE: Record<Domain, string> = {
   legal: 'LEG',
 }
 
+// Firestore collection names shared across a2h/*.ts modules. Centralized so
+// corpusProject.ts can validate a whole-corpus freeze by querying sources
+// directly without importing corpus.ts (which itself imports
+// getCorpusProject/markGeneratingIfNeeded from corpusProject.ts — importing
+// the other way would create a circular module dependency).
+export const A2H_COLLECTIONS = {
+  projects: 'a2hCorpusProjects',
+  topics: 'a2hTopics',
+  sources: 'a2hCorpusSources',
+  detectorResults: 'a2hDetectorResults',
+  outputs: 'a2hBenchmarkOutputs',
+  manifests: 'a2hCorpusManifests',
+} as const
+
 export type CorpusProjectStatus = 'draft' | 'blueprint_locked' | 'generating' | 'frozen' | 'archived'
 
 // The top-level, isolated unit everything else in A2H is scoped to. Every
-// topic, source, detector result, and Humanite output carries this
-// project's id, and every uniqueness/query key includes it — two projects
-// (e.g. a 20-topic/10-length standard run and a 30-topic/6-length
-// experiment) never share or collide with each other's data, even though
-// both exist in the same Firestore collections. A project's own
-// domains/topicCountByDomain/lengthLadder/intensities are the single
-// configuration object for everything generated under it — there is no
-// separate global config anywhere else.
+// topic, source, and detector result carries this project's id, and every
+// uniqueness/query key includes it — two projects (e.g. the standard
+// 6-domain/20-topic/10-length run and a smaller experiment) never share or
+// collide with each other's data, even though both exist in the same
+// Firestore collections. A project's own domains/topic counts/length ladder
+// are the single configuration object for everything generated under it —
+// there is no separate global config anywhere else.
+//
+// Corpus configuration ends at the frozen source document. Intensity is a
+// benchmark-execution parameter (how hard to humanize a frozen source), not
+// a corpus-design parameter, so it deliberately does not live here — see the
+// (future) Benchmark Run object.
+//
+// topicCountByDomain is a derived/persisted convenience: it is always
+// recomputed from topicCountDefault and topicCountOverrides by
+// corpusProject.ts, never set independently, so the two can never disagree.
+// The common case (identical topic count across every domain) needs no
+// per-domain input at all; topicCountOverrides exists only for the domains
+// an admin explicitly deviates from the default.
 export interface CorpusProject {
   id: string
   name: string
   benchmarkVersion: string
   corpusVersion: string
   domains: Domain[]
+  topicCountDefault: number
+  topicCountOverrides: Partial<Record<Domain, number>>
   topicCountByDomain: Partial<Record<Domain, number>>
   lengthLadder: number[]
-  intensities: number[]
   status: CorpusProjectStatus
   createdAt: string
   updatedAt: string
   frozenAt: string | null
+}
+
+// An immutable, independently-verifiable record of exactly what a frozen
+// corpus contains — written once, by freezeCorpusProject, after the whole
+// source matrix has been validated complete. topicBlueprintHash and
+// manifestHash let a downstream consumer (or a later audit) confirm the
+// corpus a benchmark run claims to use is bit-for-bit the one that was
+// frozen, without re-deriving the entire matrix by hand.
+export interface CorpusManifest {
+  corpusProjectId: string
+  name: string
+  benchmarkVersion: string
+  corpusVersion: string
+  domains: Domain[]
+  topicCountByDomain: Partial<Record<Domain, number>>
+  lengthLadder: number[]
+  expectedSourceCount: number
+  actualSourceCount: number
+  topicBlueprintHash: string
+  sourceHashes: Record<string, string>
+  manifestHash: string
+  frozenAt: string
 }
 
 // A topic family — the outline a human curator (not this generation code)

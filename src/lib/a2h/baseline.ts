@@ -1,9 +1,9 @@
 import type { Firestore } from 'firebase-admin/firestore'
 import { GPTZeroProvider } from '@/lib/detection/providers/gptzero'
 import type { DetectionClassification } from '@/lib/detection/contracts'
-import type { CorpusSource, BenchmarkOutput } from './types'
+import { A2H_COLLECTIONS, type CorpusSource, type BenchmarkOutput } from './types'
 
-const COLLECTION = 'a2hDetectorResults'
+const COLLECTION = A2H_COLLECTIONS.detectorResults
 
 // Per §9.1 — the complete raw GPTZero response is retained alongside the
 // normalized fields so every derived summary stays reproducible from stored

@@ -84,10 +84,13 @@ export async function POST(req: NextRequest) {
     if (message === 'Corpus project not found.') {
       return NextResponse.json({ error: { code: 'NOT_FOUND', message } }, { status: 404 })
     }
+    if (message === 'Topic does not belong to this corpus project.') {
+      return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message } }, { status: 400 })
+    }
     if (message.startsWith('targetWords must be one of')) {
       return NextResponse.json({ error: { code: 'VALIDATION_ERROR', message } }, { status: 400 })
     }
-    const conflict = message.includes('already') || message.includes('Lock the blueprint') || message.includes('archived project')
+    const conflict = message.includes('already') || message.includes('immutable') || message.startsWith('Cannot generate sources while')
     return NextResponse.json(
       { error: { code: conflict ? 'CONFLICT' : 'GENERATION_FAILED', message } },
       { status: conflict ? 409 : 502 },

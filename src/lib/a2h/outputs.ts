@@ -4,9 +4,9 @@ import type OpenAI from 'openai'
 import { preprocess } from '@/lib/preprocess'
 import { humanizeChunk } from '@/lib/humanizePipeline'
 import { buildDocumentContext, emptyDocumentContext, runDocumentConsistencyPass, type DocumentContext } from '@/lib/document'
-import type { CorpusSource, BenchmarkOutput, BenchmarkOutputStatus } from './types'
+import { A2H_COLLECTIONS, type CorpusSource, type BenchmarkOutput, type BenchmarkOutputStatus } from './types'
 
-const COLLECTION = 'a2hBenchmarkOutputs'
+const COLLECTION = A2H_COLLECTIONS.outputs
 const MAX_GATE_RETRIES = 2
 // Tone is held fixed across every A2H-01/02/03 measurement — per the spec's
 // core experimental principle, intensity is the one repeated-measures

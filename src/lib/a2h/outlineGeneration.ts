@@ -6,6 +6,9 @@ import type { BenchmarkTopic } from './types'
 import { DEFAULT_GENERATION_PROMPT_VERSION } from './types'
 import { getCorpusProject } from './corpusProject'
 import { listTopics, createTopic, deleteTopicsForDomain } from './topics'
+import { normalizeTopicTitle } from './textNormalize'
+
+export { normalizeTopicTitle }
 
 const FIELD_GUIDANCE = [
   'Field guidance:',
@@ -96,20 +99,6 @@ function extractJson(content: string): unknown {
 
   const snippet = trimmed.slice(0, 300)
   throw new Error(`Model did not return valid JSON. First 300 characters of its response: ${snippet || '(empty response)'}`)
-}
-
-// Case/punctuation/whitespace-insensitive comparison key for a topic title
-// — "Hypertension", "hypertension", and "Hypertension." must all collide.
-// Deliberately exact-match-after-normalization only: catching paraphrased
-// near-duplicates ("Type 2 Diabetes" vs "Type II Diabetes") would need
-// semantic similarity (embeddings or a judge call), a bigger lift not
-// justified for this check.
-export function normalizeTopicTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, '')
-    .replace(/\s+/g, ' ')
-    .trim()
 }
 
 // Calls the model and returns its parsed JSON, or throws a diagnosable

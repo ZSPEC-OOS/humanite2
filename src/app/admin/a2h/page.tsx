@@ -135,6 +135,12 @@ export default function A2HAdminPage() {
                   className="text-sm px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 hover:opacity-90 transition-opacity">
                   Open Corpus
                 </Link>
+                {selected.status === 'frozen' && (
+                  <Link href={`/admin/a2h/benchmark?project=${selected.id}`}
+                    className="text-sm px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors">
+                    Benchmark Runs
+                  </Link>
+                )}
                 <button onClick={handleDuplicate} disabled={busy}
                   className="text-sm px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
                   Duplicate Corpus
