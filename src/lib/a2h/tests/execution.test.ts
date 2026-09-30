@@ -17,6 +17,13 @@ import { INITIAL_GRAMMAR_FIXTURES } from '../a2h06'
 import { INITIAL_FACTUAL_FIXTURES } from '../a2h12'
 import { listRepairAttemptsForRun } from '../repairAttempts'
 import type { A2HTestCode } from '../types'
+import { getExperimentCohort } from '../experimentCohort'
+import { listTrialsForRun } from '../trials'
+import { getA2H07Report } from '../a2h07'
+import { getA2H11Report } from '../a2h11'
+import { getA2H14Report } from '../a2h14'
+import { getA2H15Report } from '../a2h15'
+import { getA2H17Report } from '../a2h17'
 
 function makeFirestore() {
   const collections = new Map<string, Map<string, Record<string, unknown>>>()
@@ -516,5 +523,136 @@ describe('dry-run acceptance (§57): grammar/factual repair + grammar damage', (
     const attemptsAfterResume = await listRepairAttemptsForRun(firestore, runId, 'A2H-06')
     expect(attemptsAfterResume).toHaveLength(2)
     expect(attemptsAfterResume.map(a => a.id).sort()).toEqual(grammarAttempts.map(a => a.id).sort())
+  })
+})
+
+// Phase 4: the experimental trial layer (A2H-07/11/14/15) — end-to-end
+// through the SAME executeRunBatch engine every earlier phase uses, proving
+// the "do not create six separate execution architectures" constraint holds
+// in practice, not just in the module boundaries. Also exercises A2H-16
+// (via the ordinary DETERMINISTIC_EVALUATORS/test_evaluation path, with a
+// claim_relationship fixture) and A2H-17 (pure aggregation over whatever
+// telemetry the run above produced) against the same run.
+describe('dry-run acceptance (Phase 4): experimental trials + A2H-16 + A2H-17', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('executes A2H-07/11/14/15 trials, persists them, computes reports, and never double-enqueues or re-calls the model on resume', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => jsonResponse(200, { classification: 'ai', class_probabilities: { human: 0.05, ai: 0.9, mixed: 0.05 } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { firestore } = makeFirestore()
+    const projectId = await buildFrozenCorpus(firestore, { domains: ['general'], topicsPerDomain: 2, lengths: [100] })
+    const topics = await listTopics(firestore, projectId)
+    const sourceA = await getSource(firestore, projectId, topics[0]!.id, 100)
+    const sourceB = await getSource(firestore, projectId, topics[1]!.id, 100)
+
+    const fixtureSet = await createFixtureSet(firestore, { corpusProjectId: projectId, name: 'Claim Fixtures' })
+    await createFixture(firestore, {
+      fixtureSetId: fixtureSet.id, sourceId: sourceA!.id, type: 'claim_relationship',
+      expected: { category: 'causal', sourceText: 'irrelevant claim text never present in the stub output', relation: 'causes', approvedEquivalentForms: [], knownCorruptions: [] },
+    })
+    const { result: fixtureResult } = await lockFixtureSet(firestore, fixtureSet.id)
+    expect(fixtureResult.ok).toBe(true)
+
+    const run = await createRun(firestore, { corpusProjectId: projectId, name: 'Phase 4 Run', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await updateRunDraft(firestore, run.id, {
+      intensities: [5],
+      enabledTests: ['A2H-07', 'A2H-11', 'A2H-14', 'A2H-15', 'A2H-16'],
+      fixtureSetId: fixtureSet.id,
+      experimentConfig: {
+        repeatability: { repeatCount: 2, sourceSampleSize: null, intensities: [5] },
+        styleTone: { contrasts: [{ id: 'academic-vs-casual', label: 'Academic → Casual', left: { tone: 'academic' }, right: { tone: 'casual' }, expectedDirections: { contractionRate: 'higher_right' } }], sourceSampleSize: null },
+        genreAudience: { contrasts: [{ id: 'patient-vs-research', label: 'Patient → Research', domain: 'general', left: { genre: 'patient_instructions' }, right: { genre: 'research_paper' }, expectedDirections: { readability: 'higher_left' } }], sourceSampleSize: null },
+        candidateSelection: { intensities: [5], sourceSampleSize: null },
+      },
+    })
+
+    const { result } = await validateRun(firestore, run.id, { hasModelConfig: true, hasDetectorConfig: true })
+    expect(result.ok).toBe(true)
+
+    // Cohorts are frozen at validation time, before any job exists.
+    const cohortA2H07 = await getExperimentCohort(firestore, run.id, 'A2H-07')
+    const cohortA2H11 = await getExperimentCohort(firestore, run.id, 'A2H-11')
+    expect(cohortA2H07?.sourceIds).toHaveLength(2)
+    expect(cohortA2H11?.sourceIds).toHaveLength(2)
+    expect(cohortA2H07?.samplingSeed).toBeTruthy()
+
+    await startRun(firestore, run.id)
+    const client = humanizeStubClient()
+    await runToCompletion(firestore, run.id, client)
+
+    const finalRun = await getRun(firestore, run.id)
+    expect(finalRun?.status).toBe('completed')
+
+    const jobs = await listJobsForRun(firestore, run.id)
+    const trialJobs = jobs.filter(j => j.stage === 'experimental_trial')
+    // A2H-07: 2 sources x 1 intensity x 2 repeats = 4
+    // A2H-11: 2 sources x 1 contrast x 2 sides = 4
+    // A2H-14: 2 sources x 1 contrast x 2 sides = 4
+    // A2H-15: 2 sources x 1 intensity x 2 arms = 4
+    expect(trialJobs).toHaveLength(16)
+    expect(trialJobs.every(j => j.status === 'completed')).toBe(true)
+
+    const allTrials = await listTrialsForRun(firestore, run.id)
+    expect(allTrials).toHaveLength(16)
+    expect(allTrials.every(t => t.status === 'success')).toBe(true)
+
+    const a2h07Report = await getA2H07Report(firestore, run.id)
+    expect(a2h07Report.conditionsEvaluated).toBe(2)
+    expect(a2h07Report.repeatsPerCondition).toBe(2)
+    expect(a2h07Report.conditions.every(c => c.uniqueOutputCount >= 1)).toBe(true)
+
+    const a2h11Report = await getA2H11Report(firestore, run.id, (await getRun(firestore, run.id))!.experimentConfig!.styleTone!.contrasts)
+    expect(a2h11Report.pairs).toHaveLength(2)
+    expect(a2h11Report.contrasts[0]?.n).toBe(2)
+
+    const a2h14Report = await getA2H14Report(firestore, run.id, (await getRun(firestore, run.id))!.experimentConfig!.genreAudience!.contrasts)
+    expect(a2h14Report.pairs).toHaveLength(2)
+
+    const sourcesById = new Map([sourceA!, sourceB!].map(s => [s.id, s]))
+    const a2h15Report = await getA2H15Report(firestore, run.id, (await getRun(firestore, run.id))!, sourcesById)
+    expect(a2h15Report.pairs).toHaveLength(2)
+    expect(a2h15Report.overall.n).toBe(2)
+
+    // A2H-16 rides the ordinary output-scoped test_evaluation path — a
+    // claim_relationship fixture whose sourceText never appears in the
+    // stub's fixed rewrite classifies as 'uncertain', not fabricated as
+    // preserved or corrupted.
+    const a2h16Results = await listTestResultsForRun(firestore, run.id, 'A2H-16')
+    expect(a2h16Results).toHaveLength(2) // 2 sources x 1 intensity
+    const a2h16ForSourceA = a2h16Results.find(r => r.sourceId === sourceA!.id)
+    const measurementsA = a2h16ForSourceA?.measurements as { eligible: boolean; results: Array<{ status: string }> }
+    expect(measurementsA.eligible).toBe(true)
+    expect(measurementsA.results[0]?.status).toBe('uncertain')
+    const a2h16ForSourceB = a2h16Results.find(r => r.sourceId === sourceB!.id)
+    const measurementsB = a2h16ForSourceB?.measurements as { eligible: boolean }
+    expect(measurementsB.eligible).toBe(false) // sourceB has no claim_relationship fixture
+
+    const a2h17Report = await getA2H17Report(firestore, run.id)
+    expect(a2h17Report.byOperationType['trial_a2h07']?.n).toBe(4)
+    expect(a2h17Report.byOperationType['trial_a2h11']?.n).toBe(4)
+    expect(a2h17Report.byOperationType['trial_a2h14']?.n).toBe(4)
+    expect(a2h17Report.byOperationType['trial_a2h15']?.n).toBe(4)
+    expect(a2h17Report.byOperationType['humanite_transform']?.n).toBe(2)
+    expect(a2h17Report.overall.n).toBe(18)
+    expect(a2h17Report.overall.failures.count).toBe(0)
+
+    // Idempotency (§37, critical): re-running must not enqueue a single new
+    // job, duplicate a single trial, or make one more model call.
+    const callsBeforeResume = (client.chat.completions.create as ReturnType<typeof vi.fn>).mock.calls.length
+    const fetchCallsBeforeResume = fetchMock.mock.calls.length
+    const client2 = humanizeStubClient()
+    const rerunResult = await executeRunBatch(firestore, run.id, { ...EXECUTE_OPTIONS, client: client2 })
+    expect(rerunResult.processed).toBe(0)
+    expect(rerunResult.stage).toBe('idle')
+    expect((client2.chat.completions.create as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0)
+    expect((client.chat.completions.create as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsBeforeResume)
+    expect(fetchMock.mock.calls.length).toBe(fetchCallsBeforeResume)
+
+    const trialsAfterResume = await listTrialsForRun(firestore, run.id)
+    expect(trialsAfterResume).toHaveLength(16)
+    expect(trialsAfterResume.map(t => t.id).sort()).toEqual(allTrials.map(t => t.id).sort())
   })
 })

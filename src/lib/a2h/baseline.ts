@@ -37,6 +37,16 @@ async function runGPTZero(text: string, apiKey: string): Promise<Pick<DetectorRe
   }
 }
 
+// Exposed for the experimental-trial tests (A2H-07/A2H-15, Phase 4), which
+// score ad hoc trial text that has no corresponding DetectorResult row of its
+// own (a BenchmarkTrial isn't a BenchmarkOutput) — never persisted through
+// this module's own baseline/postScore collection, so callers persist the
+// probability/classification directly on their own BenchmarkTrial record.
+export async function scoreTextWithGPTZero(text: string, apiKey: string): Promise<{ aiProbability: number | null; humanProbability: number | null; classification: DetectorResult['classification'] }> {
+  const scored = await runGPTZero(text, apiKey)
+  return { aiProbability: scored.aiProbability, humanProbability: scored.humanProbability, classification: scored.classification }
+}
+
 export async function getBaseline(firestore: Firestore, sourceId: string, detectorConfigId: string): Promise<DetectorResult | null> {
   return getDetectorResult(firestore, baselineDocId(sourceId, detectorConfigId))
 }

@@ -1,23 +1,61 @@
 import type { Firestore } from 'firebase-admin/firestore'
 import {
   A2H_COLLECTIONS, IMPLEMENTED_A2H_TESTS, DEFAULT_ENABLED_TESTS, DEFAULT_TEST_VERSION, DEFAULT_DETECTOR_CONFIG_ID,
-  DEFAULT_REPAIR_CONFIG_VERSION, FIXTURE_TYPE_FOR_TEST, FIXTURE_REQUIRING_TESTS,
-  type BenchmarkRun, type BenchmarkRunSource, type A2HTestCode,
-  type BenchmarkJobStage, type BenchmarkJobStatus,
+  DEFAULT_REPAIR_CONFIG_VERSION, FIXTURE_TYPE_FOR_TEST, FIXTURE_REQUIRING_TESTS, EXPERIMENTAL_TRIAL_TEST_CODES,
+  type BenchmarkRun, type BenchmarkRunSource, type A2HTestCode, type BenchmarkExperimentConfig,
+  type BenchmarkJobStage, type BenchmarkJobStatus, type BenchmarkExperimentalTestCode,
 } from './types'
 import { getCorpusProject, getCorpusManifest } from './corpusProject'
 import { listTopics, getTopic } from './topics'
 import { getSource } from './corpus'
 import { getHumaniteVersion, getGitCommit } from './buildInfo'
-import { getOrCreateJob, listJobsForRun, cancelQueuedJobs, baselineJobId, repairEvaluationJobId } from './jobs'
+import { getOrCreateJob, listJobsForRun, cancelQueuedJobs, baselineJobId, repairEvaluationJobId, experimentalTrialJobId } from './jobs'
 import { getFixtureSet, listFixturesForSource, listFixturesForSet } from './fixtures'
 import { GRAMMAR_ENGINE_VERSION } from './grammarEngine'
+import { getOrCreateExperimentCohort, getExperimentCohort } from './experimentCohort'
+import { candidateCountForIntensity } from '@/lib/selection'
+import { generateA2H07Conditions } from './a2h07'
+import { generateA2H11Conditions, INITIAL_STYLE_TONE_CONTRASTS } from './a2h11'
+import { generateA2H14Conditions, INITIAL_GENRE_AUDIENCE_CONTRASTS } from './a2h14'
+import { generateA2H15Conditions } from './a2h15'
 
 // Tests whose enablement requires a locked fixture set AND makes a paid
 // targeted-repair model call per fixture (§22-26), rather than a pure local
 // computation — enqueued via their own repair_evaluation jobs in startRun,
 // never through the test_evaluation stage.
 const REPAIR_TEST_CODES: readonly A2HTestCode[] = ['A2H-06', 'A2H-12']
+
+// Fixture-backed tests that must have at least one fixture of their own type
+// before they can be enabled — a locked-but-empty set is not enough. Beyond
+// REPAIR_TEST_CODES, A2H-16 (Phase 4) shares this requirement (§38); the
+// other fixture-requiring tests (A2H-04/05/09/10/13) deliberately do NOT
+// (§27: coverage is reported, never enforced as complete for those).
+const FIXTURE_COVERAGE_REQUIRED_TESTS: readonly A2HTestCode[] = ['A2H-06', 'A2H-12', 'A2H-16']
+
+// Sensible, deliberately modest defaults (§42: "do not automatically enable
+// all expensive experimental tests" extends to their scale too) — an admin
+// who enables an experimental test without configuring it explicitly gets a
+// bounded, documented default rather than the full cohort at full repeat
+// count. Never mutates run.experimentConfig itself; only used to compute
+// what WOULD apply, for validation (§38) and the pre-start work estimate
+// (§39). validateRun snapshots the merged result once, permanently.
+export function effectiveExperimentConfig(run: BenchmarkRun): BenchmarkExperimentConfig {
+  const config = run.experimentConfig ?? {}
+  const result: BenchmarkExperimentConfig = { ...config }
+  if (run.enabledTests.includes('A2H-07') && !result.repeatability) {
+    result.repeatability = { repeatCount: 5, sourceSampleSize: 10, intensities: [3, 6, 9] }
+  }
+  if (run.enabledTests.includes('A2H-11') && !result.styleTone) {
+    result.styleTone = { contrasts: INITIAL_STYLE_TONE_CONTRASTS, sourceSampleSize: 10 }
+  }
+  if (run.enabledTests.includes('A2H-14') && !result.genreAudience) {
+    result.genreAudience = { contrasts: INITIAL_GENRE_AUDIENCE_CONTRASTS, sourceSampleSize: 10 }
+  }
+  if (run.enabledTests.includes('A2H-15') && !result.candidateSelection) {
+    result.candidateSelection = { intensities: [5, 8], sourceSampleSize: 10 }
+  }
+  return result
+}
 
 const COLLECTION = A2H_COLLECTIONS.runs
 const COHORT_COLLECTION = A2H_COLLECTIONS.runSources
@@ -74,6 +112,7 @@ export async function createRun(firestore: Firestore, params: CreateRunParams): 
     fixtureVersion: null,
     repairConfigVersion: DEFAULT_REPAIR_CONFIG_VERSION,
     grammarEngineConfigVersion: GRAMMAR_ENGINE_VERSION,
+    experimentConfig: null,
     concurrency: params.concurrency && params.concurrency > 0 ? Math.floor(params.concurrency) : 3,
     status: 'draft',
     createdAt: now,
@@ -97,7 +136,7 @@ export async function listRunsForProject(firestore: Firestore, corpusProjectId: 
 }
 
 export type RunDraftPatch = Partial<
-  Pick<BenchmarkRun, 'name' | 'selectedDomains' | 'selectedTopicIds' | 'selectedLengths' | 'intensities' | 'enabledTests' | 'concurrency' | 'modelProvider' | 'model' | 'detectorConfigId' | 'fixtureSetId'>
+  Pick<BenchmarkRun, 'name' | 'selectedDomains' | 'selectedTopicIds' | 'selectedLengths' | 'intensities' | 'enabledTests' | 'concurrency' | 'modelProvider' | 'model' | 'detectorConfigId' | 'fixtureSetId' | 'experimentConfig'>
 >
 
 // Shape-level validation only (types, ranges, no duplicates) — full
@@ -151,6 +190,11 @@ export async function updateRunDraft(firestore: Firestore, runId: string, patch:
   // fixture set actually belongs to this project and is locked is checked
   // in checkRunValidity/validateRun, not here.
   if (patch.fixtureSetId !== undefined) next.fixtureSetId = patch.fixtureSetId?.trim() || null
+  // An explicit admin override of the experimental-test configuration
+  // (repeat count, sample size, contrasts, intensities) — shape-level only,
+  // matching the rest of this function; §38's substantive checks
+  // (repeatCount >= 2, at least one contrast, ...) run in checkRunValidity.
+  if (patch.experimentConfig !== undefined) next.experimentConfig = patch.experimentConfig
 
   next.updatedAt = new Date().toISOString()
   await firestore.collection(COLLECTION).doc(runId).set(next)
@@ -233,12 +277,37 @@ export async function checkRunValidity(
     errors.push('A2H-02 (Intensity Response) requires at least 2 selected intensities.')
   }
 
-  const needsDetector = run.enabledTests.some(t => t === 'A2H-01' || t === 'A2H-02' || t === 'A2H-03')
+  // A2H-07/A2H-15 also call GPTZero directly on each trial (§38).
+  const needsDetector = run.enabledTests.some(t => t === 'A2H-01' || t === 'A2H-02' || t === 'A2H-03' || t === 'A2H-07' || t === 'A2H-15')
   if (needsDetector && !options.hasDetectorConfig) {
-    errors.push('GPTZero is not configured — required by the enabled A2H-01/02/03 tests.')
+    errors.push('GPTZero is not configured — required by the enabled A2H-01/02/03/07/15 tests.')
   }
   if (!options.hasModelConfig) {
     errors.push('A Humanite model/provider is not configured.')
+  }
+
+  // §38: per-experimental-test preconditions. Config sections are optional
+  // on the run (defaults apply — see effectiveExperimentConfig) so these
+  // checks validate whatever WOULD be in effect, not only an admin's
+  // explicit override.
+  const effectiveConfig = effectiveExperimentConfig(run)
+  if (run.enabledTests.includes('A2H-07')) {
+    const repeatCount = effectiveConfig.repeatability?.repeatCount ?? 0
+    if (repeatCount < 2) errors.push('A2H-07 (Repeatability) requires repeatCount >= 2.')
+  }
+  if (run.enabledTests.includes('A2H-11')) {
+    const contrasts = effectiveConfig.styleTone?.contrasts ?? []
+    if (contrasts.length === 0) errors.push('A2H-11 (Style/Tone Control) requires at least one tone contrast.')
+  }
+  if (run.enabledTests.includes('A2H-14')) {
+    const contrasts = effectiveConfig.genreAudience?.contrasts ?? []
+    if (contrasts.length === 0) errors.push('A2H-14 (Genre/Audience Control) requires at least one genre/audience contrast.')
+  }
+  if (run.enabledTests.includes('A2H-15')) {
+    const intensities = effectiveConfig.candidateSelection?.intensities ?? []
+    if (!intensities.some(i => candidateCountForIntensity(i) > 1)) {
+      errors.push('A2H-15 (Candidate Selection Effectiveness) requires at least one configured intensity that actually invokes candidate search (intensity >= 4).')
+    }
   }
 
   // §4/§27: any of A2H-04/05/09/10/13 requires a fixture set that belongs to
@@ -256,15 +325,16 @@ export async function checkRunValidity(
         if (fixtureSet.corpusProjectId !== run.corpusProjectId) errors.push('The selected fixture set does not belong to this corpus project.')
         if (fixtureSet.status !== 'locked') errors.push(`The selected fixture set is ${fixtureSet.status}, not locked.`)
 
-        // §27: A2H-06/A2H-12 additionally require at least one fixture of
-        // their own type to exist in the set — a locked-but-empty set is
-        // not enough. A2H-08 is deliberately exempt (§27: "do not require
-        // fixture coverage for A2H-08").
+        // §27/§38: A2H-06/A2H-12/A2H-16 additionally require at least one
+        // fixture of their own type to exist in the set — a locked-but-empty
+        // set is not enough. A2H-08 is deliberately exempt (§27: "do not
+        // require fixture coverage for A2H-08"), as are A2H-04/05/09/10/13
+        // (coverage is reported, never enforced as complete, for those).
         if (fixtureSet.status === 'locked' && fixtureSet.corpusProjectId === run.corpusProjectId) {
-          const enabledRepairTests = run.enabledTests.filter(t => REPAIR_TEST_CODES.includes(t))
-          if (enabledRepairTests.length > 0) {
+          const coverageRequiredTests = run.enabledTests.filter(t => FIXTURE_COVERAGE_REQUIRED_TESTS.includes(t))
+          if (coverageRequiredTests.length > 0) {
             const allFixtures = await listFixturesForSet(firestore, run.fixtureSetId)
-            for (const code of enabledRepairTests) {
+            for (const code of coverageRequiredTests) {
               const fixtureType = FIXTURE_TYPE_FOR_TEST[code]!
               if (!allFixtures.some(f => f.type === fixtureType)) {
                 errors.push(`${code} is enabled but the fixture set has zero ${fixtureType} fixtures.`)
@@ -337,9 +407,29 @@ export async function validateRun(
   // fixtureSetId is set and locked whenever it's required.
   const fixtureVersion = run.fixtureSetId ? (await getFixtureSet(firestore, run.fixtureSetId))!.fixtureVersion : null
 
+  // Snapshot the effective experimental-test configuration too (§2) — an
+  // admin's explicit override is preserved as-is; any experimental test
+  // enabled WITHOUT one gets the same bounded defaults checkRunValidity just
+  // validated against, permanently, so this run's config never silently
+  // drifts if the built-in defaults change later.
+  const experimentConfig = effectiveExperimentConfig(run)
+
   const now = new Date().toISOString()
-  const updated: BenchmarkRun = { ...run, status: 'validated', fixtureVersion, validatedAt: now, updatedAt: now }
+  const updated: BenchmarkRun = { ...run, status: 'validated', fixtureVersion, experimentConfig, validatedAt: now, updatedAt: now }
   await firestore.collection(COLLECTION).doc(runId).set(updated)
+
+  // Freeze each enabled experimental test's own stratified cohort (§41) —
+  // write-once, from the SAME just-frozen BenchmarkRunSource rows every
+  // other test's cohort is scoped to, never resampled on a later call.
+  const cohortRows = await listRunSources(firestore, runId)
+  await Promise.all(EXPERIMENTAL_TRIAL_TEST_CODES.filter(code => run.enabledTests.includes(code)).map(code => {
+    const sampleSize = code === 'A2H-07' ? experimentConfig.repeatability?.sourceSampleSize ?? null
+      : code === 'A2H-11' ? experimentConfig.styleTone?.sourceSampleSize ?? null
+        : code === 'A2H-14' ? experimentConfig.genreAudience?.sourceSampleSize ?? null
+          : experimentConfig.candidateSelection?.sourceSampleSize ?? null
+    return getOrCreateExperimentCohort(firestore, runId, code, cohortRows, sampleSize)
+  }))
+
   return { run: updated, result }
 }
 
@@ -433,6 +523,53 @@ export async function startRun(firestore: Firestore, runId: string): Promise<Ben
     }))
   }
 
+  // A2H-07/11/14/15 (Phase 4, §36): enqueue independently of the baseline/
+  // transform/post-score pipeline, against each test's own frozen
+  // experimental cohort (never the full main cohort) — one experimental_trial
+  // job per condition/repeat that test's own generator function defines.
+  await Promise.all(EXPERIMENTAL_TRIAL_TEST_CODES.filter(code => run.enabledTests.includes(code)).map(async code => {
+    const experimentCohort = await getExperimentCohort(firestore, runId, code)
+    if (!experimentCohort) return
+    const config = run.experimentConfig
+    const jobs: Promise<unknown>[] = []
+
+    if (code === 'A2H-07' && config?.repeatability) {
+      const { repeatCount, intensities } = config.repeatability
+      for (const c of generateA2H07Conditions(experimentCohort.sourceIds, intensities, repeatCount, run.model, run.humaniteVersion)) {
+        jobs.push(getOrCreateJob(firestore, {
+          id: experimentalTrialJobId(runId, code, c.sourceId, c.conditionId, c.trialIndex),
+          runId, corpusProjectId: run.corpusProjectId, stage: 'experimental_trial',
+          sourceId: c.sourceId, benchmarkCode: code, conditionId: c.conditionId, trialIndex: c.trialIndex, intensity: c.intensity,
+        }))
+      }
+    } else if (code === 'A2H-11' && config?.styleTone) {
+      for (const c of generateA2H11Conditions(experimentCohort.sourceIds, config.styleTone.contrasts)) {
+        jobs.push(getOrCreateJob(firestore, {
+          id: experimentalTrialJobId(runId, code, c.sourceId, c.conditionId, 0),
+          runId, corpusProjectId: run.corpusProjectId, stage: 'experimental_trial',
+          sourceId: c.sourceId, benchmarkCode: code, conditionId: c.conditionId, trialIndex: 0,
+        }))
+      }
+    } else if (code === 'A2H-14' && config?.genreAudience) {
+      for (const c of generateA2H14Conditions(experimentCohort.sourceIds, config.genreAudience.contrasts)) {
+        jobs.push(getOrCreateJob(firestore, {
+          id: experimentalTrialJobId(runId, code, c.sourceId, c.conditionId, 0),
+          runId, corpusProjectId: run.corpusProjectId, stage: 'experimental_trial',
+          sourceId: c.sourceId, benchmarkCode: code, conditionId: c.conditionId, trialIndex: 0,
+        }))
+      }
+    } else if (code === 'A2H-15' && config?.candidateSelection) {
+      for (const c of generateA2H15Conditions(experimentCohort.sourceIds, config.candidateSelection.intensities)) {
+        jobs.push(getOrCreateJob(firestore, {
+          id: experimentalTrialJobId(runId, code, c.sourceId, c.conditionId, 0),
+          runId, corpusProjectId: run.corpusProjectId, stage: 'experimental_trial',
+          sourceId: c.sourceId, benchmarkCode: code, conditionId: c.conditionId, trialIndex: 0, intensity: c.intensity,
+        }))
+      }
+    }
+    await Promise.all(jobs)
+  }))
+
   const now = new Date().toISOString()
   const updated: BenchmarkRun = { ...run, status: 'running', startedAt: run.startedAt ?? now, updatedAt: now }
   await firestore.collection(COLLECTION).doc(runId).set(updated)
@@ -512,6 +649,11 @@ export interface RunProgress {
   // is the fixture count for that test, not sources x intensities.
   repairJobsTotal: Partial<Record<A2HTestCode, number>>
   repairJobsCompleted: Partial<Record<A2HTestCode, number>>
+  // A2H-07/11/14/15 (Phase 4) experimental_trial job counts — kept separate
+  // from repairJobsTotal/Completed since these are a different job stage
+  // with a different (condition/repeat-based, not fixture-based) total.
+  trialJobsTotal: Partial<Record<A2HTestCode, number>>
+  trialJobsCompleted: Partial<Record<A2HTestCode, number>>
   failedJobs: number
   queuedJobs: number
 }
@@ -547,6 +689,14 @@ export async function getRunProgress(firestore: Firestore, runId: string): Promi
     repairJobsCompleted[code] = repairJobsForCode.filter(j => j.status === 'completed').length
   }
 
+  const trialJobsTotal: Partial<Record<A2HTestCode, number>> = {}
+  const trialJobsCompleted: Partial<Record<A2HTestCode, number>> = {}
+  for (const code of run.enabledTests.filter(t => EXPERIMENTAL_TRIAL_TEST_CODES.includes(t))) {
+    const trialJobsForCode = jobs.filter(j => j.stage === 'experimental_trial' && j.benchmarkCode === code)
+    trialJobsTotal[code] = trialJobsForCode.length
+    trialJobsCompleted[code] = trialJobsForCode.filter(j => j.status === 'completed').length
+  }
+
   return {
     sources: sourcesCount,
     baselinesTotal: sourcesCount,
@@ -561,7 +711,82 @@ export async function getRunProgress(firestore: Firestore, runId: string): Promi
     deterministicResultsCompleted,
     repairJobsTotal,
     repairJobsCompleted,
+    trialJobsTotal,
+    trialJobsCompleted,
     failedJobs: jobs.filter(j => j.status === 'failed').length,
     queuedJobs: jobs.filter(j => j.status === 'queued' || j.status === 'retrying').length,
   }
+}
+
+// ── Pre-start work estimate (§39) ─────────────────────────────────────────
+//
+// Callable once a run is validated (main + experimental cohorts are already
+// frozen at that point) — never before, and never re-derived from mutable
+// UI defaults once the run starts, matching every other reproducibility-
+// affecting computation in this module.
+export interface RunWorkEstimate {
+  normalTransformations: number
+  repairAttempts: number
+  repeatabilityTrials: number
+  styleToneTrials: number
+  genreAudienceTrials: number
+  candidateSelectionTrials: number
+  estimatedTotalModelOperations: number
+}
+
+export async function estimateRunWork(firestore: Firestore, run: BenchmarkRun): Promise<RunWorkEstimate> {
+  const cohort = await listRunSources(firestore, run.id)
+  const normalTransformations = cohort.length * run.intensities.length
+
+  let repairAttempts = 0
+  const enabledRepairTests = run.enabledTests.filter(t => REPAIR_TEST_CODES.includes(t))
+  if (enabledRepairTests.length > 0 && run.fixtureSetId) {
+    const allFixtures = await listFixturesForSet(firestore, run.fixtureSetId)
+    for (const code of enabledRepairTests) {
+      const fixtureType = FIXTURE_TYPE_FOR_TEST[code]!
+      repairAttempts += allFixtures.filter(f => f.type === fixtureType).length
+    }
+  }
+
+  const config = effectiveExperimentConfig(run)
+  let repeatabilityTrials = 0
+  let styleToneTrials = 0
+  let genreAudienceTrials = 0
+  let candidateSelectionTrials = 0
+
+  if (run.enabledTests.includes('A2H-07') && config.repeatability) {
+    const experimentCohort = await getExperimentCohort(firestore, run.id, 'A2H-07')
+    const n = experimentCohort?.sourceIds.length ?? 0
+    repeatabilityTrials = n * config.repeatability.intensities.length * config.repeatability.repeatCount
+  }
+  if (run.enabledTests.includes('A2H-11') && config.styleTone) {
+    const experimentCohort = await getExperimentCohort(firestore, run.id, 'A2H-11')
+    const n = experimentCohort?.sourceIds.length ?? 0
+    styleToneTrials = n * config.styleTone.contrasts.length * 2
+  }
+  if (run.enabledTests.includes('A2H-14') && config.genreAudience) {
+    const experimentCohort = await getExperimentCohort(firestore, run.id, 'A2H-14')
+    const n = experimentCohort?.sourceIds.length ?? 0
+    genreAudienceTrials = n * config.genreAudience.contrasts.length * 2
+  }
+  if (run.enabledTests.includes('A2H-15') && config.candidateSelection) {
+    const experimentCohort = await getExperimentCohort(firestore, run.id, 'A2H-15')
+    const n = experimentCohort?.sourceIds.length ?? 0
+    const eligibleIntensities = config.candidateSelection.intensities.filter(i => candidateCountForIntensity(i) > 1)
+    candidateSelectionTrials = n * eligibleIntensities.length * 2
+  }
+
+  const humaniteOperations = normalTransformations + repairAttempts + repeatabilityTrials + styleToneTrials + genreAudienceTrials + candidateSelectionTrials
+  // GPTZero calls: one baseline + one post-transform per normal
+  // transformation, plus one per A2H-07/A2H-15 trial (the only trial-based
+  // tests that call the detector) — folded into one total operation count
+  // rather than tracked as a separate axis, since §39 only asks for "an
+  // estimated total model operations" figure alongside the per-category
+  // breakdown above.
+  const gptZeroCalls = run.enabledTests.some(t => t === 'A2H-01' || t === 'A2H-02' || t === 'A2H-03') ? cohort.length + normalTransformations : 0
+  const estimatedTotalModelOperations = humaniteOperations + gptZeroCalls
+    + (run.enabledTests.includes('A2H-07') ? repeatabilityTrials : 0)
+    + (run.enabledTests.includes('A2H-15') ? candidateSelectionTrials : 0)
+
+  return { normalTransformations, repairAttempts, repeatabilityTrials, styleToneTrials, genreAudienceTrials, candidateSelectionTrials, estimatedTotalModelOperations }
 }

@@ -4,7 +4,7 @@ import { isAuthFailure } from '@/lib/require-auth'
 import { db } from '@/lib/firestore'
 import { getUserApiConfig } from '@/lib/userApiConfig'
 import { resolveProvider } from '@/lib/providerResolution'
-import { validateRun, computeFixtureEligibility } from '@/lib/a2h/runs'
+import { validateRun, computeFixtureEligibility, estimateRunWork } from '@/lib/a2h/runs'
 
 // Runs the full §24 precondition checklist and, only on success, freezes
 // the selected source cohort into BenchmarkRunSource rows. Always returns
@@ -25,7 +25,12 @@ export async function POST(req: NextRequest, { params }: { params: { runId: stri
     // once validation has snapshotted the cohort, so this is empty on a
     // failed validation.
     const eligibility = result.ok ? await computeFixtureEligibility(db(), run) : {}
-    return NextResponse.json({ run, result, eligibility })
+    // §39: the full paid-work estimate (normal transformations, repair
+    // attempts, every experimental test's trial count) — likewise only
+    // meaningful once the main and experimental cohorts are frozen, which
+    // only happens on a successful validation.
+    const workEstimate = result.ok ? await estimateRunWork(db(), run) : null
+    return NextResponse.json({ run, result, eligibility, workEstimate })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Validation failed.'
     const notFound = message === 'Benchmark run not found.'

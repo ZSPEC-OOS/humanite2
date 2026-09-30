@@ -214,6 +214,16 @@ export interface ChunkResult {
   modelUsed: string
   gate: QualityScores | null
   gatesUnavailable: boolean
+  // Telemetry for the A2H benchmark's operational-efficiency measurements
+  // (A2H-15/A2H-17). Known partial-measurement gap, documented rather than
+  // fabricated: counts only the PRIMARY generation-phase completions below
+  // (generateCandidates / the single-candidate retry loop) — internal gate,
+  // judge, targeted-repair, and claim-verification calls each live in their
+  // own modules and are not yet instrumented, so a chunk's true total paid
+  // call count is somewhat higher than modelCalls reports.
+  modelCalls: number
+  inputTokens: number | null
+  outputTokens: number | null
   // True when the shipped attempt's completion was cut off by the token
   // budget (finish_reason 'length') rather than ending naturally — the gate
   // on that attempt is forced to passed:false regardless of what it scored,
@@ -253,6 +263,25 @@ interface CandidateAttempt {
   truncated: boolean
 }
 
+// Sums whatever usage a provider actually returned across several
+// completions — some providers omit `usage` entirely. Returns null for a
+// field only when NONE of the completions reported it, rather than treating
+// a missing field as 0 and silently under-reporting a partial sum.
+function sumUsage(completions: Array<{ usage?: { prompt_tokens?: number; completion_tokens?: number } | null }>): { inputTokens: number | null; outputTokens: number | null } {
+  const withInput = completions.filter(c => typeof c.usage?.prompt_tokens === 'number')
+  const withOutput = completions.filter(c => typeof c.usage?.completion_tokens === 'number')
+  return {
+    inputTokens: withInput.length === 0 ? null : withInput.reduce((sum, c) => sum + c.usage!.prompt_tokens!, 0),
+    outputTokens: withOutput.length === 0 ? null : withOutput.reduce((sum, c) => sum + c.usage!.completion_tokens!, 0),
+  }
+}
+
+interface GeneratedCandidates {
+  attempts: CandidateAttempt[]
+  inputTokens: number | null
+  outputTokens: number | null
+}
+
 async function generateCandidates(
   client: OpenAI,
   model: string,
@@ -261,7 +290,7 @@ async function generateCandidates(
   intensity: number,
   userPrompt: string,
   count: number,
-): Promise<CandidateAttempt[]> {
+): Promise<GeneratedCandidates> {
   const maxTokens = resolveMaxTokens(client, intensity)
   const completions = await Promise.all(
     Array.from({ length: count }, () => client.chat.completions.create({
@@ -274,13 +303,14 @@ async function generateCandidates(
       temperature: 0.7,
     })),
   )
-  return completions.map(completion => {
+  const attempts = completions.map(completion => {
     const choice = completion.choices[0]
     const rewritten = choice?.message?.content?.trim() ?? fallbackText
     const truncated = choice?.finish_reason === 'length'
     const post = intensity >= 4 ? postprocess(rewritten, factLocks) : { text: rewritten, substitutions: 0 }
     return { text: post.text, substitutions: post.substitutions, modelUsed: completion.model, truncated }
   })
+  return { attempts, ...sumUsage(completions) }
 }
 
 interface SelectionOutcome {
@@ -288,6 +318,9 @@ interface SelectionOutcome {
   lastAttempt: CandidateAttempt
   gatesUnavailable: boolean
   candidateSelection: CandidateSelectionSummary
+  modelCalls: number
+  inputTokens: number | null
+  outputTokens: number | null
 }
 
 type CandidateWithEntity = CandidateAttempt & { entity: ReturnType<typeof checkEntityOverlap> }
@@ -309,6 +342,7 @@ async function fallbackToScoredCandidate(
   disqualifiedAt: CandidateDisqualificationStage,
   lastAttempt: CandidateAttempt,
   originalCandidateCount: number,
+  generationUsage: { inputTokens: number | null; outputTokens: number | null },
 ): Promise<SelectionOutcome> {
   const chosen = candidates.reduce((a, b) => (b.entity.score > a.entity.score ? b : a))
   console.warn(`Candidate selection: every candidate was disqualified at the ${disqualifiedAt} stage — shipping the least-bad one for repair to work on`, {
@@ -323,12 +357,14 @@ async function fallbackToScoredCandidate(
       lastAttempt,
       gatesUnavailable: false,
       candidateSelection,
+      modelCalls: originalCandidateCount,
+      ...generationUsage,
     }
   } catch (err) {
     console.warn('Quality gates unavailable for the fallback candidate, shipping unscored output', {
       type: err instanceof Error ? err.constructor.name : typeof err,
     })
-    return { best: null, lastAttempt: chosen, gatesUnavailable: true, candidateSelection }
+    return { best: null, lastAttempt: chosen, gatesUnavailable: true, candidateSelection, modelCalls: originalCandidateCount, ...generationUsage }
   }
 }
 
@@ -362,7 +398,9 @@ async function selectBestCandidate(
     : { operations: [] }
 
   const userPrompt = buildUserPrompt(sanitizedText, factLocks, intensity, tone, domain, plan, genre, audience, documentContext)
-  const candidates = await generateCandidates(client, model, fallbackText, factLocks, intensity, userPrompt, candidateCount)
+  const generated = await generateCandidates(client, model, fallbackText, factLocks, intensity, userPrompt, candidateCount)
+  const candidates = generated.attempts
+  const generationUsage = { inputTokens: generated.inputTokens, outputTokens: generated.outputTokens }
   const lastAttempt = candidates[0]!
 
   // Stage 1: deterministic fidelity (free) — entity_preservation and the
@@ -373,7 +411,7 @@ async function selectBestCandidate(
     !c.truncated && c.entity.score >= DEFAULT_THRESHOLDS.entityOverlap && validateFactLedger(sanitizedText, c.text).passed,
   )
   if (stage1Survivors.length === 0) {
-    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage1, 'entity_preservation', lastAttempt, candidateCount)
+    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage1, 'entity_preservation', lastAttempt, candidateCount, generationUsage)
   }
 
   // Phase 9: gates choose infrastructure by capability — resolved once for
@@ -408,7 +446,7 @@ async function selectBestCandidate(
     ? stage1Survivors.filter(c => similarityByCandidate.get(c)! >= DEFAULT_THRESHOLDS.semanticSimilarity)
     : stage1Survivors
   if (stage2Survivors.length === 0) {
-    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage1Survivors, 'semantic_similarity', lastAttempt, candidateCount)
+    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage1Survivors, 'semantic_similarity', lastAttempt, candidateCount, generationUsage)
   }
 
   // Stage 3: the combined structured judge call — survivors only, and
@@ -432,9 +470,13 @@ async function selectBestCandidate(
       // The judge is unavailable entirely, not merely failing individual
       // candidates on entailment — matches the single-candidate path's own
       // gatesUnavailable convention rather than silently shipping unjudged.
-      return { best: null, lastAttempt, gatesUnavailable: true, candidateSelection: { ranCandidateSearch: true, candidateCount, disqualifiedAt: null } }
+      return {
+        best: null, lastAttempt, gatesUnavailable: true,
+        candidateSelection: { ranCandidateSearch: true, candidateCount, disqualifiedAt: null },
+        modelCalls: candidateCount, ...generationUsage,
+      }
     }
-    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage2Survivors, 'entailment', lastAttempt, candidateCount)
+    return fallbackToScoredCandidate(client, judgeModel, sanitizedText, factLocks, tone, domain, stage2Survivors, 'entailment', lastAttempt, candidateCount, generationUsage)
   }
 
   // Rank survivors by the plan's weighted formula
@@ -483,6 +525,8 @@ async function selectBestCandidate(
     lastAttempt,
     gatesUnavailable: false,
     candidateSelection: { ranCandidateSearch: true, candidateCount, disqualifiedAt: null },
+    modelCalls: candidateCount,
+    ...generationUsage,
   }
 }
 
@@ -491,6 +535,9 @@ interface RetryLoopOutcome {
   lastAttempt: { text: string; substitutions: number; modelUsed: string; truncated: boolean }
   retryCount: number
   gatesUnavailable: boolean
+  modelCalls: number
+  inputTokens: number | null
+  outputTokens: number | null
 }
 
 // The original single-candidate generate → postprocess → gate-check →
@@ -530,6 +577,9 @@ async function runSingleCandidateRetryLoop(
     modelUsed: model,
     truncated: false,
   }
+  let modelCalls = 0
+  let inputTokens: number | null = null
+  let outputTokens: number | null = null
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const completion = await client.chat.completions.create({
@@ -541,6 +591,9 @@ async function runSingleCandidateRetryLoop(
       max_tokens: currentMaxTokens,
       temperature: 0.7,
     })
+    modelCalls++
+    if (typeof completion.usage?.prompt_tokens === 'number') inputTokens = (inputTokens ?? 0) + completion.usage.prompt_tokens
+    if (typeof completion.usage?.completion_tokens === 'number') outputTokens = (outputTokens ?? 0) + completion.usage.completion_tokens
 
     const choice = completion.choices[0]
     const rewritten = choice?.message?.content?.trim() ?? fallbackText
@@ -580,7 +633,7 @@ async function runSingleCandidateRetryLoop(
     if (truncated) currentMaxTokens = boostedMaxTokens(client, currentMaxTokens)
   }
 
-  return { best, lastAttempt, retryCount, gatesUnavailable }
+  return { best, lastAttempt, retryCount, gatesUnavailable, modelCalls, inputTokens, outputTokens }
 }
 
 // Runs the generate → postprocess → gate-check → (retry on failure) loop for
@@ -604,19 +657,28 @@ export async function humanizeChunk(
   genre?: string | null,
   audience?: string | null,
   documentContext?: DocumentContext | null,
+  // Benchmark-only override: forces single-candidate mode (1) regardless of
+  // candidateCountForIntensity(intensity), so A2H-15 can generate a genuine
+  // single-candidate baseline arm at an intensity that would otherwise engage
+  // candidate search. Omitted (every production caller and pre-Phase-4 test)
+  // preserves the normal intensity-driven candidate count exactly.
+  candidateCountOverride?: number | null,
 ): Promise<ChunkResult> {
   // The judge (entailment/fidelity check) runs on a separately configured
   // model when available, falling back to the generator itself only when no
   // JUDGE_MODEL is set — a model judging its own output is a documented
   // self-preference bias (ref. 7 in the improvement plan).
   const judgeModel = process.env.JUDGE_MODEL || model
-  const candidateCount = candidateCountForIntensity(intensity)
+  const candidateCount = candidateCountOverride ?? candidateCountForIntensity(intensity)
 
   let best: { text: string; substitutions: number; modelUsed: string; gate: QualityScores; truncated: boolean } | null
   let lastAttempt: { text: string; substitutions: number; modelUsed: string; truncated: boolean }
   let retryCount = 0
   let gatesUnavailable = false
   let candidateSelection: CandidateSelectionSummary
+  let modelCalls: number
+  let inputTokens: number | null
+  let outputTokens: number | null
 
   if (candidateCount > 1) {
     // Phase 8: generate several independent candidates and select the best
@@ -627,6 +689,9 @@ export async function humanizeChunk(
     lastAttempt = selection.lastAttempt
     gatesUnavailable = selection.gatesUnavailable
     candidateSelection = selection.candidateSelection
+    modelCalls = selection.modelCalls
+    inputTokens = selection.inputTokens
+    outputTokens = selection.outputTokens
   } else {
     const retryLoop = await runSingleCandidateRetryLoop(
       client, model, judgeModel, fallbackText, sanitizedText, factLocks, intensity, tone, domain, maxRetries, genre, audience, documentContext,
@@ -636,6 +701,9 @@ export async function humanizeChunk(
     retryCount = retryLoop.retryCount
     gatesUnavailable = retryLoop.gatesUnavailable
     candidateSelection = { ranCandidateSearch: false, candidateCount: 1, disqualifiedAt: null }
+    modelCalls = retryLoop.modelCalls
+    inputTokens = retryLoop.inputTokens
+    outputTokens = retryLoop.outputTokens
   }
 
   if (gatesUnavailable) {
@@ -653,6 +721,9 @@ export async function humanizeChunk(
       claimVerification: null,
       relationRepair: { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 },
       candidateSelection,
+      modelCalls,
+      inputTokens,
+      outputTokens,
     }
   }
 
@@ -773,6 +844,9 @@ export async function humanizeChunk(
     intensityAlignment,
     repair,
     candidateSelection,
+    modelCalls,
+    inputTokens,
+    outputTokens,
   }
 }
 
@@ -868,6 +942,12 @@ export interface AggregatedQuality {
     disqualified_by_stage: Partial<Record<Exclude<CandidateDisqualificationStage, null>, number>>
     total_candidates_generated: number
   }
+  // Document-level sum of each chunk's own modelCalls/inputTokens/outputTokens
+  // — see ChunkResult's own comment for the documented partial-measurement
+  // scope (primary generation calls only).
+  model_calls: number
+  input_tokens: number | null
+  output_tokens: number | null
 }
 
 // Sums each category's total/preserved counts and concatenates its missing
@@ -942,6 +1022,12 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
     total_candidates_generated: results.reduce((sum, r) => sum + r.candidateSelection.candidateCount, 0),
   }
 
+  const modelCallsTotal = results.reduce((sum, r) => sum + r.modelCalls, 0)
+  const inputTokensValues = results.map(r => r.inputTokens).filter((v): v is number => v != null)
+  const outputTokensValues = results.map(r => r.outputTokens).filter((v): v is number => v != null)
+  const inputTokensTotal = inputTokensValues.length === 0 ? null : inputTokensValues.reduce((sum, v) => sum + v, 0)
+  const outputTokensTotal = outputTokensValues.length === 0 ? null : outputTokensValues.reduce((sum, v) => sum + v, 0)
+
   if (scored.length === 0) {
     return {
       semantic_similarity: null,
@@ -967,6 +1053,9 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
       claim_issues: claimIssues,
       relation_repair: relationRepair,
       candidate_selection: candidateSelection,
+      model_calls: modelCallsTotal,
+      input_tokens: inputTokensTotal,
+      output_tokens: outputTokensTotal,
     }
   }
 
@@ -1013,6 +1102,9 @@ export function aggregateChunkResults(results: ChunkResult[]): AggregatedQuality
     claim_issues: claimIssues,
     relation_repair: relationRepair,
     candidate_selection: candidateSelection,
+    model_calls: modelCallsTotal,
+    input_tokens: inputTokensTotal,
+    output_tokens: outputTokensTotal,
   }
 }
 

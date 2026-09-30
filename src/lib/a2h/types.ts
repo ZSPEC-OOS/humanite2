@@ -1,4 +1,4 @@
-import type { Domain } from '@/lib/style/types'
+import type { Domain, Genre, Audience } from '@/lib/style/types'
 import type { DetectionClassification } from '@/lib/detection/contracts'
 
 // The seed value shown when configuring a new project's length ladder — see
@@ -51,6 +51,8 @@ export const A2H_COLLECTIONS = {
   fixtureSets: 'a2hFixtureSets',
   fixtures: 'a2hBenchmarkFixtures',
   repairAttempts: 'a2hBenchmarkRepairAttempts',
+  trials: 'a2hBenchmarkTrials',
+  experimentCohorts: 'a2hBenchmarkExperimentCohorts',
 } as const
 
 // This deployment has exactly one detector integration path for A2H
@@ -230,14 +232,13 @@ export type A2HTestCode =
   | 'A2H-01' | 'A2H-02' | 'A2H-03' | 'A2H-04' | 'A2H-05' | 'A2H-06' | 'A2H-07' | 'A2H-08' | 'A2H-09'
   | 'A2H-10' | 'A2H-11' | 'A2H-12' | 'A2H-13' | 'A2H-14' | 'A2H-15' | 'A2H-16' | 'A2H-17'
 
-// Phase 2 adds the first fixture-backed deterministic tests (A2H-04/05/09/10/13)
-// on top of Phase 1's detector-based A2H-01/02/03. A2H-06/07/08/11/12/14-17
-// remain unimplemented — the type carries every code now so the generic
-// BenchmarkTestResult/BenchmarkJob/DeterministicEvaluator architecture never
-// needs another schema migration as later phases fill them in.
+// Phase 4 completes the suite — every one of the 17 defined codes is now
+// implemented. Provider Compatibility was intentionally scoped out of the
+// A2H-01..17 suite and must never be reintroduced as an 18th code.
 export const IMPLEMENTED_A2H_TESTS: readonly A2HTestCode[] = [
   'A2H-01', 'A2H-02', 'A2H-03', 'A2H-04', 'A2H-05', 'A2H-09', 'A2H-10', 'A2H-13',
   'A2H-06', 'A2H-08', 'A2H-12',
+  'A2H-07', 'A2H-11', 'A2H-14', 'A2H-15', 'A2H-16', 'A2H-17',
 ]
 
 // A new run defaults to the detector-based tests only (§4's "almost no
@@ -270,6 +271,30 @@ export const A2H_TEST_LABELS: Record<A2HTestCode, string> = {
 
 export const DEFAULT_TEST_VERSION = 'A2H-TV001'
 
+// Declarative per-test dependency metadata (§43) — see A2HTestDefinition
+// above. Hand-authored rather than derived from FIXTURE_REQUIRING_TESTS/etc.
+// (which are defined from the fixture-type mapping above, before this point)
+// so this table reads as a single source of truth reviewable at a glance.
+export const A2H_TEST_DEFINITIONS: Record<A2HTestCode, A2HTestDefinition> = {
+  'A2H-01': { code: 'A2H-01', label: A2H_TEST_LABELS['A2H-01'], requiresOutput: true, requiresDetector: true, requiresFixtureSet: false, requiresRepair: false, requiresExperimentalTrials: false, requiresClaimVerifier: false },
+  'A2H-02': { code: 'A2H-02', label: A2H_TEST_LABELS['A2H-02'], requiresOutput: true, requiresDetector: true, requiresFixtureSet: false, requiresRepair: false, requiresExperimentalTrials: false, requiresClaimVerifier: false },
+  'A2H-03': { code: 'A2H-03', label: A2H_TEST_LABELS['A2H-03'], requiresOutput: true, requiresDetector: true, requiresFixtureSet: false, requiresRepair: false, requiresExperimentalTrials: false, requiresClaimVerifier: false },
+  'A2H-04': { code: 'A2H-04', label: A2H_TEST_LABELS['A2H-04'], requiresOutput: true, requiresDetector: false, requiresFixtureSet: true, requiresRepair: false, requiresExperimentalTrials: false, requiresClaimVerifier: false },
+  'A2H-05': { code: 'A2H-05', label: A2H_TEST_LABELS['A2H-05'], requiresOutput: true, requiresDetector: false, requiresFixtureSet: true, requiresRepair: false, requiresExperimentalTrials: false, requiresClaimVerifier: false },
+  'A2H-06': { code: 'A2H-06', label: A2H_TEST_LABELS['A2H-06'], requiresOutput: false, requiresDetector: false, requiresFixtureSet: true, requiresRepair: true, requiresExperimentalTrials: false, requiresClaimVerifier: false },
+  'A2H-07': { code: 'A2H-07', label: A2H_TEST_LABELS['A2H-07'], requiresOutput: false, requiresDetector: true, requiresFixtureSet: false, requiresRepair: false, requiresExperimentalTrials: true, requiresClaimVerifier: false },
+  'A2H-08': { code: 'A2H-08', label: A2H_TEST_LABELS['A2H-08'], requiresOutput: true, requiresDetector: false, requiresFixtureSet: false, requiresRepair: false, requiresExperimentalTrials: false, requiresClaimVerifier: false },
+  'A2H-09': { code: 'A2H-09', label: A2H_TEST_LABELS['A2H-09'], requiresOutput: true, requiresDetector: false, requiresFixtureSet: true, requiresRepair: false, requiresExperimentalTrials: false, requiresClaimVerifier: false },
+  'A2H-10': { code: 'A2H-10', label: A2H_TEST_LABELS['A2H-10'], requiresOutput: true, requiresDetector: false, requiresFixtureSet: true, requiresRepair: false, requiresExperimentalTrials: false, requiresClaimVerifier: false },
+  'A2H-11': { code: 'A2H-11', label: A2H_TEST_LABELS['A2H-11'], requiresOutput: false, requiresDetector: false, requiresFixtureSet: false, requiresRepair: false, requiresExperimentalTrials: true, requiresClaimVerifier: false },
+  'A2H-12': { code: 'A2H-12', label: A2H_TEST_LABELS['A2H-12'], requiresOutput: false, requiresDetector: false, requiresFixtureSet: true, requiresRepair: true, requiresExperimentalTrials: false, requiresClaimVerifier: false },
+  'A2H-13': { code: 'A2H-13', label: A2H_TEST_LABELS['A2H-13'], requiresOutput: true, requiresDetector: false, requiresFixtureSet: true, requiresRepair: false, requiresExperimentalTrials: false, requiresClaimVerifier: false },
+  'A2H-14': { code: 'A2H-14', label: A2H_TEST_LABELS['A2H-14'], requiresOutput: false, requiresDetector: false, requiresFixtureSet: false, requiresRepair: false, requiresExperimentalTrials: true, requiresClaimVerifier: false },
+  'A2H-15': { code: 'A2H-15', label: A2H_TEST_LABELS['A2H-15'], requiresOutput: false, requiresDetector: true, requiresFixtureSet: false, requiresRepair: false, requiresExperimentalTrials: true, requiresClaimVerifier: false },
+  'A2H-16': { code: 'A2H-16', label: A2H_TEST_LABELS['A2H-16'], requiresOutput: true, requiresDetector: false, requiresFixtureSet: true, requiresRepair: false, requiresExperimentalTrials: false, requiresClaimVerifier: true },
+  'A2H-17': { code: 'A2H-17', label: A2H_TEST_LABELS['A2H-17'], requiresOutput: false, requiresDetector: false, requiresFixtureSet: false, requiresRepair: false, requiresExperimentalTrials: false, requiresClaimVerifier: false },
+}
+
 // ── Fixture / annotation layer (Phase 2) ────────────────────────────────
 //
 // Fixtures annotate a frozen source — they never mutate CorpusSource.text/
@@ -287,7 +312,7 @@ export const DEFAULT_TEST_VERSION = 'A2H-TV001'
 // derived from.
 export type A2HFixtureType =
   | 'citation' | 'numeric_unit' | 'modality' | 'protected_term' | 'terminology'
-  | 'grammar_repair' | 'factual_repair'
+  | 'grammar_repair' | 'factual_repair' | 'claim_relationship'
 export type FixtureSetStatus = 'draft' | 'validated' | 'locked' | 'archived'
 
 export const DEFAULT_FIXTURE_VERSION = 'FIXTURE-V001'
@@ -306,6 +331,12 @@ export const FIXTURE_TYPE_FOR_TEST: Partial<Record<A2HTestCode, A2HFixtureType>>
   'A2H-13': 'terminology',
   'A2H-06': 'grammar_repair',
   'A2H-12': 'factual_repair',
+  // A2H-16 (Phase 4): claim-relationship fixtures annotate a claim within a
+  // frozen source's own text — evaluated against the ordinary BenchmarkOutput
+  // for that (source, intensity), the same output-scoped deterministic
+  // pattern as A2H-04/05/09/10/13, never a controlled-derivative repair cycle
+  // like A2H-06/A2H-12.
+  'A2H-16': 'claim_relationship',
 }
 
 export const FIXTURE_REQUIRING_TESTS: readonly A2HTestCode[] = Object.keys(FIXTURE_TYPE_FOR_TEST) as A2HTestCode[]
@@ -405,6 +436,12 @@ export interface BenchmarkRun {
   // admin's later choice of fixture set.
   repairConfigVersion: string
   grammarEngineConfigVersion: string
+  // Phase 4's optional, versioned configuration for the experimental-trial
+  // tests (A2H-07/11/14/15) — snapshotted once validation succeeds (like
+  // every other reproducibility-affecting field on this record) and never
+  // re-read from mutable UI defaults once a run starts. Null for a run that
+  // enables none of those tests.
+  experimentConfig: BenchmarkExperimentConfig | null
   concurrency: number
   status: BenchmarkRunStatus
   createdAt: string
@@ -504,7 +541,14 @@ export interface BenchmarkTestResult {
 // via repairChunk/repairGrammar) rather than pure local computation, so
 // it's kept as its own stage even though both stages ultimately write a
 // BenchmarkTestResult (§25).
-export type BenchmarkJobStage = 'baseline_gptzero' | 'humanite_transform' | 'post_gptzero' | 'test_evaluation' | 'repair_evaluation'
+// 'experimental_trial' (Phase 4) covers A2H-07/11/14/15 — controlled,
+// matched-condition transformations that intentionally produce MULTIPLE
+// outputs per source under varying conditions (repeats, tone/genre/audience
+// contrasts, candidate-selection arms), which the (runId, sourceId,
+// intensity)-unique BenchmarkOutput cannot represent. Operates on the
+// generic BenchmarkTrial entity below, never a second BenchmarkOutput-like
+// table.
+export type BenchmarkJobStage = 'baseline_gptzero' | 'humanite_transform' | 'post_gptzero' | 'test_evaluation' | 'repair_evaluation' | 'experimental_trial'
 export type BenchmarkJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'retrying' | 'cancelled'
 
 // ── Deterministic evaluator contract (Phase 2, §8) ──────────────────────
@@ -539,6 +583,11 @@ export interface BenchmarkJob {
   fixtureId: string | null
   intensity: number | null
   benchmarkCode: A2HTestCode | null
+  // Set only for 'experimental_trial' jobs (Phase 4) — identifies which
+  // condition/repeat this job produces. See BenchmarkTrial below for what
+  // these mean together with sourceId/benchmarkCode.
+  conditionId: string | null
+  trialIndex: number | null
   status: BenchmarkJobStatus
   attemptCount: number
   createdAt: string
@@ -629,4 +678,162 @@ export interface GrammarFinding {
   end: number
   text: string
   suggestions: string[]
+}
+
+// ── Experimental trial layer (Phase 4) ───────────────────────────────────
+//
+// A2H-07/11/14/15 intentionally produce MULTIPLE matched outputs per source
+// under varying experimental conditions (repeats, tone/genre/audience
+// contrast arms, candidate-selection arms) — something the
+// (runId, sourceId, intensity)-unique BenchmarkOutput cannot represent
+// without weakening its own uniqueness rule. BenchmarkTrial is the one
+// generic entity all four tests share, keyed by the deterministic logical
+// identity (run, benchmarkCode, source, conditionId, trialIndex) — see
+// trials.ts's trialId(). Completed trial evidence (status 'success' or
+// 'failed') is never overwritten by a resumed/retried run; only an explicit
+// admin regeneration creates a new attempt (mirroring BenchmarkRepairAttempt).
+export type BenchmarkExperimentalTestCode = 'A2H-07' | 'A2H-11' | 'A2H-14' | 'A2H-15'
+export const EXPERIMENTAL_TRIAL_TEST_CODES: readonly A2HTestCode[] = ['A2H-07', 'A2H-11', 'A2H-14', 'A2H-15']
+
+export type BenchmarkTrialStatus = 'queued' | 'running' | 'success' | 'failed'
+
+export interface BenchmarkTrial {
+  id: string
+  runId: string
+  corpusProjectId: string
+  benchmarkCode: BenchmarkExperimentalTestCode
+  sourceId: string
+  // 0-based repeat index within this (benchmarkCode, source, conditionId) —
+  // always 0 for the paired-arm tests (A2H-11/14/15, which have exactly one
+  // trial per side of a contrast/arm), and 0..repeatCount-1 for A2H-07.
+  trialIndex: number
+  // Stable identity for "which experimental condition" — e.g. a repeatability
+  // condition hash (A2H-07), "<contrastId>:left"/"<contrastId>:right"
+  // (A2H-11/14), or "<sourceId>__i<intensity>:single"/":production" (A2H-15).
+  conditionId: string
+  // What was CONFIGURED for this trial (tone, genre, intensity, arm, ...) —
+  // read-only provenance, never mutated after the trial completes.
+  condition: Record<string, unknown>
+  outputText: string | null
+  outputSha256: string | null
+  outputWords: number | null
+  modelProvider: string
+  model: string
+  latencyMs: number | null
+  // Known partial-measurement gap (documented, not fabricated): counts only
+  // the primary generation-phase completions, not internal gate/judge/repair/
+  // claim-verification calls humanizeChunk also makes — see humanizePipeline.ts.
+  modelCalls: number | null
+  retryCount: number
+  candidateCount: number | null
+  inputTokens: number | null
+  outputTokens: number | null
+  estimatedCostUsd: number | null
+  // Populated only for tests that score this trial's output with GPTZero
+  // (A2H-07, A2H-15) — null for A2H-11/14, which use deterministic style/
+  // readability metrics only and never call a detector.
+  aiProbability: number | null
+  humanProbability: number | null
+  classification: DetectionClassification | null
+  // Free-form OBSERVED telemetry beyond the named fields above — e.g. A2H-15's
+  // candidate-selection summary for the production arm (chunksWithCandidateSearch,
+  // disqualifiedAt, ...). Distinct from `condition` (what was configured):
+  // this is what was measured while producing the trial.
+  diagnostics: Record<string, unknown> | null
+  status: BenchmarkTrialStatus
+  errorCode: string | null
+  errorMessage: string | null
+  createdAt: string
+  completedAt: string | null
+}
+
+// The frozen source cohort AND sampling parameters for one experimental test
+// within one run — written once, at run validation, and never resampled or
+// shifted afterward (§41: "historical test cohorts must not shift"), the
+// same posture BenchmarkRunSource already takes for the main cohort. Doc id
+// `${runId}__${benchmarkCode}`.
+export interface BenchmarkExperimentCohort {
+  id: string
+  runId: string
+  benchmarkCode: A2HTestCode
+  sourceIds: string[]
+  samplingSeed: string | null
+  createdAt: string
+}
+
+// A named tone-vs-tone comparison (§8-9) — both sides must be real, currently
+// supported Tone values (see style/types.ts's TONES); this module never
+// invents a tone the product cannot actually invoke.
+export interface StyleToneContrast {
+  id: string
+  label: string
+  left: { tone: string }
+  right: { tone: string }
+  expectedDirections: {
+    contractionRate?: 'higher_left' | 'higher_right'
+    averageSentenceLength?: 'higher_left' | 'higher_right'
+    hedgeDensity?: 'higher_left' | 'higher_right'
+    firstPersonRate?: 'higher_left' | 'higher_right'
+    readability?: 'higher_left' | 'higher_right'
+  }
+}
+
+// A named genre/audience-vs-genre/audience comparison (§13-14) — both sides
+// must be real, currently supported Genre/Audience values (see
+// style/types.ts's GENRES/AUDIENCES).
+export interface GenreAudienceContrast {
+  id: string
+  label: string
+  domain?: Domain | null
+  left: { genre?: Genre | null; audience?: Audience | null }
+  right: { genre?: Genre | null; audience?: Audience | null }
+  expectedDirections: {
+    readability?: 'higher_left' | 'higher_right'
+    averageSentenceLength?: 'higher_left' | 'higher_right'
+    lexicalComplexity?: 'higher_left' | 'higher_right'
+    paragraphLength?: 'higher_left' | 'higher_right'
+    firstPersonRate?: 'higher_left' | 'higher_right'
+  }
+}
+
+// Snapshotted once run validation succeeds (§2) — never re-read from mutable
+// UI defaults after a run starts. Each key is present only when the
+// corresponding experimental test is enabled on the run.
+export interface BenchmarkExperimentConfig {
+  repeatability?: {
+    repeatCount: number
+    sourceSampleSize: number | null
+    intensities: number[]
+  }
+  styleTone?: {
+    contrasts: StyleToneContrast[]
+    sourceSampleSize: number | null
+  }
+  genreAudience?: {
+    contrasts: GenreAudienceContrast[]
+    sourceSampleSize: number | null
+  }
+  candidateSelection?: {
+    intensities: number[]
+    sourceSampleSize: number | null
+  }
+}
+
+// ── Test dependency metadata (Phase 4, §43) ──────────────────────────────
+//
+// Declarative description of what each test code needs, used by run
+// validation/UI instead of scattered hard-coded per-test conditionals. Does
+// not replace FIXTURE_REQUIRING_TESTS/REPAIR_TEST_CODES/EXPERIMENTAL_TRIAL_TEST_CODES
+// (existing, already-tested code keys off those directly) — this is an
+// additive, higher-level view assembled from the same facts for new
+// validation/UI surfaces.
+export interface A2HTestDefinition {
+  code: A2HTestCode
+  label: string
+  requiresOutput: boolean
+  requiresDetector: boolean
+  requiresFixtureSet: boolean
+  requiresRepair: boolean
+  requiresExperimentalTrials: boolean
+  requiresClaimVerifier: boolean
 }
