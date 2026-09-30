@@ -1,10 +1,10 @@
 import { apiFetch } from '@/lib/api'
-import type { BenchmarkTopic, CorpusSource, DomainOutlineConfig } from '@/lib/a2h/types'
+import type { BenchmarkTopic, CorpusSource, BenchmarkOutput, DomainOutlineConfig } from '@/lib/a2h/types'
 import type { CreateTopicInput } from '@/lib/a2h/topics'
 import type { DetectorResult } from '@/lib/a2h/baseline'
 import type { Domain } from '@/lib/style/types'
 
-export type { BenchmarkTopic, CorpusSource, CreateTopicInput, DetectorResult, DomainOutlineConfig }
+export type { BenchmarkTopic, CorpusSource, BenchmarkOutput, CreateTopicInput, DetectorResult, DomainOutlineConfig }
 
 export async function apiListTopics(domainId?: Domain): Promise<BenchmarkTopic[]> {
   const qs = domainId ? `?domainId=${domainId}` : ''
@@ -105,4 +105,34 @@ export async function apiGenerateOutline(domainId: Domain, force = false): Promi
     body: JSON.stringify({ domainId, force }),
   })
   return data.topics
+}
+
+export async function apiListOutputs(topicId: string, targetWords: number, corpusVersion?: string): Promise<BenchmarkOutput[]> {
+  const params = new URLSearchParams({ topicId, targetWords: String(targetWords) })
+  if (corpusVersion) params.set('corpusVersion', corpusVersion)
+  const data = await apiFetch<{ outputs: BenchmarkOutput[] }>(`/admin/a2h/corpus/transform?${params.toString()}`)
+  return data.outputs
+}
+
+export async function apiTransformSource(topicId: string, targetWords: number, intensity: number, force = false): Promise<BenchmarkOutput> {
+  const data = await apiFetch<{ output: BenchmarkOutput }>('/admin/a2h/corpus/transform', {
+    method: 'POST',
+    body: JSON.stringify({ topicId, targetWords, intensity, force }),
+  })
+  return data.output
+}
+
+export async function apiListPostScores(topicId: string, targetWords: number, corpusVersion?: string): Promise<Record<string, DetectorResult>> {
+  const params = new URLSearchParams({ topicId, targetWords: String(targetWords) })
+  if (corpusVersion) params.set('corpusVersion', corpusVersion)
+  const data = await apiFetch<{ postScores: Record<string, DetectorResult> }>(`/admin/a2h/corpus/post-score?${params.toString()}`)
+  return data.postScores
+}
+
+export async function apiAcquirePostScore(topicId: string, targetWords: number, intensity: number, force = false): Promise<DetectorResult> {
+  const data = await apiFetch<{ postScore: DetectorResult }>('/admin/a2h/corpus/post-score', {
+    method: 'POST',
+    body: JSON.stringify({ topicId, targetWords, intensity, force }),
+  })
+  return data.postScore
 }
