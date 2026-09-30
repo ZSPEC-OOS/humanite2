@@ -6,9 +6,10 @@ import {
 } from './types'
 import { getRun, maybeCompleteRun } from './runs'
 import {
-  getOrCreateJob, claimJob, reclaimStaleJobs, markJobCompleted, markJobFailed, listJobsByStageAndStatus, listDueRetryJobs,
-  transformJobId, postScoreJobId, testEvaluationJobId,
+  claimJob, markJobCompleted, markJobFailed, getJob, listJobsByStageAndStatus, listDueRetryJobs, getEarliestNextAttempt,
+  ensureTransformJobsForSource, ensurePostScoreJobForOutput, ensureTestEvaluationJobsForOutput,
 } from './jobs'
+import { recoverStaleJobs } from './recovery'
 import { getSourceById } from './corpus'
 import { acquireBaseline, acquirePostScore, getBaseline, getPostScore } from './baseline'
 import { getOutputById, transformSource } from './outputs'
@@ -49,7 +50,21 @@ export interface ExecuteBatchResult {
   processed: number
   stage: BenchmarkJobStage | 'idle'
   run: BenchmarkRun
+  // Phase 5A (§35): batch-scoped telemetry for this ONE call — claimedJobs
+  // is how many jobs this call actually claimed and attempted (equal to
+  // `processed`, kept as its own field for clarity), completedJobs/
+  // retryScheduled/failedJobs break that batch down by outcome. nextRetryAt
+  // is run-wide (not batch-scoped): the earliest time ANY of this run's
+  // 'retrying' jobs becomes claimable again, so a poll loop that gets back
+  // `processed: 0` knows whether to wait (and how long) or stop.
+  claimedJobs: number
+  completedJobs: number
+  retryScheduled: number
+  failedJobs: number
+  nextRetryAt: string | null
 }
+
+type JobOutcome = 'completed' | 'retrying' | 'failed' | 'skipped'
 
 const DEFAULT_MAX_JOBS_PER_STAGE = 5
 // 'repair_evaluation' (A2H-06/A2H-12) has no dependency on the earlier
@@ -87,13 +102,15 @@ export async function executeRunBatch(firestore: Firestore, runId: string, optio
   const run = await getRun(firestore, runId)
   if (!run) throw new Error('Benchmark run not found.')
   if (run.status !== 'running') {
-    return { processed: 0, stage: 'idle', run }
+    return { processed: 0, stage: 'idle', run, claimedJobs: 0, completedJobs: 0, retryScheduled: 0, failedJobs: 0, nextRetryAt: null }
   }
 
-  // Reclaim any 'running' job whose lease expired before its worker
-  // finished (a crash, a timeout, a killed request) — a maintenance sweep
-  // once per tick, not part of the per-job claim path.
-  await reclaimStaleJobs(firestore, runId)
+  // Reconcile any 'running' job whose lease expired before its worker
+  // finished (a crash, a timeout, a killed request, a closed browser tab) —
+  // a maintenance sweep once per tick, not part of the per-job claim path.
+  // Unlike a blind reset, this checks whether each stale job's expected
+  // artifact already exists before deciding queued vs. completed (§10).
+  await recoverStaleJobs(firestore, run)
 
   const maxJobs = options.maxJobsPerStage ?? DEFAULT_MAX_JOBS_PER_STAGE
   const workerId = options.workerId ?? `interactive-${Date.now()}`
@@ -114,17 +131,28 @@ export async function executeRunBatch(firestore: Firestore, runId: string, optio
     if (ready.length === 0) continue
 
     const batch = ready.slice(0, maxJobs)
-    let processed = 0
+    let claimedJobs = 0
+    let completedJobs = 0
+    let retryScheduled = 0
+    let failedJobsCount = 0
     for (const chunk of chunkArray(batch, Math.max(1, run.concurrency))) {
-      await Promise.all(chunk.map(job => processJob(firestore, run, job, detectorConfigId, options, fixtureCache, workerId)))
-      processed += chunk.length
+      const outcomes = await Promise.all(chunk.map(job => processJob(firestore, run, job, detectorConfigId, options, fixtureCache, workerId)))
+      for (const outcome of outcomes) {
+        if (outcome === 'skipped') continue
+        claimedJobs++
+        if (outcome === 'completed') completedJobs++
+        else if (outcome === 'retrying') retryScheduled++
+        else if (outcome === 'failed') failedJobsCount++
+      }
     }
-    await maybeCompleteRun(firestore, runId)
-    return { processed, stage, run }
+    const updatedRun = (await maybeCompleteRun(firestore, runId)) ?? run
+    const nextRetryAt = await getEarliestNextAttempt(firestore, runId)
+    return { processed: claimedJobs, stage, run: updatedRun, claimedJobs, completedJobs, retryScheduled, failedJobs: failedJobsCount, nextRetryAt }
   }
 
-  const completed = await maybeCompleteRun(firestore, runId)
-  return { processed: 0, stage: 'idle', run: completed ?? run }
+  const completed = (await maybeCompleteRun(firestore, runId)) ?? run
+  const nextRetryAt = await getEarliestNextAttempt(firestore, runId)
+  return { processed: 0, stage: 'idle', run: completed, claimedJobs: 0, completedJobs: 0, retryScheduled: 0, failedJobs: 0, nextRetryAt }
 }
 
 async function processJob(
@@ -135,12 +163,12 @@ async function processJob(
   options: ExecuteBatchOptions,
   fixtureCache: Map<string, Promise<BenchmarkFixture[]>>,
   workerId: string,
-): Promise<void> {
+): Promise<JobOutcome> {
   const claimed = await claimJob(firestore, job.id, workerId)
   // Another worker already claimed this job (or its lease hadn't actually
   // expired yet) between when we listed it and now — an expected race, not
   // an error, so this attempt simply skips it.
-  if (!claimed) return
+  if (!claimed) return 'skipped'
   try {
     if (job.stage === 'baseline_gptzero') {
       await runBaselineJob(firestore, run, job, detectorConfigId, options)
@@ -156,8 +184,11 @@ async function processJob(
       await runExperimentalTrialJob(firestore, run, job, options)
     }
     await markJobCompleted(firestore, job.id)
+    return 'completed'
   } catch (err) {
     await markJobFailed(firestore, job.id, err)
+    const after = await getJob(firestore, job.id)
+    return after?.status === 'retrying' ? 'retrying' : 'failed'
   }
 }
 
@@ -177,14 +208,7 @@ async function runBaselineJob(
 
   await acquireBaseline(firestore, { source, runId: run.id, detectorConfigId, apiKey: options.gptZeroApiKey })
 
-  await Promise.all(run.intensities.map(intensity => getOrCreateJob(firestore, {
-    id: transformJobId(run.id, job.sourceId, intensity),
-    runId: run.id,
-    corpusProjectId: run.corpusProjectId,
-    stage: 'humanite_transform',
-    sourceId: job.sourceId,
-    intensity,
-  })))
+  await ensureTransformJobsForSource(firestore, run, job.sourceId)
 }
 
 // Runs the real Humanize pipeline at this job's intensity, then enqueues
@@ -210,14 +234,7 @@ async function runTransformJob(
     releasedAt: run.releasedAt,
   })
 
-  await getOrCreateJob(firestore, {
-    id: postScoreJobId(run.id, output.id, detectorConfigId),
-    runId: run.id,
-    corpusProjectId: run.corpusProjectId,
-    stage: 'post_gptzero',
-    sourceId: job.sourceId,
-    outputId: output.id,
-  })
+  await ensurePostScoreJobForOutput(firestore, run, output, detectorConfigId)
 }
 
 // Scores the transformed output, then enqueues a test_evaluation job for
@@ -245,16 +262,7 @@ async function runPostScoreJob(
 
   await acquirePostScore(firestore, { output, detectorConfigId, apiKey: options.gptZeroApiKey })
 
-  const evaluableTests = run.enabledTests.filter(t => t === A2H01_CODE || t === A2H02_CODE || t in DETERMINISTIC_EVALUATORS)
-  await Promise.all(evaluableTests.map(code => getOrCreateJob(firestore, {
-    id: testEvaluationJobId(run.id, output.id, code, run.testVersion),
-    runId: run.id,
-    corpusProjectId: run.corpusProjectId,
-    stage: 'test_evaluation',
-    sourceId: job.sourceId,
-    outputId: output.id,
-    benchmarkCode: code,
-  })))
+  await ensureTestEvaluationJobsForOutput(firestore, run, output)
 }
 
 function getCachedFixtures(

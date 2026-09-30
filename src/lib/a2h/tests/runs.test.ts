@@ -315,8 +315,9 @@ describe('run status transitions', () => {
     await expect(startRun(firestore, run.id)).rejects.toThrow(/not validated/i)
     await expect(pauseRun(firestore, run.id)).rejects.toThrow(/not running/i)
 
-    const resumed = await resumeRun(firestore, run.id)
+    const { run: resumed, recovery } = await resumeRun(firestore, run.id)
     expect(resumed.status).toBe('running')
+    expect(recovery).toEqual({ staleJobsFound: 0, reconciledCompleted: 0, requeued: 0, unresolved: 0 })
     await expect(resumeRun(firestore, run.id)).rejects.toThrow(/not paused/i)
   })
 

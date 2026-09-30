@@ -1,7 +1,7 @@
 import { apiFetch, apiFetchBlob } from '@/lib/api'
 import type {
   BenchmarkTopic, CorpusSource, BenchmarkOutput, CorpusProject, CorpusManifest, DetectorResult,
-  BenchmarkRun, BenchmarkRunSource, FixtureSet, BenchmarkFixture, A2HFixtureType, A2HTestCode,
+  BenchmarkRun, BenchmarkRunSource, FixtureSet, BenchmarkFixture, A2HFixtureType, A2HTestCode, BenchmarkJob,
   BenchmarkExperimentConfig, StyleToneContrast, GenreAudienceContrast, A2HTestDefinition,
 } from '@/lib/a2h/types'
 import { IMPLEMENTED_A2H_TESTS, A2H_TEST_LABELS, A2H_TEST_DEFINITIONS } from '@/lib/a2h/types'
@@ -10,6 +10,7 @@ import type { ProjectDraftPatch, FreezeValidationResult } from '@/lib/a2h/corpus
 import type { RunDraftPatch, RunValidationResult, RunProgress, FixtureTestEligibility, RunWorkEstimate } from '@/lib/a2h/runs'
 import type { BenchmarkRelease, ReleaseValidationResult } from '@/lib/a2h/types'
 import type { CreateReleaseResult, ReleaseIntegrityResult } from '@/lib/a2h/release'
+import type { RecoverySummary } from '@/lib/a2h/recovery'
 import { EXPORT_FILE_NAMES, type ExportFileName } from '@/lib/a2h/exportPackage'
 import type { ExecuteBatchResult } from '@/lib/a2h/execution'
 import type { A2H01Report, A2H01Filters } from '@/lib/a2h/a2h01'
@@ -36,7 +37,7 @@ import type { Domain } from '@/lib/style/types'
 
 export type {
   BenchmarkTopic, CorpusSource, BenchmarkOutput, CreateTopicInput, DetectorResult, CorpusProject, ProjectDraftPatch, CorpusManifest, FreezeValidationResult,
-  BenchmarkRun, BenchmarkRunSource, RunDraftPatch, RunValidationResult, RunProgress, ExecuteBatchResult, FixtureTestEligibility, RunWorkEstimate,
+  BenchmarkRun, BenchmarkRunSource, BenchmarkJob, RunDraftPatch, RunValidationResult, RunProgress, ExecuteBatchResult, FixtureTestEligibility, RunWorkEstimate, RecoverySummary,
   A2H01Report, A2H01Filters, A2H02Report, A2H02Filters, A2H03Report, A2H03Filters, A2H03Stratum, OutputDetail,
   A2H04Report, A2H04Filters, A2H05Report, A2H05Filters, A2H09Report, A2H09Filters, A2H10Report, A2H10Filters, A2H13Report, A2H13Filters,
   A2H06Report, A2H08Report, A2H08Filters, A2H12Report,
@@ -247,9 +248,31 @@ export async function apiPauseRun(runId: string): Promise<BenchmarkRun> {
   return data.run
 }
 
-export async function apiResumeRun(runId: string): Promise<BenchmarkRun> {
-  const data = await apiFetch<{ run: BenchmarkRun }>(`/admin/a2h/runs/${runId}/resume`, { method: 'POST' })
-  return data.run
+export interface ResumeRunResponse {
+  run: BenchmarkRun
+  recovery: RecoverySummary
+}
+
+// Phase 5A (§18): resume always reconciles interrupted work first — the
+// recovery summary is what the UI's "Recovery complete" feedback reads.
+export async function apiResumeRun(runId: string): Promise<ResumeRunResponse> {
+  return apiFetch<ResumeRunResponse>(`/admin/a2h/runs/${runId}/resume`, { method: 'POST' })
+}
+
+export interface RecoverRunResponse {
+  run: BenchmarkRun
+  recovery: RecoverySummary
+}
+
+// Phase 5A (§19): the admin's explicit "Recover Interrupted Work" action —
+// reconciles stale jobs without changing the run's own status.
+export async function apiRecoverRun(runId: string): Promise<RecoverRunResponse> {
+  return apiFetch<RecoverRunResponse>(`/admin/a2h/runs/${runId}/recover`, { method: 'POST' })
+}
+
+export async function apiListFailedJobs(runId: string): Promise<BenchmarkJob[]> {
+  const data = await apiFetch<{ failedJobs: BenchmarkJob[] }>(`/admin/a2h/runs/${runId}/failed-jobs`)
+  return data.failedJobs
 }
 
 export async function apiCancelRun(runId: string): Promise<BenchmarkRun> {
@@ -452,7 +475,7 @@ export async function apiSeedRepairFixtures(fixtureSetId: string, sourceId: stri
 
 // Explicit admin action for a 'needs_attention' run — resets failed jobs to
 // queued and returns the run to 'running' for another pass.
-export async function apiRetryFailedJobs(runId: string): Promise<{ run: BenchmarkRun; retriedCount: number }> {
+export async function apiRetryFailedJobs(runId: string): Promise<{ run: BenchmarkRun; retriedCount: number; reconciledCount: number }> {
   return apiFetch(`/admin/a2h/runs/${runId}/retry-failed-jobs`, { method: 'POST' })
 }
 

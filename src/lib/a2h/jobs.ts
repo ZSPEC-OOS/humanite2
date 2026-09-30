@@ -1,16 +1,22 @@
 import type { Firestore } from 'firebase-admin/firestore'
-import { A2H_COLLECTIONS, type A2HTestCode, type BenchmarkJob, type BenchmarkJobStage, type BenchmarkJobStatus } from './types'
+import { A2H_COLLECTIONS, type A2HTestCode, type BenchmarkJob, type BenchmarkJobStage, type BenchmarkJobStatus, type BenchmarkRun, type BenchmarkOutput } from './types'
 import { classifyFailure, nextRetryDelayMs } from './retryPolicy'
+import { A2H01_CODE } from './a2h01'
+import { A2H02_CODE } from './a2h02'
+import { DETERMINISTIC_EVALUATORS } from './deterministicEvaluators'
 
 const COLLECTION = A2H_COLLECTIONS.jobs
 
 // A claimed job's lease lasts long enough to cover one worker invocation
-// (the interactive /execute route and the cron worker both set
-// maxDuration=300) plus headroom for clock skew and a slow provider call —
-// a lease that expired before the job actually finished would let a SECOND
-// worker claim (and re-pay for) the same job while the first is still
-// legitimately working.
-export const DEFAULT_LEASE_MS = 10 * 60 * 1000
+// (the interactive /execute route and the optional manual worker route both
+// set maxDuration=300) plus headroom for clock skew and a slow provider
+// call — a lease that expired before the job actually finished would let a
+// SECOND worker claim (and re-pay for) the same job while the first is
+// still legitimately working. Centralized here (§5 of the Phase 5A spec) —
+// no other module should hardcode its own timeout constant.
+export const BENCHMARK_JOB_LEASE_MS = 10 * 60 * 1000
+// Legacy alias — Phase 5 code referred to this constant by this name.
+export const DEFAULT_LEASE_MS = BENCHMARK_JOB_LEASE_MS
 
 // Deterministic ids per §10's logical keys — this is what makes enqueueing
 // idempotent: calling getOrCreateJob twice with the same logical identity
@@ -91,6 +97,7 @@ export async function getOrCreateJob(firestore: Firestore, params: CreateJobPara
     errorCode: null,
     errorMessage: null,
     leaseOwner: null,
+    leaseAcquiredAt: null,
     leaseExpiresAt: null,
     nextAttemptAt: null,
     lastHeartbeatAt: null,
@@ -111,7 +118,7 @@ export async function getJob(firestore: Firestore, id: string): Promise<Benchmar
 // treating that as an error, since "another worker already claimed it a
 // moment ago" is an expected, non-exceptional outcome of two workers
 // (an interactive batch call and a cron tick, say) racing for the same job.
-export async function claimJob(firestore: Firestore, id: string, workerId: string, leaseDurationMs = DEFAULT_LEASE_MS): Promise<BenchmarkJob | null> {
+export async function claimJob(firestore: Firestore, id: string, workerId: string, leaseDurationMs = BENCHMARK_JOB_LEASE_MS): Promise<BenchmarkJob | null> {
   const ref = firestore.collection(COLLECTION).doc(id)
   return firestore.runTransaction(async tx => {
     const snap = await tx.get(ref)
@@ -120,7 +127,7 @@ export async function claimJob(firestore: Firestore, id: string, workerId: strin
     const now = Date.now()
 
     const retryDue = job.status === 'retrying' && (job.nextAttemptAt == null || new Date(job.nextAttemptAt).getTime() <= now)
-    const leaseStale = job.status === 'running' && job.leaseExpiresAt != null && new Date(job.leaseExpiresAt).getTime() < now
+    const leaseStale = job.status === 'running' && isJobStale(job, now)
     const claimable = job.status === 'queued' || retryDue || leaseStale
     if (!claimable) return null
 
@@ -131,6 +138,7 @@ export async function claimJob(firestore: Firestore, id: string, workerId: strin
       attemptCount: job.attemptCount + 1,
       startedAt: job.startedAt ?? nowIso,
       leaseOwner: workerId,
+      leaseAcquiredAt: nowIso,
       leaseExpiresAt: new Date(now + leaseDurationMs).toISOString(),
       lastHeartbeatAt: nowIso,
       nextAttemptAt: null,
@@ -140,24 +148,39 @@ export async function claimJob(firestore: Firestore, id: string, workerId: strin
   })
 }
 
-// Resets every 'running' job in a run whose lease has expired back to
-// 'queued' — the worker that claimed it never reached markJobCompleted/
-// markJobFailed (a crash, a killed request, a deploy mid-invocation). Run
-// once per worker tick (not per stage, per job) since it's a maintenance
-// sweep, not part of the normal claim path. Never touches attemptCount or
-// clears the failure/retry history a job already has.
-export async function reclaimStaleJobs(firestore: Firestore, runId: string): Promise<number> {
-  const running = await firestore.collection(COLLECTION).where('runId', '==', runId).where('status', '==', 'running').get()
-  const now = Date.now()
-  const stale = running.docs
-    .map(d => d.data() as BenchmarkJob)
-    .filter(j => j.leaseExpiresAt != null && new Date(j.leaseExpiresAt).getTime() < now)
-  await Promise.all(stale.map(j => firestore.collection(COLLECTION).doc(j.id).update({
-    status: 'queued' satisfies BenchmarkJobStatus,
-    leaseOwner: null,
-    leaseExpiresAt: null,
-  })))
-  return stale.length
+// §9 of the Phase 5A spec: a 'running' job is stale once its lease has
+// expired — the worker that claimed it never reached markJobCompleted/
+// markJobFailed (a crash, a killed request, a deploy mid-invocation, a
+// closed browser tab). A legacy row from before leasing existed (no
+// leaseExpiresAt at all) falls back to "has it been running longer than one
+// lease duration" so old data doesn't get stuck 'running' forever either.
+export function isJobStale(job: BenchmarkJob, now: number = Date.now()): boolean {
+  if (job.status !== 'running') return false
+  if (job.leaseExpiresAt != null) return new Date(job.leaseExpiresAt).getTime() < now
+  if (job.startedAt != null) return now - new Date(job.startedAt).getTime() > BENCHMARK_JOB_LEASE_MS
+  return false
+}
+
+// §8: extends a still-legitimately-running job's lease so a long operation
+// doesn't get reclaimed out from under its own worker. Only succeeds if the
+// job is still 'running' under the SAME leaseOwner that's calling — a caller
+// whose lease already expired (and was possibly reclaimed by someone else)
+// gets `false` back rather than resurrecting a lease it no longer legitimately
+// holds. No stage's current operations approach the 10-minute lease window,
+// so nothing calls this yet in practice — it exists as the primitive a future
+// long-running stage would use, per the spec's "may initially occur only
+// between major sub-steps" allowance.
+export async function heartbeatJob(firestore: Firestore, id: string, leaseOwner: string, leaseDurationMs = BENCHMARK_JOB_LEASE_MS): Promise<boolean> {
+  const ref = firestore.collection(COLLECTION).doc(id)
+  return firestore.runTransaction(async tx => {
+    const snap = await tx.get(ref)
+    if (!snap.exists) return false
+    const job = snap.data() as BenchmarkJob
+    if (job.status !== 'running' || job.leaseOwner !== leaseOwner) return false
+    const now = Date.now()
+    tx.set(ref, { ...job, lastHeartbeatAt: new Date(now).toISOString(), leaseExpiresAt: new Date(now + leaseDurationMs).toISOString() })
+    return true
+  })
 }
 
 export async function markJobCompleted(firestore: Firestore, id: string): Promise<void> {
@@ -167,6 +190,7 @@ export async function markJobCompleted(firestore: Firestore, id: string): Promis
     errorCode: null,
     errorMessage: null,
     leaseOwner: null,
+    leaseAcquiredAt: null,
     leaseExpiresAt: null,
     failureClass: null,
   })
@@ -193,39 +217,112 @@ export async function markJobFailed(firestore: Firestore, id: string, err: unkno
       failureClass,
       nextAttemptAt: new Date(Date.now() + delayMs).toISOString(),
       leaseOwner: null,
+      leaseAcquiredAt: null,
       leaseExpiresAt: null,
     })
   } else {
     await firestore.collection(COLLECTION).doc(id).update({
       status: 'failed' satisfies BenchmarkJobStatus,
+      // A terminally failed job's completedAt records WHEN it reached that
+      // terminal state (§41's "last attempt" column) — a 'retrying' job
+      // deliberately leaves completedAt untouched, since it isn't done yet.
+      completedAt: new Date().toISOString(),
       errorCode,
       errorMessage,
       failureClass,
       leaseOwner: null,
+      leaseAcquiredAt: null,
       leaseExpiresAt: null,
       nextAttemptAt: null,
     })
   }
 }
 
-// Explicit admin action (§"Fix run completion semantics"): resets every
-// 'failed' job in a run back to 'queued' for a fresh attempt, clearing its
-// failure/retry bookkeeping. Does not touch attemptCount's cumulative
-// history — a job's failureClass/errorCode are cleared since they describe
-// the attempt that's about to be superseded, not a permanent verdict.
-export async function retryFailedJobs(firestore: Firestore, runId: string): Promise<number> {
-  const jobs = await listJobsForRun(firestore, runId)
-  const failed = jobs.filter(j => j.status === 'failed')
-  await Promise.all(failed.map(j => firestore.collection(COLLECTION).doc(j.id).update({
+// Resets one job back to 'queued' for a fresh attempt, clearing its lease/
+// retry bookkeeping — used both by the bulk retryFailedJobs below and by
+// recovery.ts's reconciliation-aware retry path (which calls this only for a
+// failed job whose expected artifact does NOT already exist). Never touches
+// attemptCount's cumulative history.
+export async function resetJobForRetry(firestore: Firestore, id: string): Promise<void> {
+  await firestore.collection(COLLECTION).doc(id).update({
     status: 'queued' satisfies BenchmarkJobStatus,
     errorCode: null,
     errorMessage: null,
     failureClass: null,
     nextAttemptAt: null,
     leaseOwner: null,
+    leaseAcquiredAt: null,
     leaseExpiresAt: null,
-  })))
+  })
+}
+
+// Explicit admin action (§"Fix run completion semantics"): resets every
+// 'failed' job in a run back to 'queued' for a fresh attempt. Blind — does
+// NOT check whether the job's expected artifact already exists first; the
+// admin-facing "Retry Failed Jobs" action goes through
+// recovery.ts's reconcileAndRetryFailedJobs instead, which reconciles each
+// failed job before deciding whether to reset it. This bulk version remains
+// for simpler internal/test callers that don't need that reconciliation.
+export async function retryFailedJobs(firestore: Firestore, runId: string): Promise<number> {
+  const jobs = await listJobsForRun(firestore, runId)
+  const failed = jobs.filter(j => j.status === 'failed')
+  await Promise.all(failed.map(j => resetJobForRetry(firestore, j.id)))
   return failed.length
+}
+
+// The earliest nextAttemptAt among a run's currently-'retrying' jobs — lets
+// executeRunBatch tell an idle caller (a UI poll loop, a manual worker
+// invocation) when it's worth trying again, rather than the caller
+// discovering "nothing to do" only by hammering the API repeatedly (§27).
+export async function getEarliestNextAttempt(firestore: Firestore, runId: string): Promise<string | null> {
+  const snap = await firestore.collection(COLLECTION).where('runId', '==', runId).where('status', '==', 'retrying').get()
+  const dueTimes = snap.docs.map(d => d.data() as BenchmarkJob).map(j => j.nextAttemptAt).filter((t): t is string => t != null)
+  if (dueTimes.length === 0) return null
+  return dueTimes.reduce((min, t) => (t < min ? t : min), dueTimes[0]!)
+}
+
+// ── Workflow-graph helpers (§46) ─────────────────────────────────────────
+//
+// The same "create the next stage's job(s) for this unit of work" logic
+// used both on the normal forward path (execution.ts's runBaselineJob/
+// runPostScoreJob) AND by recovery.ts's reconciliation — recovery must
+// repair the workflow graph, not merely flip one job's status, and reusing
+// these exact functions is what guarantees the two paths can never drift
+// out of sync with each other. Each is itself idempotent (getOrCreateJob),
+// so calling one when the downstream job already exists is always a no-op.
+export async function ensureTransformJobsForSource(firestore: Firestore, run: BenchmarkRun, sourceId: string): Promise<void> {
+  await Promise.all(run.intensities.map(intensity => getOrCreateJob(firestore, {
+    id: transformJobId(run.id, sourceId, intensity),
+    runId: run.id,
+    corpusProjectId: run.corpusProjectId,
+    stage: 'humanite_transform',
+    sourceId,
+    intensity,
+  })))
+}
+
+export async function ensurePostScoreJobForOutput(firestore: Firestore, run: BenchmarkRun, output: BenchmarkOutput, detectorConfigId: string): Promise<void> {
+  await getOrCreateJob(firestore, {
+    id: postScoreJobId(run.id, output.id, detectorConfigId),
+    runId: run.id,
+    corpusProjectId: run.corpusProjectId,
+    stage: 'post_gptzero',
+    sourceId: output.sourceId,
+    outputId: output.id,
+  })
+}
+
+export async function ensureTestEvaluationJobsForOutput(firestore: Firestore, run: BenchmarkRun, output: BenchmarkOutput): Promise<void> {
+  const evaluableTests = run.enabledTests.filter(t => t === A2H01_CODE || t === A2H02_CODE || t in DETERMINISTIC_EVALUATORS)
+  await Promise.all(evaluableTests.map(code => getOrCreateJob(firestore, {
+    id: testEvaluationJobId(run.id, output.id, code, run.testVersion),
+    runId: run.id,
+    corpusProjectId: run.corpusProjectId,
+    stage: 'test_evaluation',
+    sourceId: output.sourceId,
+    outputId: output.id,
+    benchmarkCode: code,
+  })))
 }
 
 export async function listJobsForRun(firestore: Firestore, runId: string): Promise<BenchmarkJob[]> {

@@ -2,11 +2,5 @@
   "framework": "nextjs",
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm build",
-  "outputDirectory": ".next",
-  "crons": [
-    {
-      "path": "/api/cron/a2h-worker",
-      "schedule": "* * * * *"
-    }
-  ]
+  "outputDirectory": ".next"
 }
