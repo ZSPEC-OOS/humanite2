@@ -2,8 +2,9 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { apiListProjects, apiCreateProject, apiDuplicateProject, apiArchiveProject, type CorpusProject } from '@/lib/a2hApi'
+import { apiListProjects, apiCreateProject, apiDuplicateProject, apiArchiveProject, apiDeleteProject, type CorpusProject } from '@/lib/a2hApi'
 import { Spinner } from '@/components/ui/Spinner'
+import { SlideToConfirm } from '@/components/ui/SlideToConfirm'
 
 const STATUS_LABEL: Record<CorpusProject['status'], string> = {
   draft: 'Draft',
@@ -27,6 +28,7 @@ export default function A2HAdminPage() {
   const [busy, setBusy] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -83,6 +85,25 @@ export default function A2HAdminPage() {
       setProjects(prev => prev.map(p => (p.id === project.id ? project : p)))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to archive corpus project.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleDeletePermanently() {
+    if (!selected) return
+    setBusy(true)
+    setError(null)
+    try {
+      await apiDeleteProject(selected.id, selected.name)
+      setProjects(prev => {
+        const remaining = prev.filter(p => p.id !== selected.id)
+        setSelectedId(remaining[0]?.id ?? '')
+        return remaining
+      })
+      setConfirmingDelete(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete corpus project.')
     } finally {
       setBusy(false)
     }
@@ -149,6 +170,33 @@ export default function A2HAdminPage() {
                   <button onClick={handleArchive} disabled={busy}
                     className="text-sm px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
                     Archive
+                  </button>
+                )}
+              </div>
+            )}
+
+            {selected && (
+              <div className="border-t border-gray-100 dark:border-gray-900 pt-3">
+                {confirmingDelete ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      Permanently delete &ldquo;{selected.name}&rdquo;? This removes every topic, source, run, and result tied to it. This cannot be undone.
+                    </p>
+                    <SlideToConfirm
+                      label="Slide to delete permanently"
+                      confirmingLabel="Release to delete"
+                      onConfirm={handleDeletePermanently}
+                      disabled={busy}
+                    />
+                    <button onClick={() => setConfirmingDelete(false)} disabled={busy}
+                      className="w-full text-sm px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-500 dark:text-gray-400 disabled:opacity-40">
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => setConfirmingDelete(true)} disabled={busy}
+                    className="w-full text-sm px-3.5 py-2 rounded-xl border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-40">
+                    Delete Permanently
                   </button>
                 )}
               </div>

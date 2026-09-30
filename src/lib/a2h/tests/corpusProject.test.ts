@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import type { Firestore } from 'firebase-admin/firestore'
-import { DEFAULT_LENGTH_LADDER, TOPICS_PER_DOMAIN } from '../types'
+import { A2H_COLLECTIONS, DEFAULT_LENGTH_LADDER, TOPICS_PER_DOMAIN } from '../types'
 import {
   validateProjectName, validateDomains, validateTopicCountDefault, validateTopicCountOverrides, validateLengthLadder,
   resolveTopicCountByDomain,
   createCorpusProject, getCorpusProject, listCorpusProjects, updateProjectDraft,
   lockBlueprint, markGeneratingIfNeeded, validateCorpusForFreeze, freezeCorpusProject, getCorpusManifest,
-  archiveCorpusProject, duplicateCorpusProject,
+  archiveCorpusProject, duplicateCorpusProject, deleteCorpusProjectPermanently,
 } from '../corpusProject'
 import { generateSource, freezeSource } from '../corpus'
 import { createTopic, listTopics, updateTopic } from '../topics'
@@ -639,5 +639,62 @@ describe('duplicateCorpusProject', () => {
     const { firestore } = makeFirestore()
     const project = await createCorpusProject(firestore, { name: 'Test' })
     await expect(duplicateCorpusProject(firestore, project.id, '   ')).rejects.toThrow()
+  })
+})
+
+describe('deleteCorpusProjectPermanently', () => {
+  // Every cascade-scoped collection, seeded with one row belonging to the
+  // target project and one belonging to a sibling — proves the delete both
+  // reaches every collection and stays scoped to the right project.
+  const CASCADE_COLLECTIONS = [
+    A2H_COLLECTIONS.topics,
+    A2H_COLLECTIONS.sources,
+    A2H_COLLECTIONS.detectorResults,
+    A2H_COLLECTIONS.outputs,
+    A2H_COLLECTIONS.runs,
+    A2H_COLLECTIONS.runSources,
+    A2H_COLLECTIONS.jobs,
+    A2H_COLLECTIONS.testResults,
+  ] as const
+
+  async function seedRow(firestore: Firestore, collectionName: string, corpusProjectId: string) {
+    const id = `${collectionName}-${corpusProjectId}`
+    await firestore.collection(collectionName).doc(id).set({ id, corpusProjectId })
+    return id
+  }
+
+  it('removes the project, its manifest, and every row in every cascade-scoped collection', async () => {
+    const { firestore } = makeFirestore()
+    const target = await createCorpusProject(firestore, { name: 'Target' })
+    const other = await createCorpusProject(firestore, { name: 'Other' })
+
+    const targetIds: Record<string, string> = {}
+    const otherIds: Record<string, string> = {}
+    for (const collectionName of CASCADE_COLLECTIONS) {
+      targetIds[collectionName] = await seedRow(firestore, collectionName, target.id)
+      otherIds[collectionName] = await seedRow(firestore, collectionName, other.id)
+    }
+    await firestore.collection(A2H_COLLECTIONS.manifests).doc(target.id).set({ corpusProjectId: target.id })
+    await firestore.collection(A2H_COLLECTIONS.manifests).doc(other.id).set({ corpusProjectId: other.id })
+
+    await deleteCorpusProjectPermanently(firestore, target.id)
+
+    expect(await getCorpusProject(firestore, target.id)).toBeNull()
+    expect((await firestore.collection(A2H_COLLECTIONS.manifests).doc(target.id).get()).exists).toBe(false)
+    for (const collectionName of CASCADE_COLLECTIONS) {
+      expect((await firestore.collection(collectionName).doc(targetIds[collectionName]!).get()).exists).toBe(false)
+    }
+
+    // The sibling project and its rows are untouched.
+    expect(await getCorpusProject(firestore, other.id)).not.toBeNull()
+    expect((await firestore.collection(A2H_COLLECTIONS.manifests).doc(other.id).get()).exists).toBe(true)
+    for (const collectionName of CASCADE_COLLECTIONS) {
+      expect((await firestore.collection(collectionName).doc(otherIds[collectionName]!).get()).exists).toBe(true)
+    }
+  })
+
+  it('throws for a nonexistent project', async () => {
+    const { firestore } = makeFirestore()
+    await expect(deleteCorpusProjectPermanently(firestore, 'missing')).rejects.toThrow(/not found/i)
   })
 })
