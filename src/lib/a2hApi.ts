@@ -1,10 +1,10 @@
 import { apiFetch } from '@/lib/api'
-import type { BenchmarkTopic, CorpusSource } from '@/lib/a2h/types'
+import type { BenchmarkTopic, CorpusSource, DomainOutlineConfig } from '@/lib/a2h/types'
 import type { CreateTopicInput } from '@/lib/a2h/topics'
 import type { DetectorResult } from '@/lib/a2h/baseline'
 import type { Domain } from '@/lib/style/types'
 
-export type { BenchmarkTopic, CorpusSource, CreateTopicInput, DetectorResult }
+export type { BenchmarkTopic, CorpusSource, CreateTopicInput, DetectorResult, DomainOutlineConfig }
 
 export async function apiListTopics(domainId?: Domain): Promise<BenchmarkTopic[]> {
   const qs = domainId ? `?domainId=${domainId}` : ''
@@ -68,4 +68,41 @@ export async function apiAcquireBaseline(topicId: string, targetWords: number, f
     body: JSON.stringify({ topicId, targetWords, force }),
   })
   return data.baseline
+}
+
+export async function apiGetDomainConfig(domainId: Domain): Promise<DomainOutlineConfig | null> {
+  const data = await apiFetch<{ config: DomainOutlineConfig | null }>(`/admin/a2h/domains/${domainId}`)
+  return data.config
+}
+
+export async function apiSaveDomainTopicCount(domainId: Domain, topicCount: number): Promise<DomainOutlineConfig> {
+  const data = await apiFetch<{ config: DomainOutlineConfig }>(`/admin/a2h/domains/${domainId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ action: 'save', topicCount }),
+  })
+  return data.config
+}
+
+export async function apiLockDomain(domainId: Domain, topicCount?: number): Promise<DomainOutlineConfig> {
+  const data = await apiFetch<{ config: DomainOutlineConfig }>(`/admin/a2h/domains/${domainId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ action: 'lock', topicCount }),
+  })
+  return data.config
+}
+
+export async function apiUnlockDomain(domainId: Domain): Promise<DomainOutlineConfig> {
+  const data = await apiFetch<{ config: DomainOutlineConfig }>(`/admin/a2h/domains/${domainId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ action: 'unlock' }),
+  })
+  return data.config
+}
+
+export async function apiGenerateOutline(domainId: Domain, force = false): Promise<BenchmarkTopic[]> {
+  const data = await apiFetch<{ topics: BenchmarkTopic[] }>('/admin/a2h/topics/generate-outline', {
+    method: 'POST',
+    body: JSON.stringify({ domainId, force }),
+  })
+  return data.topics
 }
