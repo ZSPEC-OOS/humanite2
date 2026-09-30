@@ -1,6 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore'
 import {
-  A2H_COLLECTIONS, IMPLEMENTED_A2H_TESTS, DEFAULT_TEST_VERSION, DEFAULT_DETECTOR_CONFIG_ID,
+  A2H_COLLECTIONS, IMPLEMENTED_A2H_TESTS, DEFAULT_ENABLED_TESTS, DEFAULT_TEST_VERSION, DEFAULT_DETECTOR_CONFIG_ID,
+  FIXTURE_TYPE_FOR_TEST, FIXTURE_REQUIRING_TESTS,
   type BenchmarkRun, type BenchmarkRunSource, type A2HTestCode,
   type BenchmarkJobStage, type BenchmarkJobStatus,
 } from './types'
@@ -9,6 +10,7 @@ import { listTopics, getTopic } from './topics'
 import { getSource } from './corpus'
 import { getHumaniteVersion, getGitCommit } from './buildInfo'
 import { getOrCreateJob, listJobsForRun, cancelQueuedJobs, baselineJobId } from './jobs'
+import { getFixtureSet, listFixturesForSource } from './fixtures'
 
 const COLLECTION = A2H_COLLECTIONS.runs
 const COHORT_COLLECTION = A2H_COLLECTIONS.runSources
@@ -60,7 +62,9 @@ export async function createRun(firestore: Firestore, params: CreateRunParams): 
     selectedTopicIds: relevantTopics.map(t => t.id),
     selectedLengths: [...project.lengthLadder],
     intensities: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-    enabledTests: [...IMPLEMENTED_A2H_TESTS],
+    enabledTests: [...DEFAULT_ENABLED_TESTS],
+    fixtureSetId: null,
+    fixtureVersion: null,
     concurrency: params.concurrency && params.concurrency > 0 ? Math.floor(params.concurrency) : 3,
     status: 'draft',
     createdAt: now,
@@ -84,7 +88,7 @@ export async function listRunsForProject(firestore: Firestore, corpusProjectId: 
 }
 
 export type RunDraftPatch = Partial<
-  Pick<BenchmarkRun, 'name' | 'selectedDomains' | 'selectedTopicIds' | 'selectedLengths' | 'intensities' | 'enabledTests' | 'concurrency' | 'modelProvider' | 'model' | 'detectorConfigId'>
+  Pick<BenchmarkRun, 'name' | 'selectedDomains' | 'selectedTopicIds' | 'selectedLengths' | 'intensities' | 'enabledTests' | 'concurrency' | 'modelProvider' | 'model' | 'detectorConfigId' | 'fixtureSetId'>
 >
 
 // Shape-level validation only (types, ranges, no duplicates) — full
@@ -134,6 +138,10 @@ export async function updateRunDraft(firestore: Firestore, runId: string, patch:
   if (patch.modelProvider !== undefined) next.modelProvider = patch.modelProvider
   if (patch.model !== undefined) next.model = patch.model
   if (patch.detectorConfigId !== undefined) next.detectorConfigId = patch.detectorConfigId?.trim() || DEFAULT_DETECTOR_CONFIG_ID
+  // Shape-level only, matching the rest of this function — whether the
+  // fixture set actually belongs to this project and is locked is checked
+  // in checkRunValidity/validateRun, not here.
+  if (patch.fixtureSetId !== undefined) next.fixtureSetId = patch.fixtureSetId?.trim() || null
 
   next.updatedAt = new Date().toISOString()
   await firestore.collection(COLLECTION).doc(runId).set(next)
@@ -224,6 +232,24 @@ export async function checkRunValidity(
     errors.push('A Humanite model/provider is not configured.')
   }
 
+  // §4/§27: any of A2H-04/05/09/10/13 requires a fixture set that belongs to
+  // this project and is locked — never a mutable "current" fixture set
+  // resolved later.
+  const needsFixtureSet = run.enabledTests.some(t => FIXTURE_REQUIRING_TESTS.includes(t))
+  if (needsFixtureSet) {
+    if (!run.fixtureSetId) {
+      errors.push(`A locked fixture set is required — enabled tests include ${run.enabledTests.filter(t => FIXTURE_REQUIRING_TESTS.includes(t)).join(', ')}.`)
+    } else {
+      const fixtureSet = await getFixtureSet(firestore, run.fixtureSetId)
+      if (!fixtureSet) {
+        errors.push('The selected fixture set no longer exists.')
+      } else {
+        if (fixtureSet.corpusProjectId !== run.corpusProjectId) errors.push('The selected fixture set does not belong to this corpus project.')
+        if (fixtureSet.status !== 'locked') errors.push(`The selected fixture set is ${fixtureSet.status}, not locked.`)
+      }
+    }
+  }
+
   // Only check actual cell coverage once everything else is sound — no
   // point issuing hundreds of "missing frozen source" errors for topic ids
   // that don't even belong to this project.
@@ -280,10 +306,50 @@ export async function validateRun(
     await firestore.collection(COHORT_COLLECTION).doc(cohortRow.id).set(cohortRow)
   }))
 
+  // Snapshot the fixture set's version now (§4) — never re-resolved from a
+  // mutable "current fixture set" later. checkRunValidity already confirmed
+  // fixtureSetId is set and locked whenever it's required.
+  const fixtureVersion = run.fixtureSetId ? (await getFixtureSet(firestore, run.fixtureSetId))!.fixtureVersion : null
+
   const now = new Date().toISOString()
-  const updated: BenchmarkRun = { ...run, status: 'validated', validatedAt: now, updatedAt: now }
+  const updated: BenchmarkRun = { ...run, status: 'validated', fixtureVersion, validatedAt: now, updatedAt: now }
   await firestore.collection(COLLECTION).doc(runId).set(updated)
   return { run: updated, result }
+}
+
+export interface FixtureTestEligibility {
+  eligibleSourceCount: number
+  eligibleOutputCount: number
+  totalSourceCount: number
+  totalOutputCount: number
+}
+
+// §27's pre-run coverage display ("A2H-04 eligible outputs: 3,120 / 12,000")
+// — computed from the run's already-snapshotted cohort (BenchmarkRunSource
+// rows) and fixture set, before any output exists yet, so eligibility can be
+// shown up front rather than discovered only after execution. One fixture
+// query per cohort source (not per source per test), reused across every
+// enabled fixture-requiring test for that source.
+export async function computeFixtureEligibility(firestore: Firestore, run: BenchmarkRun): Promise<Partial<Record<A2HTestCode, FixtureTestEligibility>>> {
+  const relevantTests = run.enabledTests.filter(t => FIXTURE_REQUIRING_TESTS.includes(t))
+  if (relevantTests.length === 0 || !run.fixtureSetId) return {}
+
+  const cohort = await listRunSources(firestore, run.id)
+  const fixtureSetId = run.fixtureSetId
+  const fixturesBySource = new Map(await Promise.all(cohort.map(async row => [row.sourceId, await listFixturesForSource(firestore, fixtureSetId, row.sourceId)] as const)))
+
+  const result: Partial<Record<A2HTestCode, FixtureTestEligibility>> = {}
+  for (const code of relevantTests) {
+    const fixtureType = FIXTURE_TYPE_FOR_TEST[code]!
+    const eligibleSourceCount = cohort.filter(row => (fixturesBySource.get(row.sourceId) ?? []).some(f => f.type === fixtureType)).length
+    result[code] = {
+      eligibleSourceCount,
+      eligibleOutputCount: eligibleSourceCount * run.intensities.length,
+      totalSourceCount: cohort.length,
+      totalOutputCount: cohort.length * run.intensities.length,
+    }
+  }
+  return result
 }
 
 export async function listRunSources(firestore: Firestore, runId: string): Promise<BenchmarkRunSource[]> {
@@ -379,6 +445,12 @@ export interface RunProgress {
   testResultsTotal: number
   a2h01ResultsCompleted: number
   a2h02ResultsCompleted: number
+  // Generic per-test completed-job counts for every fixture-backed
+  // deterministic test enabled on this run (A2H-04/05/09/10/13, ...) — kept
+  // separate from the two named A2H-01/02 fields above (which predate this
+  // phase and existing UI already reads directly) rather than folding
+  // everything into one map and breaking that shape.
+  deterministicResultsCompleted: Partial<Record<A2HTestCode, number>>
   failedJobs: number
   queuedJobs: number
 }
@@ -401,6 +473,11 @@ export async function getRunProgress(firestore: Firestore, runId: string): Promi
   const testCodesForEvaluation = run.enabledTests.filter((t): t is 'A2H-01' | 'A2H-02' => t === 'A2H-01' || t === 'A2H-02')
   const testResultsTotal = outputsTotal * testCodesForEvaluation.length
 
+  const deterministicResultsCompleted: Partial<Record<A2HTestCode, number>> = {}
+  for (const code of run.enabledTests.filter(t => FIXTURE_REQUIRING_TESTS.includes(t))) {
+    deterministicResultsCompleted[code] = jobs.filter(j => j.stage === 'test_evaluation' && j.status === 'completed' && j.benchmarkCode === code).length
+  }
+
   return {
     sources: sourcesCount,
     baselinesTotal: sourcesCount,
@@ -412,6 +489,7 @@ export async function getRunProgress(firestore: Firestore, runId: string): Promi
     testResultsTotal,
     a2h01ResultsCompleted: jobs.filter(j => j.stage === 'test_evaluation' && j.status === 'completed' && j.benchmarkCode === 'A2H-01').length,
     a2h02ResultsCompleted: jobs.filter(j => j.stage === 'test_evaluation' && j.status === 'completed' && j.benchmarkCode === 'A2H-02').length,
+    deterministicResultsCompleted,
     failedJobs: jobs.filter(j => j.status === 'failed').length,
     queuedJobs: jobs.filter(j => j.status === 'queued' || j.status === 'retrying').length,
   }

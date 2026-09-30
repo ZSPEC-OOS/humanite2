@@ -3,23 +3,17 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { DOMAINS, type Domain } from '@/lib/style/types'
-import type { A2HTestCode } from '@/lib/a2h/types'
+import { A2H_TEST_LABELS, IMPLEMENTED_A2H_TESTS, FIXTURE_REQUIRING_TESTS, type A2HTestCode } from '@/lib/a2h/types'
 import {
   apiGetRun, apiGetProject, apiListTopics, apiUpdateRunDraft, apiValidateRun,
   apiStartRun, apiPauseRun, apiResumeRun, apiCancelRun, apiGetRunProgress, apiExecuteRunBatch,
+  apiListFixtureSets, type FixtureSet, type FixtureTestEligibility,
   type BenchmarkRun, type CorpusProject, type BenchmarkTopic, type RunValidationResult, type RunProgress,
 } from '@/lib/a2hApi'
 import { Spinner } from '@/components/ui/Spinner'
 
-const ALL_TESTS: A2HTestCode[] = ['A2H-01', 'A2H-02', 'A2H-03']
-const TEST_LABEL: Record<A2HTestCode, string> = {
-  'A2H-01': 'A2H-01 GPTZero Conversion',
-  'A2H-02': 'A2H-02 Intensity Response',
-  'A2H-03': 'A2H-03 Length Performance',
-  'A2H-04': 'A2H-04', 'A2H-05': 'A2H-05', 'A2H-06': 'A2H-06', 'A2H-07': 'A2H-07', 'A2H-08': 'A2H-08',
-  'A2H-09': 'A2H-09', 'A2H-10': 'A2H-10', 'A2H-11': 'A2H-11', 'A2H-12': 'A2H-12', 'A2H-13': 'A2H-13',
-  'A2H-14': 'A2H-14', 'A2H-15': 'A2H-15', 'A2H-16': 'A2H-16', 'A2H-17': 'A2H-17',
-}
+const ALL_TESTS: A2HTestCode[] = [...IMPLEMENTED_A2H_TESTS]
+const TEST_LABEL = A2H_TEST_LABELS
 
 export default function A2HRunDetailPage() {
   const runId = useParams().runId as string
@@ -32,6 +26,8 @@ export default function A2HRunDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [validation, setValidation] = useState<RunValidationResult | null>(null)
+  const [eligibility, setEligibility] = useState<Partial<Record<A2HTestCode, FixtureTestEligibility>>>({})
+  const [fixtureSets, setFixtureSets] = useState<FixtureSet[]>([])
   const [runningAll, setRunningAll] = useState(false)
 
   const refresh = useCallback(async () => {
@@ -49,10 +45,11 @@ export default function A2HRunDetailPage() {
       .then(async r => {
         if (cancelled) return
         setRun(r)
-        const [p, t] = await Promise.all([apiGetProject(r.corpusProjectId), apiListTopics(r.corpusProjectId)])
+        const [p, t, fs] = await Promise.all([apiGetProject(r.corpusProjectId), apiListTopics(r.corpusProjectId), apiListFixtureSets(r.corpusProjectId)])
         if (cancelled) return
         setProject(p)
         setTopics(t)
+        setFixtureSets(fs)
         if (r.status !== 'draft') setProgress(await apiGetRunProgress(runId))
       })
       .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load run.') })
@@ -102,6 +99,7 @@ export default function A2HRunDetailPage() {
         selectedLengths: run.selectedLengths,
         intensities: run.intensities,
         enabledTests: run.enabledTests,
+        fixtureSetId: run.fixtureSetId,
       })
       setRun(updated)
     } catch (err) {
@@ -116,9 +114,10 @@ export default function A2HRunDetailPage() {
     setBusy(true)
     setError(null)
     try {
-      const { run: updated, result } = await apiValidateRun(run.id)
+      const { run: updated, result, eligibility: nextEligibility } = await apiValidateRun(run.id)
       setRun(updated)
       setValidation(result)
+      setEligibility(nextEligibility as Partial<Record<A2HTestCode, FixtureTestEligibility>>)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Validation failed.')
     } finally {
@@ -296,6 +295,44 @@ export default function A2HRunDetailPage() {
           ))}
         </div>
 
+        {run.enabledTests.some(t => FIXTURE_REQUIRING_TESTS.includes(t)) && (
+          <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-2">
+            <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Fixture Set</h2>
+            <p className="text-xs text-gray-400 dark:text-gray-500">Required — a locked fixture set to back A2H-04/05/09/10/13.</p>
+            {isDraft ? (
+              <select
+                value={run.fixtureSetId ?? ''}
+                onChange={e => setRun({ ...run, fixtureSetId: e.target.value || null })}
+                className="w-full text-sm rounded-xl px-3 py-2 bg-white border border-gray-300 text-gray-700 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300"
+              >
+                <option value="">Select a fixture set…</option>
+                {fixtureSets.map(fs => (
+                  <option key={fs.id} value={fs.id} disabled={fs.status !== 'locked'}>
+                    {fs.name} · {fs.fixtureVersion} · {fs.status}{fs.status !== 'locked' ? ' (not locked)' : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-sm text-gray-700 dark:text-gray-300">{run.fixtureVersion ?? 'none snapshotted'}</p>
+            )}
+            {fixtureSets.length === 0 && (
+              <Link href={`/admin/a2h/fixtures?project=${run.corpusProjectId}`} className="text-xs underline text-gray-500 dark:text-gray-400">
+                No fixture sets yet — create one →
+              </Link>
+            )}
+            {Object.keys(eligibility).length > 0 && (
+              <dl className="space-y-1 text-xs pt-2 border-t border-gray-100 dark:border-gray-900">
+                {(Object.entries(eligibility) as [string, FixtureTestEligibility][]).map(([code, e]) => (
+                  <div key={code} className="flex justify-between">
+                    <dt className="text-gray-500 dark:text-gray-400">{code} eligible outputs</dt>
+                    <dd className="tabular-nums text-gray-700 dark:text-gray-300">{e.eligibleOutputCount.toLocaleString()} / {e.totalOutputCount.toLocaleString()}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </div>
+        )}
+
         <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4">
           <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">Estimated</h2>
           <dl className="space-y-1 text-sm">
@@ -379,15 +416,12 @@ export default function A2HRunDetailPage() {
 
         {(run.status === 'running' || run.status === 'completed' || run.status === 'paused') && (
           <div className="flex flex-wrap gap-2">
-            {run.enabledTests.includes('A2H-01') && (
-              <Link href={`/admin/a2h/runs/${run.id}/tests/a2h-01`} className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">A2H-01 Results →</Link>
-            )}
-            {run.enabledTests.includes('A2H-02') && (
-              <Link href={`/admin/a2h/runs/${run.id}/tests/a2h-02`} className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">A2H-02 Results →</Link>
-            )}
-            {run.enabledTests.includes('A2H-03') && (
-              <Link href={`/admin/a2h/runs/${run.id}/tests/a2h-03`} className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">A2H-03 Results →</Link>
-            )}
+            {ALL_TESTS.filter(code => run.enabledTests.includes(code)).map(code => (
+              <Link key={code} href={`/admin/a2h/runs/${run.id}/tests/${code.toLowerCase()}`}
+                className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">
+                {code} Results →
+              </Link>
+            ))}
           </div>
         )}
       </div>

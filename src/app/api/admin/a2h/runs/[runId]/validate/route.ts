@@ -4,7 +4,7 @@ import { isAuthFailure } from '@/lib/require-auth'
 import { db } from '@/lib/firestore'
 import { getUserApiConfig } from '@/lib/userApiConfig'
 import { resolveProvider } from '@/lib/providerResolution'
-import { validateRun } from '@/lib/a2h/runs'
+import { validateRun, computeFixtureEligibility } from '@/lib/a2h/runs'
 
 // Runs the full §24 precondition checklist and, only on success, freezes
 // the selected source cohort into BenchmarkRunSource rows. Always returns
@@ -21,7 +21,11 @@ export async function POST(req: NextRequest, { params }: { params: { runId: stri
 
   try {
     const { run, result } = await validateRun(db(), params.runId, { hasModelConfig, hasDetectorConfig })
-    return NextResponse.json({ run, result })
+    // §27: show fixture coverage before the run starts — only meaningful
+    // once validation has snapshotted the cohort, so this is empty on a
+    // failed validation.
+    const eligibility = result.ok ? await computeFixtureEligibility(db(), run) : {}
+    return NextResponse.json({ run, result, eligibility })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Validation failed.'
     const notFound = message === 'Benchmark run not found.'
