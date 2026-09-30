@@ -14,6 +14,10 @@ export default function A2HAdminPage() {
           Corpus generation, run execution, and analysis tooling.
         </p>
         <div className="flex flex-col gap-2">
+          <Link href="/admin/a2h/corpus-design"
+            className="text-sm px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+            Corpus Design
+          </Link>
           <Link href="/admin/a2h/topics"
             className="text-sm px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
             Topic Outlines

@@ -1,10 +1,10 @@
 import { apiFetch } from '@/lib/api'
-import type { BenchmarkTopic, CorpusSource, BenchmarkOutput, DomainOutlineConfig } from '@/lib/a2h/types'
+import type { BenchmarkTopic, CorpusSource, BenchmarkOutput, DomainOutlineConfig, LengthLadderConfig } from '@/lib/a2h/types'
 import type { CreateTopicInput } from '@/lib/a2h/topics'
 import type { DetectorResult } from '@/lib/a2h/baseline'
 import type { Domain } from '@/lib/style/types'
 
-export type { BenchmarkTopic, CorpusSource, BenchmarkOutput, CreateTopicInput, DetectorResult, DomainOutlineConfig }
+export type { BenchmarkTopic, CorpusSource, BenchmarkOutput, CreateTopicInput, DetectorResult, DomainOutlineConfig, LengthLadderConfig }
 
 export async function apiListTopics(domainId?: Domain): Promise<BenchmarkTopic[]> {
   const qs = domainId ? `?domainId=${domainId}` : ''
@@ -105,6 +105,51 @@ export async function apiGenerateOutline(domainId: Domain, force = false): Promi
     body: JSON.stringify({ domainId, force }),
   })
   return data.topics
+}
+
+export async function apiRaiseDomainTopicCount(domainId: Domain, topicCount: number): Promise<DomainOutlineConfig> {
+  const data = await apiFetch<{ config: DomainOutlineConfig }>(`/admin/a2h/domains/${domainId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ action: 'raise', topicCount }),
+  })
+  return data.config
+}
+
+export async function apiExpandOutline(domainId: Domain): Promise<BenchmarkTopic[]> {
+  const data = await apiFetch<{ topics: BenchmarkTopic[] }>('/admin/a2h/topics/expand-outline', {
+    method: 'POST',
+    body: JSON.stringify({ domainId }),
+  })
+  return data.topics
+}
+
+export async function apiGetLengthLadder(): Promise<LengthLadderConfig | null> {
+  const data = await apiFetch<{ config: LengthLadderConfig | null }>('/admin/a2h/length-ladder')
+  return data.config
+}
+
+export async function apiSaveLengthLadder(ladder: number[]): Promise<LengthLadderConfig> {
+  const data = await apiFetch<{ config: LengthLadderConfig }>('/admin/a2h/length-ladder', {
+    method: 'PATCH',
+    body: JSON.stringify({ action: 'save', ladder }),
+  })
+  return data.config
+}
+
+export async function apiLockLengthLadder(ladder?: number[]): Promise<LengthLadderConfig> {
+  const data = await apiFetch<{ config: LengthLadderConfig }>('/admin/a2h/length-ladder', {
+    method: 'PATCH',
+    body: JSON.stringify({ action: 'lock', ladder }),
+  })
+  return data.config
+}
+
+export async function apiExpandLengthLadder(additionalLadder: number[]): Promise<LengthLadderConfig> {
+  const data = await apiFetch<{ config: LengthLadderConfig }>('/admin/a2h/length-ladder', {
+    method: 'PATCH',
+    body: JSON.stringify({ action: 'expand', ladder: additionalLadder }),
+  })
+  return data.config
 }
 
 export async function apiListOutputs(topicId: string, targetWords: number, corpusVersion?: string): Promise<BenchmarkOutput[]> {
