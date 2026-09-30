@@ -3,7 +3,10 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { apiGetOutputDetail, type OutputDetail } from '@/lib/a2hApi'
+import { A2H_TEST_LABELS, type A2HTestCode } from '@/lib/a2h/types'
 import { Spinner } from '@/components/ui/Spinner'
+
+const PRESERVATION_CODES: A2HTestCode[] = ['A2H-04', 'A2H-05', 'A2H-09', 'A2H-10', 'A2H-13']
 
 function pct(n: number | null | undefined): string {
   return n == null ? '—' : `${(n * 100).toFixed(1)}%`
@@ -96,6 +99,48 @@ export default function OutputDrilldownPage() {
             </div>
           </div>
           {deltaAi != null && <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">Δ AI probability: {(deltaAi * 100).toFixed(1)} points</p>}
+        </Section>
+
+        <Section title="Preservation">
+          {PRESERVATION_CODES.every(code => !detail.preservation[code]) ? (
+            <p className="text-xs text-gray-400 dark:text-gray-500">No fixture-backed test results for this output.</p>
+          ) : (
+            PRESERVATION_CODES.map(code => {
+              const result = detail.preservation[code]
+              if (!result) return null
+              const measurements = result.measurements as Record<string, unknown>
+              const eligible = measurements['eligible'] === true
+              return (
+                <div key={code} className="border-t border-gray-100 dark:border-gray-900 pt-2 first:border-t-0 first:pt-0">
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">{A2H_TEST_LABELS[code]}</p>
+                  {!eligible ? (
+                    <p className="text-xs text-gray-400 dark:text-gray-500 italic">Not eligible — no fixtures for this source.</p>
+                  ) : code === 'A2H-13' ? (
+                    <div className="space-y-0.5">
+                      {(measurements['terminology'] as Array<{ preferredTerm: string; consistentCount: number; controlledCount: number; forbiddenVariantCount: number; unexpectedVariantCount: number }>).map((t, i) => (
+                        <p key={i} className="text-xs flex items-center gap-2">
+                          <span className="text-gray-700 dark:text-gray-300">{t.preferredTerm}</span>
+                          <span className="text-gray-400 dark:text-gray-500">{t.consistentCount}/{t.controlledCount}</span>
+                          {t.forbiddenVariantCount > 0 && <span className="text-red-600 dark:text-red-400">{t.forbiddenVariantCount} forbidden</span>}
+                          {t.unexpectedVariantCount > 0 && <span className="text-amber-600 dark:text-amber-400">{t.unexpectedVariantCount} unexpected</span>}
+                        </p>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-0.5">
+                      {(measurements['fixtures'] as Array<{ expected: string; status: string; observed: string[] }>).map((f, i) => (
+                        <p key={i} className="text-xs flex items-center gap-2">
+                          <span className="font-mono text-gray-700 dark:text-gray-300">{f.expected}</span>
+                          <span className={f.status === 'preserved' ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>{f.status}</span>
+                          {f.observed.length > 0 && f.status !== 'preserved' && <span className="text-gray-400 dark:text-gray-500">→ {f.observed.join(', ')}</span>}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          )}
         </Section>
 
         <Section title="Raw Data">

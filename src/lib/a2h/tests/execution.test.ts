@@ -7,11 +7,13 @@ import { createRun, updateRunDraft, validateRun, startRun, pauseRun, resumeRun, 
 import { createCorpusProject, updateProjectDraft, lockBlueprint, freezeCorpusProject } from '../corpusProject'
 import { createTopic, listTopics } from '../topics'
 import type { CreateTopicInput } from '../topics'
-import { generateSource, freezeSource } from '../corpus'
+import { generateSource, freezeSource, getSource } from '../corpus'
 import { listTestResultsForRun } from '../testResults'
 import { getA2H02Rows } from '../a2h02'
 import { getA2H03Report } from '../a2h03'
 import { listJobsForRun } from '../jobs'
+import { createFixtureSet, createFixture, lockFixtureSet } from '../fixtures'
+import type { A2HTestCode } from '../types'
 
 function makeFirestore() {
   const collections = new Map<string, Map<string, Record<string, unknown>>>()
@@ -316,5 +318,113 @@ describe('dry-run acceptance (§28): 2 domains x 3 topics x 3 lengths x 3 intens
     // intensity — it must be identical across all three rows.
     const sourceWordsSet = new Set(rows.map(r => r.measurements.sourceWords))
     expect(sourceWordsSet.size).toBe(1)
+  })
+})
+
+// §46's dry-run integration test for Phase 2's fixture-backed deterministic
+// tests: 1 frozen source, 2 intensities, all 5 of A2H-04/05/09/10/13
+// enabled (no A2H-01/02/03) — proves the deterministic tests plug into the
+// existing pipeline without a second job engine, without any extra
+// Humanite/GPTZero calls of their own, and idempotently.
+describe('dry-run acceptance (§46): fixture-backed deterministic tests', () => {
+  const DETERMINISTIC_CODES: A2HTestCode[] = ['A2H-04', 'A2H-05', 'A2H-09', 'A2H-10', 'A2H-13']
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  async function buildRunWithFixtures(firestore: Firestore) {
+    const projectId = await buildFrozenCorpus(firestore, { domains: ['general'], topicsPerDomain: 1, lengths: [100] })
+    const topics = await listTopics(firestore, projectId)
+    const source = await getSource(firestore, projectId, topics[0]!.id, 100)
+
+    const fixtureSet = await createFixtureSet(firestore, { corpusProjectId: projectId, name: 'Test Fixtures' })
+    await createFixture(firestore, {
+      fixtureSetId: fixtureSet.id, sourceId: source!.id, type: 'citation',
+      expected: { kind: 'numeric', exactText: '[1]', normalizedText: '[1]' },
+    })
+    await createFixture(firestore, {
+      fixtureSetId: fixtureSet.id, sourceId: source!.id, type: 'numeric_unit',
+      expected: { kind: 'value_unit', exactText: '5 mg', numericValue: 5, unit: 'mg', rangeStart: null, rangeEnd: null, sign: null, exponent: null, normalizedValue: '5 mg' },
+    })
+    await createFixture(firestore, {
+      fixtureSetId: fixtureSet.id, sourceId: source!.id, type: 'modality',
+      expected: { exactText: 'may', category: 'permission', strength: 2, approvedEquivalentForms: [], anchorText: 'patients may discontinue' },
+    })
+    await createFixture(firestore, {
+      fixtureSetId: fixtureSet.id, sourceId: source!.id, type: 'protected_term',
+      expected: { kind: 'gene', exactText: 'BRCA1', caseSensitive: true, allowedVariants: [] },
+    })
+    await createFixture(firestore, {
+      fixtureSetId: fixtureSet.id, sourceId: source!.id, type: 'terminology',
+      expected: { preferredTerm: 'myocardial infarction', allowedVariants: ['MI'], forbiddenVariants: ['heart episode'], caseSensitive: false, expectedMinimumOccurrences: null },
+    })
+    const { set: locked, result } = await lockFixtureSet(firestore, fixtureSet.id)
+    expect(result.ok).toBe(true)
+    expect(locked.status).toBe('locked')
+
+    const run = await createRun(firestore, { corpusProjectId: projectId, name: 'Fixture Run', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await updateRunDraft(firestore, run.id, { intensities: [3, 6], enabledTests: DETERMINISTIC_CODES, fixtureSetId: locked.id })
+    return run.id
+  }
+
+  it('produces exactly one A2H-04/05/09/10/13 result per output, with no extra Humanite or GPTZero calls', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => jsonResponse(200, { classification: 'ai', class_probabilities: { human: 0.05, ai: 0.9, mixed: 0.05 } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { firestore } = makeFirestore()
+    const runId = await buildRunWithFixtures(firestore)
+
+    const { result } = await validateRun(firestore, runId, { hasModelConfig: true, hasDetectorConfig: true })
+    expect(result.ok).toBe(true)
+    const validated = await getRun(firestore, runId)
+    expect(validated?.fixtureSetId).not.toBeNull()
+    expect(validated?.fixtureVersion).toBe('FIXTURE-V001')
+
+    await startRun(firestore, runId)
+    const client = humanizeStubClient()
+    await runToCompletion(firestore, runId, client)
+
+    const finalRun = await getRun(firestore, runId)
+    expect(finalRun?.status).toBe('completed')
+
+    // 1 source -> 2 Humanite outputs (one per intensity); GPTZero is called
+    // once for the baseline and once per output for post-score — exactly
+    // the same shape as a run with no deterministic tests at all.
+    expect((client.chat.completions.create as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(0)
+    expect(fetchMock.mock.calls.length).toBe(3) // 1 baseline + 2 post-scores
+
+    const jobs = await listJobsForRun(firestore, runId)
+    expect(jobs.filter(j => j.stage === 'humanite_transform')).toHaveLength(2)
+    expect(jobs.filter(j => j.stage === 'test_evaluation')).toHaveLength(10) // 2 outputs x 5 tests
+
+    for (const code of DETERMINISTIC_CODES) {
+      const results = await listTestResultsForRun(firestore, runId, code)
+      expect(results).toHaveLength(2)
+      for (const r of results) {
+        expect(r.measurements['eligible']).toBe(true)
+        expect(r.measurements['fixtureCount']).toBe(1)
+      }
+    }
+  })
+
+  it('re-running a completed run does not duplicate deterministic test results (§47 idempotency)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => jsonResponse(200, { classification: 'ai', class_probabilities: { human: 0.05, ai: 0.9, mixed: 0.05 } })))
+    const { firestore } = makeFirestore()
+    const runId = await buildRunWithFixtures(firestore)
+    await validateRun(firestore, runId, { hasModelConfig: true, hasDetectorConfig: true })
+    await startRun(firestore, runId)
+    await runToCompletion(firestore, runId, humanizeStubClient())
+
+    const before = await listTestResultsForRun(firestore, runId, 'A2H-04')
+    const idsBefore = before.map(r => r.id).sort()
+
+    const result = await executeRunBatch(firestore, runId, { ...EXECUTE_OPTIONS, client: humanizeStubClient() })
+    expect(result.processed).toBe(0)
+    expect(result.stage).toBe('idle')
+
+    const after = await listTestResultsForRun(firestore, runId, 'A2H-04')
+    expect(after).toHaveLength(before.length)
+    expect(after.map(r => r.id).sort()).toEqual(idsBefore)
   })
 })

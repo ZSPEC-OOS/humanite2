@@ -48,6 +48,8 @@ export const A2H_COLLECTIONS = {
   runSources: 'a2hBenchmarkRunSources',
   jobs: 'a2hBenchmarkJobs',
   testResults: 'a2hBenchmarkTestResults',
+  fixtureSets: 'a2hFixtureSets',
+  fixtures: 'a2hBenchmarkFixtures',
 } as const
 
 // This deployment has exactly one detector integration path for A2H
@@ -227,9 +229,104 @@ export type A2HTestCode =
   | 'A2H-01' | 'A2H-02' | 'A2H-03' | 'A2H-04' | 'A2H-05' | 'A2H-06' | 'A2H-07' | 'A2H-08' | 'A2H-09'
   | 'A2H-10' | 'A2H-11' | 'A2H-12' | 'A2H-13' | 'A2H-14' | 'A2H-15' | 'A2H-16' | 'A2H-17'
 
-export const IMPLEMENTED_A2H_TESTS: readonly A2HTestCode[] = ['A2H-01', 'A2H-02', 'A2H-03']
+// Phase 2 adds the first fixture-backed deterministic tests (A2H-04/05/09/10/13)
+// on top of Phase 1's detector-based A2H-01/02/03. A2H-06/07/08/11/12/14-17
+// remain unimplemented — the type carries every code now so the generic
+// BenchmarkTestResult/BenchmarkJob/DeterministicEvaluator architecture never
+// needs another schema migration as later phases fill them in.
+export const IMPLEMENTED_A2H_TESTS: readonly A2HTestCode[] = ['A2H-01', 'A2H-02', 'A2H-03', 'A2H-04', 'A2H-05', 'A2H-09', 'A2H-10', 'A2H-13']
+
+// A new run defaults to the detector-based tests only (§4's "almost no
+// configuration" standard case) — the fixture-backed tests below are valid
+// choices (IMPLEMENTED_A2H_TESTS includes them) but never auto-enabled,
+// since enabling one requires an admin to first pick a locked fixture set;
+// defaulting them on would make every new run invalid until that extra step
+// happens.
+export const DEFAULT_ENABLED_TESTS: readonly A2HTestCode[] = ['A2H-01', 'A2H-02', 'A2H-03']
+
+export const A2H_TEST_LABELS: Record<A2HTestCode, string> = {
+  'A2H-01': 'A2H-01 GPTZero AI-to-Human Conversion',
+  'A2H-02': 'A2H-02 Intensity Response',
+  'A2H-03': 'A2H-03 Length Performance',
+  'A2H-04': 'A2H-04 Citation Preservation',
+  'A2H-05': 'A2H-05 Numeric & Unit Preservation',
+  'A2H-06': 'A2H-06 Grammar Repair',
+  'A2H-07': 'A2H-07 Repeatability',
+  'A2H-08': 'A2H-08 Grammar Damage',
+  'A2H-09': 'A2H-09 Negation & Modality Preservation',
+  'A2H-10': 'A2H-10 Protected-Term Preservation',
+  'A2H-11': 'A2H-11 Style/Tone Control',
+  'A2H-12': 'A2H-12 Factual Repair',
+  'A2H-13': 'A2H-13 Terminology Consistency',
+  'A2H-14': 'A2H-14 Genre/Audience',
+  'A2H-15': 'A2H-15 Candidate Selection',
+  'A2H-16': 'A2H-16 Claim Relationships',
+  'A2H-17': 'A2H-17 Operational Efficiency',
+}
 
 export const DEFAULT_TEST_VERSION = 'A2H-TV001'
+
+// ── Fixture / annotation layer (Phase 2) ────────────────────────────────
+//
+// Fixtures annotate a frozen source — they never mutate CorpusSource.text/
+// sha256, the topic blueprint, or the corpus manifest (§53). A fixture set
+// belongs to exactly one Corpus Project and is versioned independently of
+// the corpus/benchmark version; once locked it is immutable, and a
+// correction becomes a new fixture-set version (FIXTURE-V002, ...) rather
+// than a mutation of locked benchmark truth (§2/§26).
+export type A2HFixtureType = 'citation' | 'numeric_unit' | 'modality' | 'protected_term' | 'terminology'
+export type FixtureSetStatus = 'draft' | 'validated' | 'locked' | 'archived'
+
+export const DEFAULT_FIXTURE_VERSION = 'FIXTURE-V001'
+
+// Which BenchmarkOutput-consuming test each fixture type backs — the same
+// mapping run validation (§27), execution (§7/§28), and eligibility
+// reporting (§29) all key off of.
+export const FIXTURE_TYPE_FOR_TEST: Partial<Record<A2HTestCode, A2HFixtureType>> = {
+  'A2H-04': 'citation',
+  'A2H-05': 'numeric_unit',
+  'A2H-09': 'modality',
+  'A2H-10': 'protected_term',
+  'A2H-13': 'terminology',
+}
+
+export const FIXTURE_REQUIRING_TESTS: readonly A2HTestCode[] = Object.keys(FIXTURE_TYPE_FOR_TEST) as A2HTestCode[]
+
+export interface FixtureSet {
+  id: string
+  corpusProjectId: string
+  name: string
+  fixtureVersion: string
+  status: FixtureSetStatus
+  createdAt: string
+  updatedAt: string
+  lockedAt: string | null
+}
+
+// The generic, type-agnostic fixture record every one of A2H-04/05/09/10/13
+// reads (§3) — `expected` holds whichever of CitationFixtureExpected /
+// NumericUnitFixtureExpected / ModalityFixtureExpected /
+// ProtectedTermFixtureExpected / TerminologyFixtureExpected shape its own
+// `type` defines (see the corresponding a2h0N.ts module), as plain data, the
+// same pattern BenchmarkTestResult.measurements already uses for per-test
+// shapes. sourceStart/sourceEnd/sourceText are optional provenance —
+// exactly where in the frozen source this fixture was found/curated —
+// useful for admin review but not required for evaluation.
+export interface BenchmarkFixture {
+  id: string
+  fixtureSetId: string
+  corpusProjectId: string
+  sourceId: string
+  type: A2HFixtureType
+  ordinal: number
+  expected: Record<string, unknown>
+  sourceStart: number | null
+  sourceEnd: number | null
+  sourceText: string | null
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+}
 
 // A named, versioned execution against a frozen corpus. Every field that
 // affects reproducibility is captured here at creation/validation time and
@@ -253,6 +350,12 @@ export interface BenchmarkRun {
   selectedLengths: number[]
   intensities: number[]
   enabledTests: A2HTestCode[]
+  // Snapshotted at validation time (§4), never re-resolved from a mutable
+  // "current fixture set" later — null until a run enables one of
+  // FIXTURE_REQUIRING_TESTS and is validated. Both are set together: a run
+  // with fixtureSetId set always has fixtureVersion set, and vice versa.
+  fixtureSetId: string | null
+  fixtureVersion: string | null
   concurrency: number
   status: BenchmarkRunStatus
   createdAt: string
@@ -344,6 +447,26 @@ export interface BenchmarkTestResult {
 // tracked (and potentially billable) work.
 export type BenchmarkJobStage = 'baseline_gptzero' | 'humanite_transform' | 'post_gptzero' | 'test_evaluation'
 export type BenchmarkJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'retrying' | 'cancelled'
+
+// ── Deterministic evaluator contract (Phase 2, §8) ──────────────────────
+//
+// Defined here (not in deterministicEvaluators.ts) so every a2h0N.ts module
+// can import these two types without creating a circular value-import with
+// the registry that imports each module's evaluator function.
+export interface DeterministicTestContext {
+  run: BenchmarkRun
+  source: CorpusSource
+  output: BenchmarkOutput
+  fixtures: BenchmarkFixture[]
+}
+
+export interface DeterministicEvaluation {
+  passed: boolean | null
+  score: number | null
+  measurements: Record<string, unknown>
+}
+
+export type DeterministicEvaluator = (ctx: DeterministicTestContext) => DeterministicEvaluation
 
 export interface BenchmarkJob {
   id: string

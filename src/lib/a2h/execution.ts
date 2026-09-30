@@ -1,6 +1,9 @@
 import type { Firestore } from 'firebase-admin/firestore'
 import type OpenAI from 'openai'
-import { DEFAULT_DETECTOR_CONFIG_ID, type BenchmarkRun, type BenchmarkJob, type BenchmarkJobStage } from './types'
+import {
+  DEFAULT_DETECTOR_CONFIG_ID, FIXTURE_TYPE_FOR_TEST,
+  type BenchmarkRun, type BenchmarkJob, type BenchmarkJobStage, type BenchmarkFixture,
+} from './types'
 import { getRun, maybeCompleteRun } from './runs'
 import {
   getOrCreateJob, markJobRunning, markJobCompleted, markJobFailed, listJobsByStageAndStatus,
@@ -11,6 +14,8 @@ import { acquireBaseline, acquirePostScore, getBaseline, getPostScore } from './
 import { getOutputById, transformSource } from './outputs'
 import { computeA2H01Measurements, A2H01_CODE } from './a2h01'
 import { computeA2H02Measurements, A2H02_CODE } from './a2h02'
+import { DETERMINISTIC_EVALUATORS } from './deterministicEvaluators'
+import { listFixturesForSource } from './fixtures'
 import { upsertTestResult } from './testResults'
 
 export interface ExecuteBatchOptions {
@@ -57,6 +62,12 @@ export async function executeRunBatch(firestore: Firestore, runId: string, optio
 
   const maxJobs = options.maxJobsPerStage ?? DEFAULT_MAX_JOBS_PER_STAGE
   const detectorConfigId = run.detectorConfigId ?? DEFAULT_DETECTOR_CONFIG_ID
+  // One fixture query per source, shared across every test_evaluation job
+  // this call processes (§48) — several deterministic tests (A2H-04/05/09/
+  // 10/13) against the same source, and repeated intensities of the same
+  // source, all resolve to the same cached read instead of one Firestore
+  // query per output per test.
+  const fixtureCache = new Map<string, Promise<BenchmarkFixture[]>>()
 
   for (const stage of STAGE_ORDER) {
     const queued = await listJobsByStageAndStatus(firestore, runId, stage, 'queued')
@@ -65,7 +76,7 @@ export async function executeRunBatch(firestore: Firestore, runId: string, optio
     const batch = queued.slice(0, maxJobs)
     let processed = 0
     for (const chunk of chunkArray(batch, Math.max(1, run.concurrency))) {
-      await Promise.all(chunk.map(job => processJob(firestore, run, job, detectorConfigId, options)))
+      await Promise.all(chunk.map(job => processJob(firestore, run, job, detectorConfigId, options, fixtureCache)))
       processed += chunk.length
     }
     await maybeCompleteRun(firestore, runId)
@@ -82,6 +93,7 @@ async function processJob(
   job: BenchmarkJob,
   detectorConfigId: string,
   options: ExecuteBatchOptions,
+  fixtureCache: Map<string, Promise<BenchmarkFixture[]>>,
 ): Promise<void> {
   await markJobRunning(firestore, job.id)
   try {
@@ -92,7 +104,7 @@ async function processJob(
     } else if (job.stage === 'post_gptzero') {
       await runPostScoreJob(firestore, run, job, detectorConfigId, options)
     } else if (job.stage === 'test_evaluation') {
-      await runTestEvaluationJob(firestore, run, job, detectorConfigId)
+      await runTestEvaluationJob(firestore, run, job, detectorConfigId, fixtureCache)
     }
     await markJobCompleted(firestore, job.id)
   } catch (err) {
@@ -161,9 +173,17 @@ async function runTransformJob(
 }
 
 // Scores the transformed output, then enqueues a test_evaluation job for
-// every enabled test that consumes an output directly (A2H-01, A2H-02).
-// A2H-03 never gets a job — it's a pure aggregation of A2H-01/A2H-02 results
-// (see a2h03.ts), computed on demand by the results API, never queued.
+// every enabled test that consumes an output directly (A2H-01, A2H-02, and
+// every fixture-backed deterministic test — A2H-04/05/09/10/13). A2H-03
+// never gets a job — it's a pure aggregation of A2H-01/A2H-02 results (see
+// a2h03.ts), computed on demand by the results API, never queued.
+//
+// The deterministic tests don't need this score to compute their own
+// metric, but they still queue behind it (§7: "can still execute after
+// output generation/post-score within the existing stage order") — this is
+// the one fixed pipeline, never a second one, so post-score isn't
+// special-cased away just because a given run's enabled tests don't happen
+// to read it.
 async function runPostScoreJob(
   firestore: Firestore,
   run: BenchmarkRun,
@@ -177,7 +197,7 @@ async function runPostScoreJob(
 
   await acquirePostScore(firestore, { output, detectorConfigId, apiKey: options.gptZeroApiKey })
 
-  const evaluableTests = run.enabledTests.filter(t => t === A2H01_CODE || t === A2H02_CODE)
+  const evaluableTests = run.enabledTests.filter(t => t === A2H01_CODE || t === A2H02_CODE || t in DETERMINISTIC_EVALUATORS)
   await Promise.all(evaluableTests.map(code => getOrCreateJob(firestore, {
     id: testEvaluationJobId(run.id, output.id, code, run.testVersion),
     runId: run.id,
@@ -189,14 +209,61 @@ async function runPostScoreJob(
   })))
 }
 
-async function runTestEvaluationJob(firestore: Firestore, run: BenchmarkRun, job: BenchmarkJob, detectorConfigId: string): Promise<void> {
+function getCachedFixtures(
+  firestore: Firestore,
+  fixtureCache: Map<string, Promise<BenchmarkFixture[]>>,
+  fixtureSetId: string,
+  sourceId: string,
+): Promise<BenchmarkFixture[]> {
+  const key = `${fixtureSetId}__${sourceId}`
+  let cached = fixtureCache.get(key)
+  if (!cached) {
+    cached = listFixturesForSource(firestore, fixtureSetId, sourceId)
+    fixtureCache.set(key, cached)
+  }
+  return cached
+}
+
+async function runTestEvaluationJob(
+  firestore: Firestore,
+  run: BenchmarkRun,
+  job: BenchmarkJob,
+  detectorConfigId: string,
+  fixtureCache: Map<string, Promise<BenchmarkFixture[]>>,
+): Promise<void> {
   if (!job.outputId || !job.benchmarkCode) throw new Error(`Test evaluation job ${job.id} is missing outputId/benchmarkCode.`)
   const output = await getOutputById(firestore, job.outputId)
   if (!output) throw new Error(`Output ${job.outputId} not found.`)
-  const postScore = await getPostScore(firestore, output.id, detectorConfigId)
-  if (!postScore) throw new Error(`Post-transform score for output ${output.id} not found.`)
 
   const now = new Date().toISOString()
+
+  // Fixture-backed deterministic tests (§28) never touch GPTZero — they
+  // don't need postScore at all, unlike A2H-01/02 below.
+  const evaluator = DETERMINISTIC_EVALUATORS[job.benchmarkCode]
+  if (evaluator) {
+    if (!FIXTURE_TYPE_FOR_TEST[job.benchmarkCode]) throw new Error(`No fixture type mapped for ${job.benchmarkCode}.`)
+    if (!run.fixtureSetId) throw new Error(`Run ${run.id} has no fixtureSetId but enables fixture-backed test ${job.benchmarkCode}.`)
+    const source = await getSourceById(firestore, output.sourceId)
+    if (!source) throw new Error(`Source ${output.sourceId} not found.`)
+    const fixtures = await getCachedFixtures(firestore, fixtureCache, run.fixtureSetId, output.sourceId)
+    const evaluation = evaluator({ run, source, output, fixtures })
+    await upsertTestResult(firestore, {
+      runId: run.id,
+      corpusProjectId: run.corpusProjectId,
+      sourceId: output.sourceId,
+      outputId: output.id,
+      benchmarkCode: job.benchmarkCode,
+      testVersion: run.testVersion,
+      passed: evaluation.passed,
+      score: evaluation.score,
+      measurements: evaluation.measurements,
+      evaluatedAt: now,
+    })
+    return
+  }
+
+  const postScore = await getPostScore(firestore, output.id, detectorConfigId)
+  if (!postScore) throw new Error(`Post-transform score for output ${output.id} not found.`)
 
   if (job.benchmarkCode === A2H01_CODE) {
     const baseline = await getBaseline(firestore, output.sourceId, detectorConfigId)

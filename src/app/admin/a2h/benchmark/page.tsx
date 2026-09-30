@@ -100,6 +100,9 @@ export default function A2HBenchmarkPage() {
               {manifest && <> · Manifest: <span className="font-mono">{manifest.manifestHash.slice(0, 8)}…</span></>}
             </p>
           )}
+          <Link href={`/admin/a2h/fixtures?project=${projectId}`} className="text-xs underline text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300">
+            Fixture Sets (A2H-04/05/09/10/13) →
+          </Link>
         </div>
 
         {project && project.status !== 'frozen' && (

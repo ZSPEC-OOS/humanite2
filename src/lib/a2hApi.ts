@@ -1,22 +1,30 @@
 import { apiFetch } from '@/lib/api'
 import type {
   BenchmarkTopic, CorpusSource, BenchmarkOutput, CorpusProject, CorpusManifest, DetectorResult,
-  BenchmarkRun, BenchmarkRunSource,
+  BenchmarkRun, BenchmarkRunSource, FixtureSet, BenchmarkFixture, A2HFixtureType,
 } from '@/lib/a2h/types'
 import type { CreateTopicInput } from '@/lib/a2h/topics'
 import type { ProjectDraftPatch, FreezeValidationResult } from '@/lib/a2h/corpusProject'
-import type { RunDraftPatch, RunValidationResult, RunProgress } from '@/lib/a2h/runs'
+import type { RunDraftPatch, RunValidationResult, RunProgress, FixtureTestEligibility } from '@/lib/a2h/runs'
 import type { ExecuteBatchResult } from '@/lib/a2h/execution'
 import type { A2H01Report, A2H01Filters } from '@/lib/a2h/a2h01'
 import type { A2H02Report, A2H02Filters } from '@/lib/a2h/a2h02'
 import type { A2H03Report, A2H03Filters, A2H03Stratum } from '@/lib/a2h/a2h03'
+import type { A2H04Report, A2H04Filters } from '@/lib/a2h/a2h04'
+import type { A2H05Report, A2H05Filters } from '@/lib/a2h/a2h05'
+import type { A2H09Report, A2H09Filters } from '@/lib/a2h/a2h09'
+import type { A2H10Report, A2H10Filters } from '@/lib/a2h/a2h10'
+import type { A2H13Report, A2H13Filters } from '@/lib/a2h/a2h13'
+import type { CreateFixtureInput, FixtureUpdatePatch, FixtureSetValidationResult, LockFixtureSetResult, FixtureCandidates } from '@/lib/a2h/fixtures'
 import type { OutputDetail } from '@/lib/a2h/outputDetail'
 import type { Domain } from '@/lib/style/types'
 
 export type {
   BenchmarkTopic, CorpusSource, BenchmarkOutput, CreateTopicInput, DetectorResult, CorpusProject, ProjectDraftPatch, CorpusManifest, FreezeValidationResult,
-  BenchmarkRun, BenchmarkRunSource, RunDraftPatch, RunValidationResult, RunProgress, ExecuteBatchResult,
+  BenchmarkRun, BenchmarkRunSource, RunDraftPatch, RunValidationResult, RunProgress, ExecuteBatchResult, FixtureTestEligibility,
   A2H01Report, A2H01Filters, A2H02Report, A2H02Filters, A2H03Report, A2H03Filters, A2H03Stratum, OutputDetail,
+  A2H04Report, A2H04Filters, A2H05Report, A2H05Filters, A2H09Report, A2H09Filters, A2H10Report, A2H10Filters, A2H13Report, A2H13Filters,
+  FixtureSet, BenchmarkFixture, A2HFixtureType, CreateFixtureInput, FixtureUpdatePatch, FixtureSetValidationResult, LockFixtureSetResult, FixtureCandidates,
 }
 
 // ── Corpus projects ──────────────────────────────────────────────────────
@@ -197,8 +205,14 @@ export async function apiUpdateRunDraft(runId: string, patch: RunDraftPatch): Pr
   return data.run
 }
 
-export async function apiValidateRun(runId: string): Promise<{ run: BenchmarkRun; result: RunValidationResult }> {
-  return apiFetch<{ run: BenchmarkRun; result: RunValidationResult }>(`/admin/a2h/runs/${runId}/validate`, { method: 'POST' })
+export interface ValidateRunResponse {
+  run: BenchmarkRun
+  result: RunValidationResult
+  eligibility: Partial<Record<string, FixtureTestEligibility>>
+}
+
+export async function apiValidateRun(runId: string): Promise<ValidateRunResponse> {
+  return apiFetch<ValidateRunResponse>(`/admin/a2h/runs/${runId}/validate`, { method: 'POST' })
 }
 
 export async function apiStartRun(runId: string): Promise<BenchmarkRun> {
@@ -264,4 +278,87 @@ export async function apiGetA2H03Report(runId: string, filters?: A2H03Filters, s
 export async function apiGetOutputDetail(runId: string, outputId: string): Promise<OutputDetail> {
   const data = await apiFetch<{ detail: OutputDetail }>(`/admin/a2h/runs/${runId}/outputs/${outputId}`)
   return data.detail
+}
+
+export async function apiGetA2H04Report(runId: string, filters?: A2H04Filters): Promise<A2H04Report> {
+  return apiFetch<A2H04Report>(`/admin/a2h/runs/${runId}/tests/a2h-04${toQuery({ ...filters })}`)
+}
+
+export async function apiGetA2H05Report(runId: string, filters?: A2H05Filters): Promise<A2H05Report> {
+  return apiFetch<A2H05Report>(`/admin/a2h/runs/${runId}/tests/a2h-05${toQuery({ ...filters })}`)
+}
+
+export async function apiGetA2H09Report(runId: string, filters?: A2H09Filters): Promise<A2H09Report> {
+  return apiFetch<A2H09Report>(`/admin/a2h/runs/${runId}/tests/a2h-09${toQuery({ ...filters })}`)
+}
+
+export async function apiGetA2H10Report(runId: string, filters?: A2H10Filters): Promise<A2H10Report> {
+  return apiFetch<A2H10Report>(`/admin/a2h/runs/${runId}/tests/a2h-10${toQuery({ ...filters })}`)
+}
+
+export async function apiGetA2H13Report(runId: string, filters?: A2H13Filters): Promise<A2H13Report> {
+  return apiFetch<A2H13Report>(`/admin/a2h/runs/${runId}/tests/a2h-13${toQuery({ ...filters })}`)
+}
+
+// ── Fixture sets & fixtures ──────────────────────────────────────────────
+
+export async function apiListFixtureSets(corpusProjectId: string): Promise<FixtureSet[]> {
+  const data = await apiFetch<{ fixtureSets: FixtureSet[] }>(`/admin/a2h/projects/${corpusProjectId}/fixture-sets`)
+  return data.fixtureSets
+}
+
+export async function apiCreateFixtureSet(corpusProjectId: string, name: string): Promise<FixtureSet> {
+  const data = await apiFetch<{ fixtureSet: FixtureSet }>(`/admin/a2h/projects/${corpusProjectId}/fixture-sets`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+  return data.fixtureSet
+}
+
+export async function apiGetFixtureSet(fixtureSetId: string): Promise<FixtureSet> {
+  const data = await apiFetch<{ fixtureSet: FixtureSet }>(`/admin/a2h/fixture-sets/${fixtureSetId}`)
+  return data.fixtureSet
+}
+
+export async function apiValidateFixtureSet(fixtureSetId: string): Promise<FixtureSetValidationResult> {
+  const data = await apiFetch<{ result: FixtureSetValidationResult }>(`/admin/a2h/fixture-sets/${fixtureSetId}/validate`, { method: 'POST' })
+  return data.result
+}
+
+export async function apiLockFixtureSet(fixtureSetId: string): Promise<LockFixtureSetResult> {
+  return apiFetch<LockFixtureSetResult>(`/admin/a2h/fixture-sets/${fixtureSetId}/lock`, { method: 'POST' })
+}
+
+export async function apiListFixtures(fixtureSetId: string, sourceId?: string): Promise<BenchmarkFixture[]> {
+  const qs = sourceId ? `?sourceId=${encodeURIComponent(sourceId)}` : ''
+  const data = await apiFetch<{ fixtures: BenchmarkFixture[] }>(`/admin/a2h/fixture-sets/${fixtureSetId}/fixtures${qs}`)
+  return data.fixtures
+}
+
+export async function apiCreateFixture(fixtureSetId: string, input: Omit<CreateFixtureInput, 'fixtureSetId'>): Promise<BenchmarkFixture> {
+  const data = await apiFetch<{ fixture: BenchmarkFixture }>(`/admin/a2h/fixture-sets/${fixtureSetId}/fixtures`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  return data.fixture
+}
+
+export async function apiUpdateFixture(fixtureSetId: string, fixtureId: string, patch: FixtureUpdatePatch): Promise<BenchmarkFixture> {
+  const data = await apiFetch<{ fixture: BenchmarkFixture }>(`/admin/a2h/fixture-sets/${fixtureSetId}/fixtures/${fixtureId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+  return data.fixture
+}
+
+export async function apiDeleteFixture(fixtureSetId: string, fixtureId: string): Promise<void> {
+  await apiFetch<{ deleted: true }>(`/admin/a2h/fixture-sets/${fixtureSetId}/fixtures/${fixtureId}`, { method: 'DELETE' })
+}
+
+export async function apiScanSourceForCandidates(fixtureSetId: string, sourceId: string): Promise<FixtureCandidates> {
+  const data = await apiFetch<{ candidates: FixtureCandidates }>(`/admin/a2h/fixture-sets/${fixtureSetId}/scan`, {
+    method: 'POST',
+    body: JSON.stringify({ sourceId }),
+  })
+  return data.candidates
 }
