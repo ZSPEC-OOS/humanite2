@@ -9,7 +9,7 @@ import { getCorpusProject, getCorpusManifest } from './corpusProject'
 import { listTopics, getTopic } from './topics'
 import { getSource } from './corpus'
 import { getHumaniteVersion, getGitCommit } from './buildInfo'
-import { getOrCreateJob, listJobsForRun, cancelQueuedJobs, baselineJobId, repairEvaluationJobId, experimentalTrialJobId } from './jobs'
+import { getOrCreateJob, listJobsForRun, cancelQueuedJobs, retryFailedJobs, baselineJobId, repairEvaluationJobId, experimentalTrialJobId } from './jobs'
 import { getFixtureSet, listFixturesForSource, listFixturesForSet } from './fixtures'
 import { GRAMMAR_ENGINE_VERSION } from './grammarEngine'
 import { getOrCreateExperimentCohort, getExperimentCohort } from './experimentCohort'
@@ -120,6 +120,7 @@ export async function createRun(firestore: Firestore, params: CreateRunParams): 
     validatedAt: null,
     startedAt: null,
     completedAt: null,
+    releasedAt: null,
   }
   await ref.set(run)
   return run
@@ -133,6 +134,14 @@ export async function getRun(firestore: Firestore, id: string): Promise<Benchmar
 export async function listRunsForProject(firestore: Firestore, corpusProjectId: string): Promise<BenchmarkRun[]> {
   const snap = await firestore.collection(COLLECTION).where('corpusProjectId', '==', corpusProjectId).get()
   return snap.docs.map(d => d.data() as BenchmarkRun).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+}
+
+// Cross-project — the Phase 5 cron worker (see /api/cron/a2h-worker) has no
+// single project/admin session to scope to; it processes every run that is
+// actually 'running', regardless of which project or admin started it.
+export async function listRunningRuns(firestore: Firestore): Promise<BenchmarkRun[]> {
+  const snap = await firestore.collection(COLLECTION).where('status', '==', 'running').get()
+  return snap.docs.map(d => d.data() as BenchmarkRun)
 }
 
 export type RunDraftPatch = Partial<
@@ -608,11 +617,15 @@ export async function cancelRun(firestore: Firestore, runId: string): Promise<Be
   return updated
 }
 
-// Called after each executed batch (see execution.ts) — a run reaches
-// 'completed' once every job it owns has reached a terminal state
-// (completed/failed/cancelled), regardless of individual job failures
-// (those stay visible via progress.failedJobs rather than blocking
-// completion outright).
+// Called after each executed batch (see execution.ts) — once every job a
+// run owns has reached a terminal state (completed/failed/cancelled),
+// Phase 5 distinguishes WHICH terminal state a run finished in, since a
+// benchmark run scientifically must not read as a clean 'completed' (and
+// must not be releasable — see release.ts) while it's still carrying
+// unresolved failures:
+//   0 failed jobs  -> 'completed'
+//   >=1 failed job -> 'needs_attention' (retryFailedJobsAction below moves
+//                     it back to 'running' for another pass)
 export async function maybeCompleteRun(firestore: Firestore, runId: string): Promise<BenchmarkRun | null> {
   const run = await getRun(firestore, runId)
   if (!run || run.status !== 'running') return null
@@ -620,10 +633,32 @@ export async function maybeCompleteRun(firestore: Firestore, runId: string): Pro
   if (jobs.length === 0) return null
   const unfinished = jobs.some(j => j.status === 'queued' || j.status === 'running' || j.status === 'retrying')
   if (unfinished) return null
+  const hasFailures = jobs.some(j => j.status === 'failed')
   const now = new Date().toISOString()
-  const updated: BenchmarkRun = { ...run, status: 'completed', completedAt: now, updatedAt: now }
+  const updated: BenchmarkRun = {
+    ...run,
+    status: hasFailures ? 'needs_attention' : 'completed',
+    completedAt: hasFailures ? run.completedAt : now,
+    updatedAt: now,
+  }
   await firestore.collection(COLLECTION).doc(runId).set(updated)
   return updated
+}
+
+// The explicit admin action §"Fix run completion semantics" calls for: reset
+// every failed job back to queued and put the run back into 'running' so the
+// next executeRunBatch call (or cron tick) picks them up. A run can only
+// reach this action from 'needs_attention' — a 'completed' run has nothing
+// to retry, and a 'running'/'paused' run should use pause/resume instead.
+export async function retryFailedJobsAction(firestore: Firestore, runId: string): Promise<{ run: BenchmarkRun; retriedCount: number }> {
+  const run = await getRun(firestore, runId)
+  if (!run) throw new Error('Benchmark run not found.')
+  if (run.status !== 'needs_attention') throw new Error(`Cannot retry failed jobs — run is ${run.status}, not needs_attention.`)
+
+  const retriedCount = await retryFailedJobs(firestore, runId)
+  const updated: BenchmarkRun = { ...run, status: 'running', updatedAt: new Date().toISOString() }
+  await firestore.collection(COLLECTION).doc(runId).set(updated)
+  return { run: updated, retriedCount }
 }
 
 export interface RunProgress {

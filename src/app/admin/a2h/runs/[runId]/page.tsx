@@ -8,6 +8,8 @@ import {
   apiGetRun, apiGetProject, apiListTopics, apiUpdateRunDraft, apiValidateRun,
   apiStartRun, apiPauseRun, apiResumeRun, apiCancelRun, apiGetRunProgress, apiExecuteRunBatch,
   apiListFixtureSets, type FixtureSet, type FixtureTestEligibility,
+  apiRetryFailedJobs, apiGetReleaseReadiness, apiCreateRelease, apiVerifyReleaseIntegrity, apiDownloadExportFile,
+  EXPORT_FILE_NAMES, type ExportFileName, type ReleaseReadiness,
   type BenchmarkRun, type CorpusProject, type BenchmarkTopic, type RunValidationResult, type RunProgress, type RunWorkEstimate,
 } from '@/lib/a2hApi'
 import { Spinner } from '@/components/ui/Spinner'
@@ -72,6 +74,8 @@ export default function A2HRunDetailPage() {
   const [workEstimate, setWorkEstimate] = useState<RunWorkEstimate | null>(null)
   const [fixtureSets, setFixtureSets] = useState<FixtureSet[]>([])
   const [runningAll, setRunningAll] = useState(false)
+  const [releaseInfo, setReleaseInfo] = useState<ReleaseReadiness | null>(null)
+  const [integrityResult, setIntegrityResult] = useState<{ ok: boolean; errors: string[] } | null>(null)
 
   const refresh = useCallback(async () => {
     const r = await apiGetRun(runId)
@@ -221,10 +225,83 @@ export default function A2HRunDetailPage() {
     }
   }
 
+  async function handleRetryFailedJobs() {
+    if (!run) return
+    setBusy(true)
+    setError(null)
+    try {
+      const { run: updated } = await apiRetryFailedJobs(run.id)
+      setRun(updated)
+      setProgress(await apiGetRunProgress(run.id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Retry failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const loadReleaseInfo = useCallback(async () => {
+    if (!run) return
+    try {
+      setReleaseInfo(await apiGetReleaseReadiness(run.id))
+    } catch {
+      // Non-fatal — the release panel simply stays hidden/empty.
+    }
+  }, [run])
+
+  useEffect(() => {
+    if (run && (run.status === 'completed' || run.status === 'needs_attention')) void loadReleaseInfo()
+  }, [run, loadReleaseInfo])
+
+  async function handleFreezeRelease() {
+    if (!run) return
+    if (!window.confirm('Freeze this benchmark release? Once frozen, this run\'s evidence can never be regenerated or overwritten.')) return
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await apiCreateRelease(run.id)
+      if (!result.ok) {
+        setError(`Release blocked: ${result.errors.join(' ')}`)
+      } else {
+        await loadReleaseInfo()
+        setRun(await apiGetRun(run.id))
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Release failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleVerifyIntegrity() {
+    if (!run) return
+    setBusy(true)
+    setError(null)
+    try {
+      setIntegrityResult(await apiVerifyReleaseIntegrity(run.id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Integrity check failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleDownload(file: ExportFileName) {
+    if (!run) return
+    try {
+      await apiDownloadExportFile(run.id, file)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed.')
+    }
+  }
+
   // Loops apiExecuteRunBatch — the interactive equivalent of a worker
-  // picking jobs off a queue, since this deployment has no background
-  // worker process. Stops when the run leaves 'running' (paused, completed,
-  // or cancelled elsewhere) or on any error.
+  // picking jobs off a queue. A Vercel Cron job (see
+  // /api/cron/a2h-worker) also drives the run forward independently of any
+  // open browser tab; this loop is a convenience for watching progress
+  // live, not the only thing keeping the run moving. Stops when the run
+  // leaves 'running' (paused, needs_attention, completed, or cancelled
+  // elsewhere) or on any error.
   async function handleRunAll() {
     if (!run) return
     setRunningAll(true)
@@ -447,6 +524,26 @@ export default function A2HRunDetailPage() {
           </div>
         )}
 
+        {run.status === 'needs_attention' && (
+          <div className="border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 rounded-2xl p-4 space-y-2">
+            <h2 className="text-xs font-semibold text-red-700 dark:text-red-400 uppercase tracking-wider">Needs Attention</h2>
+            <p className="text-sm text-red-700 dark:text-red-400">
+              Every job reached a terminal state, but at least one FAILED — this run cannot be released until every failure is
+              resolved. Retry to requeue the failed jobs, or cancel the run to abandon it.
+            </p>
+            <div className="flex items-center gap-2">
+              <button onClick={handleRetryFailedJobs} disabled={busy}
+                className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">
+                {busy ? 'Retrying…' : 'Retry Failed Jobs'}
+              </button>
+              <button onClick={handleCancel} disabled={busy}
+                className="text-xs font-medium px-3.5 py-2 rounded-xl border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 disabled:opacity-40">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         {progress && (
           <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-1.5">
             <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">Progress</h2>
@@ -473,7 +570,75 @@ export default function A2HRunDetailPage() {
           </div>
         )}
 
-        {(run.status === 'running' || run.status === 'completed' || run.status === 'paused' || run.status === 'failed') && (
+        {(run.status === 'completed' || run.status === 'needs_attention') && releaseInfo && (
+          <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-3">
+            <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Benchmark Release</h2>
+
+            {!releaseInfo.release && (
+              <>
+                {releaseInfo.readiness.errors.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-red-700 dark:text-red-400">Not ready to release:</p>
+                    {releaseInfo.readiness.errors.map((e, i) => <p key={i} className="text-sm text-red-600 dark:text-red-400">• {e}</p>)}
+                  </div>
+                )}
+                {releaseInfo.readiness.warnings.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-amber-700 dark:text-amber-400">Warnings:</p>
+                    {releaseInfo.readiness.warnings.map((w, i) => <p key={i} className="text-sm text-amber-600 dark:text-amber-400">• {w}</p>)}
+                  </div>
+                )}
+                <p className="text-xs text-gray-400 dark:text-gray-500">
+                  Freezing a release locks this run&apos;s evidence permanently — outputs, results, and reported numbers can never be
+                  regenerated or overwritten afterward.
+                </p>
+                <button onClick={handleFreezeRelease} disabled={busy || !releaseInfo.readiness.ok}
+                  className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">
+                  {busy ? 'Freezing…' : 'Freeze Benchmark Release'}
+                </button>
+              </>
+            )}
+
+            {releaseInfo.release && (
+              <>
+                <dl className="space-y-1 text-sm">
+                  <div className="flex justify-between"><dt className="text-gray-500 dark:text-gray-400">Release version</dt><dd className="text-gray-800 dark:text-gray-200">{releaseInfo.release.releaseVersion}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500 dark:text-gray-400">Released at</dt><dd className="text-gray-800 dark:text-gray-200">{new Date(releaseInfo.release.releasedAt).toLocaleString()}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500 dark:text-gray-400">Release hash</dt><dd className="font-mono text-xs text-gray-600 dark:text-gray-400">{releaseInfo.release.releaseHash.slice(0, 16)}…</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500 dark:text-gray-400">Primary outputs</dt><dd className="tabular-nums text-gray-800 dark:text-gray-200">{releaseInfo.release.primaryOutputCount.toLocaleString()}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500 dark:text-gray-400">Test results</dt><dd className="tabular-nums text-gray-800 dark:text-gray-200">{releaseInfo.release.testResultCount.toLocaleString()}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500 dark:text-gray-400">Excluded records</dt><dd className="tabular-nums text-gray-800 dark:text-gray-200">{releaseInfo.release.excludedRecordCount.toLocaleString()}</dd></div>
+                </dl>
+
+                <div className="flex items-center gap-2">
+                  <button onClick={handleVerifyIntegrity} disabled={busy}
+                    className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
+                    {busy ? 'Verifying…' : 'Verify Integrity'}
+                  </button>
+                </div>
+                {integrityResult && (
+                  <p className={`text-sm ${integrityResult.ok ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {integrityResult.ok ? 'Integrity verified — all stored hashes match current records.' : `Integrity check failed: ${integrityResult.errors.join(' ')}`}
+                  </p>
+                )}
+
+                <div className="space-y-1 pt-2 border-t border-gray-100 dark:border-gray-900">
+                  <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wider">Export</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {EXPORT_FILE_NAMES.map(file => (
+                      <button key={file} onClick={() => handleDownload(file)}
+                        className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500">
+                        {file}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {(run.status === 'running' || run.status === 'completed' || run.status === 'paused' || run.status === 'failed' || run.status === 'needs_attention') && (
           <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-1.5">
             <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">Results (numerical order)</h2>
             {ALL_TESTS.filter(code => run.enabledTests.includes(code)).map(code => {

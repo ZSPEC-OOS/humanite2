@@ -24,6 +24,18 @@ export interface RepairResult {
   succeeded: boolean
   text: string
   sentencesRepaired: number
+  // Phase 5 telemetry: summed across every repairSentence call this attempt
+  // made (zero or more) — null only when no call was actually made
+  // (attempted: false), never fabricated.
+  modelCalls: number
+  inputTokens: number | null
+  outputTokens: number | null
+}
+
+interface RepairedSentence {
+  text: string
+  inputTokens: number | null
+  outputTokens: number | null
 }
 
 // A fact failure is only repairable at the sentence level when its source
@@ -45,7 +57,7 @@ export async function repairSentence(
   failures: FidelityFailure[],
   tone: string,
   domain: string,
-): Promise<string | null> {
+): Promise<RepairedSentence | null> {
   const requiredFacts = failures.map(f => `- "${f.fact.text}" (${f.fact.type})`).join('\n')
   const prompt = `Rewrite ONLY the CURRENT sentence below so every required fact appears exactly as written, while keeping the same "${tone}" tone and "${domain}" domain conventions as the rest of the passage. Preserve as much of the current sentence's phrasing as possible — correct only what is necessary.
 
@@ -69,7 +81,12 @@ ${requiredFacts}`
   })
 
   const text = completion.choices[0]?.message?.content?.trim()
-  return text || null
+  if (!text) return null
+  return {
+    text,
+    inputTokens: typeof completion.usage?.prompt_tokens === 'number' ? completion.usage.prompt_tokens : null,
+    outputTokens: typeof completion.usage?.completion_tokens === 'number' ? completion.usage.completion_tokens : null,
+  }
 }
 
 export async function repairChunk(
@@ -82,7 +99,7 @@ export async function repairChunk(
 ): Promise<RepairResult> {
   const fidelityResult = validateFactLedger(sourceText, outputText)
   if (fidelityResult.passed) {
-    return { attempted: false, strategy: 'none', succeeded: false, text: outputText, sentencesRepaired: 0 }
+    return { attempted: false, strategy: 'none', succeeded: false, text: outputText, sentencesRepaired: 0, modelCalls: 0, inputTokens: null, outputTokens: null }
   }
 
   const trimmedOutput = outputText.trim()
@@ -93,7 +110,7 @@ export async function repairChunk(
 
   const strategy = classifyFailure(fidelityResult.failures, new Set(outputIndexBySourceIndex.keys()))
   if (strategy === 'none') {
-    return { attempted: false, strategy: 'none', succeeded: false, text: outputText, sentencesRepaired: 0 }
+    return { attempted: false, strategy: 'none', succeeded: false, text: outputText, sentencesRepaired: 0, modelCalls: 0, inputTokens: null, outputTokens: null }
   }
 
   // Several failing facts can point at the same output sentence — repair
@@ -109,14 +126,22 @@ export async function repairChunk(
 
   const spans = locateSentenceSpans(trimmedOutput, outputSentences)
   const replacements = new Map<number, string>()
+  let modelCalls = 0
+  let inputTokens: number | null = null
+  let outputTokens: number | null = null
   for (const [outputIndex, failures] of failuresByOutputIndex) {
     const sourceIndex = failures[0]!.fact.sentenceIndex
     const repaired = await repairSentence(client, model, sourceSentences[sourceIndex]!, outputSentences[outputIndex]!, failures, tone, domain)
-    if (repaired) replacements.set(outputIndex, repaired)
+    modelCalls++
+    if (repaired) {
+      replacements.set(outputIndex, repaired.text)
+      if (repaired.inputTokens != null) inputTokens = (inputTokens ?? 0) + repaired.inputTokens
+      if (repaired.outputTokens != null) outputTokens = (outputTokens ?? 0) + repaired.outputTokens
+    }
   }
 
   if (replacements.size === 0) {
-    return { attempted: true, strategy, succeeded: false, text: outputText, sentencesRepaired: 0 }
+    return { attempted: true, strategy, succeeded: false, text: outputText, sentencesRepaired: 0, modelCalls, inputTokens, outputTokens }
   }
 
   const repairedText = spliceSentences(trimmedOutput, spans, replacements)
@@ -130,6 +155,9 @@ export async function repairChunk(
     succeeded: verification.passed,
     text: verification.passed ? repairedText : outputText,
     sentencesRepaired: verification.passed ? replacements.size : 0,
+    modelCalls,
+    inputTokens,
+    outputTokens,
   }
 }
 
@@ -144,7 +172,13 @@ export async function repairChunk(
 // targeted completion, minimal-change instruction) for that purpose.
 const GRAMMAR_REPAIR_SYSTEM_PROMPT = `You are a precise copy editor. Fix ONLY grammatical errors in the sentence you are given — subject-verb agreement, verb tense, articles, prepositions, pronoun/number agreement, sentence fragments, run-ons, punctuation, modifier placement, and parallelism. Preserve the original meaning, facts, numbers, and wording as closely as possible; change only what grammar requires. Output ONLY the corrected sentence — no preamble, no commentary, no surrounding quotation marks.`
 
-export async function repairGrammar(client: OpenAI, model: string, corruptedText: string): Promise<string | null> {
+export interface GrammarRepairCallResult {
+  text: string | null
+  inputTokens: number | null
+  outputTokens: number | null
+}
+
+export async function repairGrammar(client: OpenAI, model: string, corruptedText: string): Promise<GrammarRepairCallResult> {
   const completion = await client.chat.completions.create({
     model,
     messages: [
@@ -155,5 +189,9 @@ export async function repairGrammar(client: OpenAI, model: string, corruptedText
     temperature: 0.3,
   })
   const text = completion.choices[0]?.message?.content?.trim()
-  return text || null
+  return {
+    text: text || null,
+    inputTokens: typeof completion.usage?.prompt_tokens === 'number' ? completion.usage.prompt_tokens : null,
+    outputTokens: typeof completion.usage?.completion_tokens === 'number' ? completion.usage.completion_tokens : null,
+  }
 }

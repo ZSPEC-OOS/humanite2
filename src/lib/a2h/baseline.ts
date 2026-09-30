@@ -23,8 +23,9 @@ async function getDetectorResult(firestore: Firestore, id: string): Promise<Dete
   return doc.exists ? (doc.data() as DetectorResult) : null
 }
 
-async function runGPTZero(text: string, apiKey: string): Promise<Pick<DetectorResult, 'detector' | 'aiProbability' | 'humanProbability' | 'mixedProbability' | 'classification' | 'analyzedAt' | 'rawResponse'>> {
+async function runGPTZero(text: string, apiKey: string): Promise<Pick<DetectorResult, 'detector' | 'aiProbability' | 'humanProbability' | 'mixedProbability' | 'classification' | 'analyzedAt' | 'rawResponse' | 'latencyMs'>> {
   const provider = new GPTZeroProvider(apiKey)
+  const start = Date.now()
   const { result, raw } = await provider.detectWithRaw(text)
   return {
     detector: 'gptzero',
@@ -34,6 +35,7 @@ async function runGPTZero(text: string, apiKey: string): Promise<Pick<DetectorRe
     classification: result.classification,
     analyzedAt: new Date().toISOString(),
     rawResponse: raw,
+    latencyMs: Date.now() - start,
   }
 }
 
@@ -70,6 +72,16 @@ export async function listPostScoresForOutputs(firestore: Firestore, outputIds: 
   const map: Record<string, DetectorResult> = {}
   for (const [id, result] of entries) if (result) map[id] = result
   return map
+}
+
+// Phase 5 export layer: every baseline AND post-transform DetectorResult
+// this run produced or reused — a baseline's own runId is only provenance
+// (§8: "which run first produced it"), so this can surface baselines this
+// run reused from an earlier run too, which is correct: they still scored
+// text this run's own A2H-01/02 measurements depend on.
+export async function listDetectorResultsForRun(firestore: Firestore, runId: string): Promise<DetectorResult[]> {
+  const snap = await firestore.collection(COLLECTION).where('runId', '==', runId).get()
+  return snap.docs.map(d => d.data() as DetectorResult)
 }
 
 export interface AcquireBaselineParams {

@@ -1,12 +1,14 @@
 import { describe, it, expect, vi } from 'vitest'
 import type OpenAI from 'openai'
-import { classifyFailure, repairChunk } from '../repair'
+import { classifyFailure, repairChunk, repairGrammar } from '../repair'
 import { validateFactLedger } from '@/lib/fidelity'
 
-function mockRepairClient(...completions: string[]) {
+function mockRepairClient(...completions: Array<string | { content: string; usage?: { prompt_tokens: number; completion_tokens: number } }>) {
   const create = vi.fn()
-  for (const content of completions) {
-    create.mockResolvedValueOnce({ model: 'gpt-4o-mini', choices: [{ message: { content } }] })
+  for (const c of completions) {
+    const content = typeof c === 'string' ? c : c.content
+    const usage = typeof c === 'string' ? undefined : c.usage
+    create.mockResolvedValueOnce({ model: 'gpt-4o-mini', choices: [{ message: { content } }], usage })
   }
   return { client: { chat: { completions: { create } } } as unknown as OpenAI, create }
 }
@@ -83,5 +85,51 @@ describe('repairChunk', () => {
     expect(result.attempted).toBe(false)
     expect(result.strategy).toBe('none')
     expect(create).not.toHaveBeenCalled()
+  })
+
+  it('reports zero calls and null tokens when it never attempts a repair (Phase 5 telemetry)', async () => {
+    const text = 'The dose is 5 mg, and it must not exceed 20 mg per day.'
+    const { client } = mockRepairClient()
+    const result = await repairChunk(client, 'gpt-4o-mini', text, text, 'balanced', 'medical')
+    expect(result.modelCalls).toBe(0)
+    expect(result.inputTokens).toBeNull()
+    expect(result.outputTokens).toBeNull()
+  })
+
+  it('counts modelCalls and null tokens when the provider reports no usage (Phase 5 telemetry)', async () => {
+    const source = 'The dose is 5 mg. The trial had 40 patients.'
+    const corrupted = 'The dose is 50 mg. The trial had 40 patients.'
+    const { client } = mockRepairClient('The dose is 5 mg.')
+    const result = await repairChunk(client, 'gpt-4o-mini', source, corrupted, 'balanced', 'medical')
+    expect(result.modelCalls).toBe(1)
+    expect(result.inputTokens).toBeNull()
+    expect(result.outputTokens).toBeNull()
+  })
+
+  it('sums real token usage across repaired sentences when the provider reports it (Phase 5 telemetry)', async () => {
+    const source = 'Server Alpha runs firmware 2.1; Server Beta runs firmware 3.4.'
+    const corrupted = 'Server Alpha runs firmware 3.4; Server Beta runs firmware 2.1.'
+    const { client } = mockRepairClient({ content: 'Server Alpha runs firmware 2.1; Server Beta runs firmware 3.4.', usage: { prompt_tokens: 150, completion_tokens: 30 } })
+    const result = await repairChunk(client, 'gpt-4o-mini', source, corrupted, 'balanced', 'technical')
+    expect(result.modelCalls).toBe(1)
+    expect(result.inputTokens).toBe(150)
+    expect(result.outputTokens).toBe(30)
+  })
+})
+
+describe('repairGrammar', () => {
+  it('returns the corrected text and real token usage when the provider reports it', async () => {
+    const { client } = mockRepairClient({ content: 'A pathogen enters the bloodstream.', usage: { prompt_tokens: 80, completion_tokens: 12 } })
+    const result = await repairGrammar(client, 'gpt-4o-mini', 'A pathogen enter the bloodstream.')
+    expect(result.text).toBe('A pathogen enters the bloodstream.')
+    expect(result.inputTokens).toBe(80)
+    expect(result.outputTokens).toBe(12)
+  })
+
+  it('reports null tokens (not fabricated) when the provider omits usage', async () => {
+    const { client } = mockRepairClient('A pathogen enters the bloodstream.')
+    const result = await repairGrammar(client, 'gpt-4o-mini', 'A pathogen enter the bloodstream.')
+    expect(result.inputTokens).toBeNull()
+    expect(result.outputTokens).toBeNull()
   })
 })

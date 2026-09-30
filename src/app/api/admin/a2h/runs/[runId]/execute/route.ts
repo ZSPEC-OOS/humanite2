@@ -41,6 +41,7 @@ export async function POST(req: NextRequest, { params }: { params: { runId: stri
       model,
       modelProvider: usingByok ? (baseURL ?? 'openai') : 'openai',
       gptZeroApiKey,
+      workerId: `interactive-${auth.claims.sub}`,
     })
     return NextResponse.json(result)
   } catch (err) {

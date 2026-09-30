@@ -3,8 +3,8 @@ import type { Firestore } from 'firebase-admin/firestore'
 import type OpenAI from 'openai'
 import type { Domain } from '@/lib/style/types'
 import {
-  createRun, getRun, listRunsForProject, updateRunDraft, checkRunValidity, validateRun,
-  listRunSources, startRun, pauseRun, resumeRun, cancelRun, getRunProgress,
+  createRun, getRun, listRunsForProject, listRunningRuns, updateRunDraft, checkRunValidity, validateRun,
+  listRunSources, startRun, pauseRun, resumeRun, cancelRun, getRunProgress, maybeCompleteRun, retryFailedJobsAction,
 } from '../runs'
 import { listJobsForRun } from '../jobs'
 import { createCorpusProject, updateProjectDraft, lockBlueprint, freezeCorpusProject } from '../corpusProject'
@@ -344,6 +344,102 @@ describe('run status transitions', () => {
     await startRun(firestore, run.id)
     await cancelRun(firestore, run.id)
     await expect(cancelRun(firestore, run.id)).rejects.toThrow(/already/i)
+  })
+})
+
+describe('maybeCompleteRun / needs_attention (Phase 5)', () => {
+  it('completes cleanly when every job is completed with zero failures', async () => {
+    const { firestore } = makeFirestore()
+    const projectId = await buildFrozenCorpus(firestore, { domains: ['general'], topicsPerDomain: 1, lengths: [100] })
+    const run = await createRun(firestore, { corpusProjectId: projectId, name: 'Run 1', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await validateRun(firestore, run.id, OK_OPTIONS)
+    await startRun(firestore, run.id)
+    const jobs = await listJobsForRun(firestore, run.id)
+    for (const job of jobs) {
+      await firestore.collection('a2hBenchmarkJobs').doc(job.id).update({ status: 'completed', completedAt: new Date().toISOString() })
+    }
+    const completed = await maybeCompleteRun(firestore, run.id)
+    expect(completed?.status).toBe('completed')
+    expect(completed?.completedAt).not.toBeNull()
+  })
+
+  it('reaches needs_attention (never completed) when at least one job is terminally failed', async () => {
+    const { firestore } = makeFirestore()
+    const projectId = await buildFrozenCorpus(firestore, { domains: ['general'], topicsPerDomain: 1, lengths: [100] })
+    const run = await createRun(firestore, { corpusProjectId: projectId, name: 'Run 1', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await validateRun(firestore, run.id, OK_OPTIONS)
+    await startRun(firestore, run.id)
+    const jobs = await listJobsForRun(firestore, run.id)
+    for (const [i, job] of jobs.entries()) {
+      await firestore.collection('a2hBenchmarkJobs').doc(job.id).update({
+        status: i === 0 ? 'failed' : 'completed',
+        completedAt: new Date().toISOString(),
+      })
+    }
+    const result = await maybeCompleteRun(firestore, run.id)
+    expect(result?.status).toBe('needs_attention')
+    expect(result?.completedAt).toBeNull()
+  })
+
+  it('stays unfinished (returns null) while any job is still queued/running/retrying', async () => {
+    const { firestore } = makeFirestore()
+    const projectId = await buildFrozenCorpus(firestore, { domains: ['general'], topicsPerDomain: 1, lengths: [100] })
+    const run = await createRun(firestore, { corpusProjectId: projectId, name: 'Run 1', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await validateRun(firestore, run.id, OK_OPTIONS)
+    await startRun(firestore, run.id)
+    expect(await maybeCompleteRun(firestore, run.id)).toBeNull()
+    const stillRunning = await getRun(firestore, run.id)
+    expect(stillRunning?.status).toBe('running')
+  })
+})
+
+describe('retryFailedJobsAction (Phase 5)', () => {
+  it('requires needs_attention — refuses from running, paused, or completed', async () => {
+    const { firestore } = makeFirestore()
+    const projectId = await buildFrozenCorpus(firestore, { domains: ['general'], topicsPerDomain: 1, lengths: [100] })
+    const run = await createRun(firestore, { corpusProjectId: projectId, name: 'Run 1', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await validateRun(firestore, run.id, OK_OPTIONS)
+    await startRun(firestore, run.id)
+    await expect(retryFailedJobsAction(firestore, run.id)).rejects.toThrow(/not needs_attention/i)
+  })
+
+  it('resets failed jobs to queued and puts the run back to running', async () => {
+    const { firestore } = makeFirestore()
+    const projectId = await buildFrozenCorpus(firestore, { domains: ['general'], topicsPerDomain: 1, lengths: [100] })
+    const run = await createRun(firestore, { corpusProjectId: projectId, name: 'Run 1', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await validateRun(firestore, run.id, OK_OPTIONS)
+    await startRun(firestore, run.id)
+    const jobs = await listJobsForRun(firestore, run.id)
+    for (const [i, job] of jobs.entries()) {
+      await firestore.collection('a2hBenchmarkJobs').doc(job.id).update({
+        status: i === 0 ? 'failed' : 'completed',
+        completedAt: new Date().toISOString(),
+      })
+    }
+    await maybeCompleteRun(firestore, run.id)
+    expect((await getRun(firestore, run.id))?.status).toBe('needs_attention')
+
+    const { run: retried, retriedCount } = await retryFailedJobsAction(firestore, run.id)
+    expect(retried.status).toBe('running')
+    expect(retriedCount).toBe(1)
+    const jobsAfter = await listJobsForRun(firestore, run.id)
+    expect(jobsAfter.find(j => j.id === jobs[0]!.id)?.status).toBe('queued')
+  })
+})
+
+describe('listRunningRuns (Phase 5 cron worker)', () => {
+  it('returns only runs currently in running status, across projects', async () => {
+    const { firestore } = makeFirestore()
+    const projectId = await buildFrozenCorpus(firestore, { domains: ['general'], topicsPerDomain: 1, lengths: [100] })
+    const runA = await createRun(firestore, { corpusProjectId: projectId, name: 'Run A', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    const runB = await createRun(firestore, { corpusProjectId: projectId, name: 'Run B', modelProvider: 'openai', model: 'gpt-4o-mini' })
+    await validateRun(firestore, runA.id, OK_OPTIONS)
+    await startRun(firestore, runA.id)
+    // runB stays 'draft'.
+
+    const running = await listRunningRuns(firestore)
+    expect(running.map(r => r.id)).toEqual([runA.id])
+    expect(running.some(r => r.id === runB.id)).toBe(false)
   })
 })
 

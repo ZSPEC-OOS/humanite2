@@ -38,6 +38,7 @@ function makeFirestore() {
     const docs = docsFor(name)
     return {
       id,
+      _docs: docs,
       get: async () => ({ exists: docs.has(id), data: () => docs.get(id) }),
       set: async (data: Record<string, unknown>) => { docs.set(id, data) },
       update: async (patch: Record<string, unknown>) => { docs.set(id, { ...(docs.get(id) ?? {}), ...patch }) },
@@ -60,7 +61,18 @@ function makeFirestore() {
     }
   }
 
-  return { firestore: { collection } as unknown as Firestore }
+  // A single-threaded transaction mock — sufficient for claimJob's
+  // read-then-conditionally-write logic under vitest's sequential execution
+  // (no real concurrent callers within one test).
+  async function runTransaction<T>(fn: (tx: { get: (ref: ReturnType<typeof docRef>) => Promise<{ exists: boolean; data: () => Record<string, unknown> | undefined }>; set: (ref: ReturnType<typeof docRef>, data: Record<string, unknown>) => void }) => Promise<T>): Promise<T> {
+    const tx = {
+      get: async (ref: ReturnType<typeof docRef>) => ref.get(),
+      set: (ref: ReturnType<typeof docRef>, data: Record<string, unknown>) => { ref._docs.set(ref.id, data) },
+    }
+    return fn(tx)
+  }
+
+  return { firestore: { collection, runTransaction } as unknown as Firestore }
 }
 
 function words(n: number): string {

@@ -48,6 +48,28 @@ function stubClient(): OpenAI {
   return { chat: { completions: { create: chatCreate } } } as unknown as OpenAI
 }
 
+// Same stub, but WITH prompt_tokens/completion_tokens on every completion —
+// isolates "does transformSource actually propagate real token usage" from
+// "does this particular stub happen to report it" (see stubClient above,
+// which deliberately omits them to prove the null-vs-zero distinction too).
+function stubClientWithTokenUsage(): OpenAI {
+  const chatCreate = vi.fn().mockImplementation(async (args: { response_format?: { type?: string } }) => {
+    if (args.response_format?.type === 'json_object') {
+      return {
+        model: 'stub-model',
+        choices: [{ message: { content: '{"entailment_probability": 0.9, "issues": []}' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 120, completion_tokens: 40, total_tokens: 160 },
+      }
+    }
+    return {
+      model: 'stub-model',
+      choices: [{ message: { content: 'A rewritten passage of the source text, for plumbing purposes only.' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 300, completion_tokens: 200, total_tokens: 500 },
+    }
+  })
+  return { chat: { completions: { create: chatCreate } } } as unknown as OpenAI
+}
+
 function rejectingClient(): OpenAI {
   return {
     chat: { completions: { create: vi.fn().mockRejectedValue(new Error('generation boom')) } },
@@ -102,13 +124,37 @@ describe('transformSource', () => {
     expect(output.outputText.length).toBeGreaterThan(0)
     expect(output.outputSha256).toHaveLength(64)
     expect(output.latencyMs).toBeGreaterThanOrEqual(0)
+    // Phase 5: modelCalls is now real telemetry from humanizeChunk (a
+    // positive count of primary generation completions) — inputTokens/
+    // outputTokens stay null here only because this particular stub client
+    // never sets completion.usage.prompt_tokens/completion_tokens, not
+    // because the plumbing itself is missing (see a2h/tests/execution.test.ts
+    // for a stub that does set them).
+    expect(output.modelCalls).toBeGreaterThan(0)
     expect(output.inputTokens).toBeNull()
     expect(output.estimatedCostUsd).toBeNull()
-    expect(output.modelCalls).toBeNull()
 
     const fetched = await getOutput(firestore, RUN_ID, FROZEN_SOURCE.id, 5)
     expect(fetched).toEqual(output)
     expect(await getOutputById(firestore, output.id)).toEqual(output)
+  })
+
+  it('propagates real inputTokens/outputTokens when the provider reports usage (Phase 5 telemetry)', async () => {
+    const { firestore } = makeFirestore()
+    const output = await transformSource(firestore, { runId: RUN_ID, source: FROZEN_SOURCE, intensity: 5, client: stubClientWithTokenUsage(), model: 'stub-model', modelProvider: 'openai' })
+    expect(output.modelCalls).toBeGreaterThan(0)
+    expect(output.inputTokens).toBeGreaterThan(0)
+    expect(output.outputTokens).toBeGreaterThan(0)
+  })
+
+  it('refuses to regenerate an output on a released run, even with forceOverwrite', async () => {
+    const { firestore } = makeFirestore()
+    await transformSource(firestore, { runId: RUN_ID, source: FROZEN_SOURCE, intensity: 5, client: stubClient(), model: 'stub-model', modelProvider: 'openai' })
+    await expect(transformSource(
+      firestore,
+      { runId: RUN_ID, source: FROZEN_SOURCE, intensity: 5, client: stubClient(), model: 'stub-model', modelProvider: 'openai', releasedAt: '2026-01-01T00:00:00.000Z' },
+      true,
+    )).rejects.toThrow(/released/i)
   })
 
   it('reuses an existing successful output without calling the model again (idempotent resume, §26)', async () => {

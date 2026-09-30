@@ -18,6 +18,7 @@ function makeResult(overrides: Partial<DetectorResult> = {}): DetectorResult {
     classification: 'ai-generated',
     analyzedAt: '2026-01-01T00:00:00.000Z',
     rawResponse: {},
+    latencyMs: null,
     ...overrides,
   }
 }

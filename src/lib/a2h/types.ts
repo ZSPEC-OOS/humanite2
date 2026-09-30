@@ -53,6 +53,7 @@ export const A2H_COLLECTIONS = {
   repairAttempts: 'a2hBenchmarkRepairAttempts',
   trials: 'a2hBenchmarkTrials',
   experimentCohorts: 'a2hBenchmarkExperimentCohorts',
+  releases: 'a2hBenchmarkReleases',
 } as const
 
 // This deployment has exactly one detector integration path for A2H
@@ -222,7 +223,16 @@ export interface BenchmarkOutput {
 // reusable across arbitrarily many independent BenchmarkRuns — intensity,
 // model, and test selection are run parameters, not corpus configuration.
 
-export type BenchmarkRunStatus = 'draft' | 'validated' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
+// Phase 5: 'needs_attention' is the scientifically honest distinction
+// between "finished executing" and "finished executing cleanly" — every job
+// reached a terminal state, but at least one is 'failed', so the run must
+// not read as a clean 'completed' (and must not be releasable) until an
+// admin explicitly retries the failures (or accepts the exclusions and the
+// release-validation step below records them). 'failed' (the run-level
+// status) is reserved for a whole-run failure outside the job model
+// entirely (e.g. validation drift mid-run); it is never set by
+// maybeCompleteRun.
+export type BenchmarkRunStatus = 'draft' | 'validated' | 'running' | 'paused' | 'needs_attention' | 'completed' | 'failed' | 'cancelled'
 
 // Only A2H-01/02/03 are implemented by this phase (see IMPLEMENTED_A2H_TESTS)
 // — the remaining codes exist in the type now so the generic
@@ -449,6 +459,11 @@ export interface BenchmarkRun {
   validatedAt: string | null
   startedAt: string | null
   completedAt: string | null
+  // Phase 5: set once a BenchmarkRelease has been frozen for this run — from
+  // that point on, every paid artifact's forceOverwrite/regeneration path
+  // must refuse, regardless of what the caller passes (see release.ts and
+  // the checks in outputs.ts/trials.ts/repairAttempts.ts).
+  releasedAt: string | null
 }
 
 // The frozen source cohort for one run, written once by validateRun (never
@@ -497,6 +512,9 @@ export interface DetectorResult {
   classification: DetectionClassification
   analyzedAt: string
   rawResponse: unknown
+  // Phase 5 telemetry propagation — null only for a result written before
+  // this field existed, never fabricated for a new one.
+  latencyMs: number | null
 }
 
 // The generic, code-agnostic result row every A2H-0N test writes into — built
@@ -595,6 +613,23 @@ export interface BenchmarkJob {
   completedAt: string | null
   errorCode: string | null
   errorMessage: string | null
+  // ── Phase 5: leasing + controlled retry (see retryPolicy.ts, jobs.ts's
+  // claimJob/reclaimStaleJobs) ──────────────────────────────────────────
+  // Opaque id of whichever worker invocation (a cron tick or an interactive
+  // batch call) currently holds this job — null when not claimed.
+  leaseOwner: string | null
+  // A claimed 'running' job whose lease has expired (the worker that
+  // claimed it never finished — a crash, a timeout, a killed request) is
+  // reclaimable: reclaimStaleJobs resets it to 'queued' so another worker
+  // can claim it, rather than leaving it stuck 'running' forever.
+  leaseExpiresAt: string | null
+  // Set only on a 'retrying' job — the earliest time a worker may claim it
+  // again, per retryPolicy.ts's bounded backoff schedule.
+  nextAttemptAt: string | null
+  lastHeartbeatAt: string | null
+  // Set on failure — which classifyFailure() bucket produced the most
+  // recent errorCode/errorMessage. Null on a job that has never failed.
+  failureClass: 'retryable' | 'permanent' | null
 }
 
 // ── Repair attempts (Phase 3) ────────────────────────────────────────────
@@ -836,4 +871,59 @@ export interface A2HTestDefinition {
   requiresRepair: boolean
   requiresExperimentalTrials: boolean
   requiresClaimVerifier: boolean
+}
+
+// ── Benchmark Release (Phase 5) ──────────────────────────────────────────
+//
+// The benchmark-execution equivalent of CorpusManifest: an immutable,
+// independently-verifiable record of exactly what a completed run produced,
+// written once by release.ts's createRelease AFTER validateReleaseReadiness
+// passes. Once a release exists for a run, that run's evidence is frozen —
+// every forceOverwrite/regeneration path (transformSource, getOrCreateTrial,
+// getOrCreateRepairAttempt) must refuse regardless of what the caller asks
+// for. A corrected or re-executed benchmark is a NEW BenchmarkRun (and a new
+// release), never a mutation of a released one — the same posture
+// CorpusManifest already established for the corpus layer.
+export interface BenchmarkRelease {
+  id: string
+  runId: string
+  corpusProjectId: string
+  releaseVersion: string
+  benchmarkVersion: string
+  testVersion: string
+  corpusManifestHash: string
+  fixtureSetId: string | null
+  fixtureVersion: string | null
+  humaniteVersion: string
+  gitCommit: string
+  modelProvider: string
+  model: string
+  enabledTests: A2HTestCode[]
+  sourceCount: number
+  primaryOutputCount: number
+  trialCount: number
+  repairAttemptCount: number
+  testResultCount: number
+  failedJobCount: number
+  excludedRecordCount: number
+  // Per-collection content hash (sha256 of every row's own id+content,
+  // concatenated in a stable sort order) — lets a later audit confirm a
+  // specific collection's frozen content without recomputing every hash.
+  outputHashes: Record<string, string>
+  resultHashes: Record<string, string>
+  // Every one of the 17 tests' aggregate report, computed once at release
+  // time and frozen here (§"Result snapshotting") — a later TEST-Vnnn bump
+  // or aggregation bug fix can never silently change what a released run
+  // reports, since the UI reads THIS snapshot for a released run, not a
+  // live recomputation.
+  aggregateSnapshot: Record<string, unknown>
+  releaseHash: string
+  completedAt: string
+  releasedAt: string
+}
+
+export interface ReleaseValidationResult {
+  ok: boolean
+  errors: string[]
+  warnings: string[]
 }

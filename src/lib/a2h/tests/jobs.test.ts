@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import type { Firestore } from 'firebase-admin/firestore'
 import {
   baselineJobId, transformJobId, postScoreJobId, testEvaluationJobId,
-  getOrCreateJob, getJob, markJobRunning, markJobCompleted, markJobFailed,
-  listJobsForRun, listJobsByStageAndStatus, cancelQueuedJobs,
+  getOrCreateJob, getJob, claimJob, reclaimStaleJobs, markJobCompleted, markJobFailed, retryFailedJobs,
+  listJobsForRun, listJobsByStageAndStatus, listDueRetryJobs, cancelQueuedJobs,
 } from '../jobs'
 
 function makeFirestore() {
@@ -29,7 +29,21 @@ function makeFirestore() {
     doc: (id: string) => docRef(id),
     where: (field: string, _op: string, value: unknown) => makeQuery(d => d[field] === value),
   }
-  return { firestore: { collection: () => collection } as unknown as Firestore }
+
+  // A single-threaded transaction mock — no real isolation between
+  // concurrent callers (vitest tests run sequentially anyway), but faithful
+  // enough to exercise claimJob's own read-then-conditionally-write logic.
+  const firestoreObj = {
+    collection: () => collection,
+    runTransaction: async <T>(fn: (tx: { get: (ref: ReturnType<typeof docRef>) => Promise<{ exists: boolean; data: () => Record<string, unknown> | undefined }>; set: (ref: ReturnType<typeof docRef>, data: Record<string, unknown>) => void }) => Promise<T>) => {
+      const tx = {
+        get: async (ref: ReturnType<typeof docRef>) => ref.get(),
+        set: (ref: ReturnType<typeof docRef>, data: Record<string, unknown>) => { docs.set(ref.id, data) },
+      }
+      return fn(tx)
+    },
+  }
+  return { firestore: firestoreObj as unknown as Firestore }
 }
 
 describe('job id builders', () => {
@@ -47,7 +61,7 @@ describe('job id builders', () => {
 })
 
 describe('getOrCreateJob', () => {
-  it('creates a new job in queued status', async () => {
+  it('creates a new job in queued status with lease fields unset', async () => {
     const { firestore } = makeFirestore()
     const job = await getOrCreateJob(firestore, {
       id: baselineJobId('run-1', 'source-1', 'cfg'),
@@ -57,6 +71,9 @@ describe('getOrCreateJob', () => {
     expect(job.attemptCount).toBe(0)
     expect(job.startedAt).toBeNull()
     expect(job.completedAt).toBeNull()
+    expect(job.leaseOwner).toBeNull()
+    expect(job.leaseExpiresAt).toBeNull()
+    expect(job.failureClass).toBeNull()
   })
 
   it('is idempotent — calling it twice with the same id returns the same row rather than resetting it', async () => {
@@ -70,47 +87,202 @@ describe('getOrCreateJob', () => {
   })
 })
 
-describe('job status transitions', () => {
-  it('markJobRunning increments attemptCount and sets startedAt once', async () => {
+describe('claimJob — transactional queued/retry-due/stale-lease claiming (Phase 5)', () => {
+  it('claims a queued job, setting status=running, a lease, and incrementing attemptCount', async () => {
     const { firestore } = makeFirestore()
     const id = baselineJobId('run-1', 'source-1', 'cfg')
     await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'project-1', stage: 'baseline_gptzero', sourceId: 'source-1' })
 
-    await markJobRunning(firestore, id)
-    const afterFirst = await getJob(firestore, id)
-    expect(afterFirst?.status).toBe('running')
-    expect(afterFirst?.attemptCount).toBe(1)
-    expect(afterFirst?.startedAt).not.toBeNull()
-
-    const startedAt = afterFirst!.startedAt
-    await markJobRunning(firestore, id)
-    const afterSecond = await getJob(firestore, id)
-    expect(afterSecond?.attemptCount).toBe(2)
-    expect(afterSecond?.startedAt).toBe(startedAt)
+    const claimed = await claimJob(firestore, id, 'worker-a')
+    expect(claimed?.status).toBe('running')
+    expect(claimed?.attemptCount).toBe(1)
+    expect(claimed?.leaseOwner).toBe('worker-a')
+    expect(claimed?.leaseExpiresAt).not.toBeNull()
+    expect(claimed?.startedAt).not.toBeNull()
   })
 
-  it('markJobCompleted sets status and completedAt, clearing any prior error', async () => {
+  it('a second worker cannot claim a job whose lease has not expired — prevents duplicate paid work', async () => {
     const { firestore } = makeFirestore()
     const id = baselineJobId('run-1', 'source-1', 'cfg')
     await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'project-1', stage: 'baseline_gptzero', sourceId: 'source-1' })
-    await markJobFailed(firestore, id, 'Boom', 'it broke')
+
+    const first = await claimJob(firestore, id, 'worker-a')
+    expect(first).not.toBeNull()
+    const second = await claimJob(firestore, id, 'worker-b')
+    expect(second).toBeNull()
+
+    const job = await getJob(firestore, id)
+    expect(job?.leaseOwner).toBe('worker-a')
+  })
+
+  it('a worker CAN reclaim a job whose lease has already expired', async () => {
+    const { firestore } = makeFirestore()
+    const id = baselineJobId('run-1', 'source-1', 'cfg')
+    await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'project-1', stage: 'baseline_gptzero', sourceId: 'source-1' })
+    // Claim with an already-elapsed lease duration to simulate a stale lease.
+    await claimJob(firestore, id, 'worker-a', -1)
+
+    const reclaimed = await claimJob(firestore, id, 'worker-b')
+    expect(reclaimed?.leaseOwner).toBe('worker-b')
+    expect(reclaimed?.attemptCount).toBe(2)
+  })
+
+  it('cannot claim a completed or cancelled job', async () => {
+    const { firestore } = makeFirestore()
+    const id = baselineJobId('run-1', 'source-1', 'cfg')
+    await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'project-1', stage: 'baseline_gptzero', sourceId: 'source-1' })
+    await markJobCompleted(firestore, id)
+    expect(await claimJob(firestore, id, 'worker-a')).toBeNull()
+  })
+
+  it('claims a due retry but not one still in its backoff window', async () => {
+    const { firestore } = makeFirestore()
+    const id = baselineJobId('run-1', 'source-1', 'cfg')
+    await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'project-1', stage: 'baseline_gptzero', sourceId: 'source-1' })
+    await firestore.collection('a2hBenchmarkJobs').doc(id).update({ status: 'retrying', nextAttemptAt: new Date(Date.now() + 60_000).toISOString() })
+    expect(await claimJob(firestore, id, 'worker-a')).toBeNull()
+
+    await firestore.collection('a2hBenchmarkJobs').doc(id).update({ nextAttemptAt: new Date(Date.now() - 1000).toISOString() })
+    const claimed = await claimJob(firestore, id, 'worker-a')
+    expect(claimed?.status).toBe('running')
+  })
+
+  it('returns null for a job that does not exist', async () => {
+    const { firestore } = makeFirestore()
+    expect(await claimJob(firestore, 'nonexistent', 'worker-a')).toBeNull()
+  })
+})
+
+describe('reclaimStaleJobs', () => {
+  it('resets a running job with an expired lease back to queued, leaving a fresh lease untouched', async () => {
+    const { firestore } = makeFirestore()
+    const staleId = baselineJobId('run-1', 's1', 'cfg')
+    const freshId = baselineJobId('run-1', 's2', 'cfg')
+    await getOrCreateJob(firestore, { id: staleId, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's1' })
+    await getOrCreateJob(firestore, { id: freshId, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's2' })
+    await claimJob(firestore, staleId, 'worker-a', -1)
+    await claimJob(firestore, freshId, 'worker-b', 60_000)
+
+    const reclaimedCount = await reclaimStaleJobs(firestore, 'run-1')
+    expect(reclaimedCount).toBe(1)
+    expect((await getJob(firestore, staleId))?.status).toBe('queued')
+    expect((await getJob(firestore, staleId))?.leaseOwner).toBeNull()
+    expect((await getJob(firestore, freshId))?.status).toBe('running')
+  })
+})
+
+describe('markJobCompleted', () => {
+  it('sets status and completedAt, clearing any prior error and lease', async () => {
+    const { firestore } = makeFirestore()
+    const id = baselineJobId('run-1', 'source-1', 'cfg')
+    await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'project-1', stage: 'baseline_gptzero', sourceId: 'source-1' })
+    await claimJob(firestore, id, 'worker-a')
+    await markJobFailed(firestore, id, new Error('boom'))
     await markJobCompleted(firestore, id)
     const job = await getJob(firestore, id)
     expect(job?.status).toBe('completed')
     expect(job?.completedAt).not.toBeNull()
     expect(job?.errorCode).toBeNull()
     expect(job?.errorMessage).toBeNull()
+    expect(job?.leaseOwner).toBeNull()
   })
+})
 
-  it('markJobFailed records the error', async () => {
+describe('markJobFailed — retry classification and bounded backoff (Phase 5)', () => {
+  class RateLimitError extends Error {}
+  class ValidationBug extends Error {}
+
+  it('a retryable failure on the first attempt becomes "retrying" with a scheduled nextAttemptAt', async () => {
     const { firestore } = makeFirestore()
     const id = baselineJobId('run-1', 'source-1', 'cfg')
     await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'project-1', stage: 'baseline_gptzero', sourceId: 'source-1' })
-    await markJobFailed(firestore, id, 'ProviderError', 'GPTZero timed out')
+    await claimJob(firestore, id, 'worker-a') // attemptCount -> 1
+
+    await markJobFailed(firestore, id, new RateLimitError('rate limit exceeded'))
+    const job = await getJob(firestore, id)
+    expect(job?.status).toBe('retrying')
+    expect(job?.failureClass).toBe('retryable')
+    expect(job?.nextAttemptAt).not.toBeNull()
+    expect(job?.leaseOwner).toBeNull()
+  })
+
+  it('a permanent failure goes straight to "failed", never "retrying"', async () => {
+    const { firestore } = makeFirestore()
+    const id = baselineJobId('run-1', 'source-1', 'cfg')
+    await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'project-1', stage: 'baseline_gptzero', sourceId: 'source-1' })
+    await claimJob(firestore, id, 'worker-a')
+
+    await markJobFailed(firestore, id, new ValidationBug('Source not found.'))
     const job = await getJob(firestore, id)
     expect(job?.status).toBe('failed')
-    expect(job?.errorCode).toBe('ProviderError')
-    expect(job?.errorMessage).toBe('GPTZero timed out')
+    expect(job?.failureClass).toBe('permanent')
+    expect(job?.nextAttemptAt).toBeNull()
+  })
+
+  it('a retryable failure that exhausts the backoff schedule becomes permanently failed', async () => {
+    const { firestore } = makeFirestore()
+    const id = baselineJobId('run-1', 'source-1', 'cfg')
+    await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'project-1', stage: 'baseline_gptzero', sourceId: 'source-1' })
+
+    // Simulate one failure beyond the full 3-entry backoff schedule (4
+    // total retryable failures) — the 4th must exhaust the schedule and
+    // terminate the job rather than scheduling a 4th retry.
+    for (let i = 0; i < 4; i++) {
+      await firestore.collection('a2hBenchmarkJobs').doc(id).update({ nextAttemptAt: new Date(Date.now() - 1000).toISOString() })
+      const claimed = await claimJob(firestore, id, 'worker-a')
+      expect(claimed).not.toBeNull()
+      await markJobFailed(firestore, id, new RateLimitError('rate limit'))
+    }
+    const job = await getJob(firestore, id)
+    expect(job?.status).toBe('failed')
+    expect(job?.attemptCount).toBe(4)
+  })
+
+  it('falls back to UnknownError for a non-Error throw', async () => {
+    const { firestore } = makeFirestore()
+    const id = baselineJobId('run-1', 'source-1', 'cfg')
+    await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'project-1', stage: 'baseline_gptzero', sourceId: 'source-1' })
+    await claimJob(firestore, id, 'worker-a')
+    await markJobFailed(firestore, id, 'a plain string throw')
+    const job = await getJob(firestore, id)
+    expect(job?.errorCode).toBe('UnknownError')
+    expect(job?.failureClass).toBe('permanent')
+  })
+})
+
+describe('retryFailedJobs — explicit admin action', () => {
+  it('resets every failed job in a run back to queued, clearing its failure bookkeeping', async () => {
+    const { firestore } = makeFirestore()
+    const failedId = baselineJobId('run-1', 's1', 'cfg')
+    const completedId = baselineJobId('run-1', 's2', 'cfg')
+    await getOrCreateJob(firestore, { id: failedId, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's1' })
+    await getOrCreateJob(firestore, { id: completedId, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's2' })
+    await claimJob(firestore, failedId, 'worker-a')
+    await markJobFailed(firestore, failedId, new Error('permanent-ish'))
+    await markJobCompleted(firestore, completedId)
+
+    const count = await retryFailedJobs(firestore, 'run-1')
+    expect(count).toBe(1)
+    const retried = await getJob(firestore, failedId)
+    expect(retried?.status).toBe('queued')
+    expect(retried?.errorCode).toBeNull()
+    expect(retried?.failureClass).toBeNull()
+    expect((await getJob(firestore, completedId))?.status).toBe('completed')
+  })
+})
+
+describe('listDueRetryJobs', () => {
+  it('returns only retrying jobs whose nextAttemptAt has passed', async () => {
+    const { firestore } = makeFirestore()
+    const dueId = baselineJobId('run-1', 's1', 'cfg')
+    const notDueId = baselineJobId('run-1', 's2', 'cfg')
+    await getOrCreateJob(firestore, { id: dueId, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's1' })
+    await getOrCreateJob(firestore, { id: notDueId, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's2' })
+    await firestore.collection('a2hBenchmarkJobs').doc(dueId).update({ status: 'retrying', nextAttemptAt: new Date(Date.now() - 1000).toISOString() })
+    await firestore.collection('a2hBenchmarkJobs').doc(notDueId).update({ status: 'retrying', nextAttemptAt: new Date(Date.now() + 60_000).toISOString() })
+
+    const due = await listDueRetryJobs(firestore, 'run-1', 'baseline_gptzero')
+    expect(due.map(j => j.id)).toEqual([dueId])
   })
 })
 

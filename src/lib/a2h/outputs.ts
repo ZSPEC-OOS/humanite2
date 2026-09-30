@@ -72,6 +72,11 @@ export interface TransformSourceParams {
   client: OpenAI
   model: string
   modelProvider: string
+  // Phase 5: null for an unreleased run. When set, forceOverwrite is refused
+  // outright — a released run's evidence is frozen (see release.ts); a
+  // corrected re-execution belongs to a NEW BenchmarkRun, never a mutation
+  // of a released one's outputs.
+  releasedAt?: string | null
 }
 
 // Runs the real Humanize pipeline (preprocess -> humanizeChunk -> document
@@ -89,9 +94,12 @@ export interface TransformSourceParams {
 // validation_failed source. forceOverwrite is reserved for an explicit
 // administrator regeneration of an already-successful output.
 //
-// Known gap: humanizeChunk doesn't surface completion token usage or a
-// distinct per-call count, so inputTokens/outputTokens/estimatedCostUsd/
-// modelCalls are left null rather than fabricated.
+// Phase 5: modelCalls/inputTokens/outputTokens are populated from
+// humanizeChunk's own telemetry (real, though partial — see
+// humanizePipeline.ts's ChunkResult comment: it counts only the primary
+// generation-phase completions, not internal gate/judge/repair/claim calls).
+// estimatedCostUsd stays null — no pricing-per-token configuration exists in
+// this codebase, and none is fabricated here.
 export async function transformSource(
   firestore: Firestore,
   params: TransformSourceParams,
@@ -103,6 +111,9 @@ export async function transformSource(
   }
   if (!Number.isInteger(intensity) || intensity < 1 || intensity > 10) {
     throw new Error('intensity must be an integer between 1 and 10')
+  }
+  if (forceOverwrite && params.releasedAt) {
+    throw new Error('Cannot regenerate an output — this run has been released; its evidence is frozen. Start a new run instead.')
   }
 
   const existing = await getOutput(firestore, runId, source.id, intensity)
@@ -121,6 +132,9 @@ export async function transformSource(
   let modelUsed = model
   let retryCount = 0
   let candidateCount = 1
+  let modelCalls: number | null = null
+  let inputTokens: number | null = null
+  let outputTokens: number | null = null
 
   try {
     const documentContext = await safeDocumentContext(client, model, prep.sanitized_text)
@@ -134,6 +148,9 @@ export async function transformSource(
     modelUsed = result.modelUsed
     retryCount = result.retryCount
     candidateCount = result.candidateSelection.candidateCount
+    modelCalls = result.modelCalls
+    inputTokens = result.inputTokens
+    outputTokens = result.outputTokens
   } catch (err) {
     status = 'failed'
     errorCode = err instanceof Error ? err.constructor.name : 'UnknownError'
@@ -157,10 +174,10 @@ export async function transformSource(
     model: modelUsed,
     retryCount,
     candidateCount: status === 'success' ? candidateCount : null,
-    modelCalls: null,
+    modelCalls: status === 'success' ? modelCalls : null,
     latencyMs,
-    inputTokens: null,
-    outputTokens: null,
+    inputTokens: status === 'success' ? inputTokens : null,
+    outputTokens: status === 'success' ? outputTokens : null,
     estimatedCostUsd: null,
     generatedAt: new Date().toISOString(),
     status,
