@@ -62,6 +62,17 @@ export async function apiArchiveProject(projectId: string): Promise<CorpusProjec
   return data.project
 }
 
+// Irreversible — cascades to every topic/source/run/result scoped to this
+// project. confirmName must exactly match the project's current name; the
+// server re-checks this independently of whatever UI confirmation gated
+// the call.
+export async function apiDeleteProject(projectId: string, confirmName: string): Promise<void> {
+  await apiFetch<{ deleted: true }>(`/admin/a2h/projects/${projectId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ confirmName }),
+  })
+}
+
 export async function apiDuplicateProject(projectId: string, name: string): Promise<CorpusProject> {
   const data = await apiFetch<{ project: CorpusProject }>(`/admin/a2h/projects/${projectId}/duplicate`, {
     method: 'POST',

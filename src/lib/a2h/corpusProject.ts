@@ -457,6 +457,42 @@ export async function archiveCorpusProject(firestore: Firestore, id: string): Pr
   return updated
 }
 
+// Every other A2H collection scoped by corpusProjectId — everything a
+// project's full cascade delete must also remove. The manifest is the one
+// exception: it's keyed by corpusProjectId directly rather than carrying it
+// as a field, so it's deleted by id, not by query.
+const CASCADE_COLLECTIONS = [
+  A2H_COLLECTIONS.topics,
+  A2H_COLLECTIONS.sources,
+  A2H_COLLECTIONS.detectorResults,
+  A2H_COLLECTIONS.outputs,
+  A2H_COLLECTIONS.runs,
+  A2H_COLLECTIONS.runSources,
+  A2H_COLLECTIONS.jobs,
+  A2H_COLLECTIONS.testResults,
+] as const
+
+// Irreversibly deletes a corpus project and every record scoped to it —
+// topics, sources, detector results, outputs, manifest, and every
+// benchmark run (plus its cohort/jobs/results) built against it. Unlike
+// archiveCorpusProject (a reversible status flip), there is no undo here:
+// intended for an admin tool's "permanently delete" action, gated behind an
+// explicit confirmation in the UI, never a routine status transition.
+export async function deleteCorpusProjectPermanently(firestore: Firestore, id: string): Promise<void> {
+  const project = await getCorpusProject(firestore, id)
+  if (!project) throw new Error('Corpus project not found.')
+
+  for (const collectionName of CASCADE_COLLECTIONS) {
+    const snap = await firestore.collection(collectionName).where('corpusProjectId', '==', id).get()
+    await Promise.all(snap.docs.map(d => {
+      const { id: docId } = d.data() as { id: string }
+      return firestore.collection(collectionName).doc(docId).delete()
+    }))
+  }
+  await firestore.collection(A2H_COLLECTIONS.manifests).doc(id).delete()
+  await firestore.collection(COLLECTION).doc(id).delete()
+}
+
 // Copies configuration and the generated topic blueprint into a brand-new
 // project — never the generated corpus sources, detector results, or
 // Humanite outputs, which is exactly what makes this useful for trying a
