@@ -8,12 +8,54 @@ import {
   apiGetRun, apiGetProject, apiListTopics, apiUpdateRunDraft, apiValidateRun,
   apiStartRun, apiPauseRun, apiResumeRun, apiCancelRun, apiGetRunProgress, apiExecuteRunBatch,
   apiListFixtureSets, type FixtureSet, type FixtureTestEligibility,
-  type BenchmarkRun, type CorpusProject, type BenchmarkTopic, type RunValidationResult, type RunProgress,
+  type BenchmarkRun, type CorpusProject, type BenchmarkTopic, type RunValidationResult, type RunProgress, type RunWorkEstimate,
 } from '@/lib/a2hApi'
 import { Spinner } from '@/components/ui/Spinner'
 
-const ALL_TESTS: A2HTestCode[] = [...IMPLEMENTED_A2H_TESTS]
+// §44: presented in NUMERICAL order, not implementation order — IMPLEMENTED_A2H_TESTS
+// itself is ordered by when each phase shipped, so this page sorts by the
+// numeric suffix for display purposes only.
+const ALL_TESTS: A2HTestCode[] = [...IMPLEMENTED_A2H_TESTS].sort((a, b) => Number(a.slice(4)) - Number(b.slice(4)))
 const TEST_LABEL = A2H_TEST_LABELS
+
+type TestDisplayStatus = 'not_eligible' | 'not_started' | 'running' | 'complete' | 'failed'
+
+// A coarse but honest status per test (§44): "not eligible" means this run
+// doesn't have the test enabled; "failed" only reflects a whole-run failure,
+// since RunProgress's failedJobs count isn't broken down per test code.
+// Every other test infers progress from the same RunProgress fields the
+// page's own Progress section already reads.
+function testDisplayStatus(run: BenchmarkRun, progress: RunProgress | null, code: A2HTestCode): TestDisplayStatus {
+  if (!run.enabledTests.includes(code)) return 'not_eligible'
+  if (run.status === 'failed') return 'failed'
+  if (run.status === 'draft' || run.status === 'validated') return 'not_started'
+  if (!progress) return 'not_started'
+
+  let completed = 0
+  let total = 0
+  if (code === 'A2H-01') { completed = progress.a2h01ResultsCompleted; total = progress.outputsTotal }
+  else if (code === 'A2H-02') { completed = progress.a2h02ResultsCompleted; total = progress.outputsTotal }
+  else if (code === 'A2H-03' || code === 'A2H-17') { completed = progress.outputsCompleted; total = progress.outputsTotal }
+  else if (code === 'A2H-08') { completed = progress.outputsCompleted; total = progress.outputsTotal }
+  else if (code === 'A2H-06' || code === 'A2H-12') { completed = progress.repairJobsCompleted[code] ?? 0; total = progress.repairJobsTotal[code] ?? 0 }
+  else if (code === 'A2H-07' || code === 'A2H-11' || code === 'A2H-14' || code === 'A2H-15') { completed = progress.trialJobsCompleted[code] ?? 0; total = progress.trialJobsTotal[code] ?? 0 }
+  else { completed = progress.deterministicResultsCompleted[code] ?? 0; total = progress.outputsTotal }
+
+  if (total === 0) return 'not_started'
+  if (completed >= total) return 'complete'
+  return 'running'
+}
+
+const STATUS_LABEL: Record<TestDisplayStatus, string> = {
+  not_eligible: 'Not eligible', not_started: 'Not started', running: 'Running', complete: 'Complete', failed: 'Failed',
+}
+const STATUS_CLASS: Record<TestDisplayStatus, string> = {
+  not_eligible: 'text-gray-400 dark:text-gray-600',
+  not_started: 'text-gray-500 dark:text-gray-400',
+  running: 'text-amber-600 dark:text-amber-400',
+  complete: 'text-green-700 dark:text-green-400',
+  failed: 'text-red-600 dark:text-red-400',
+}
 
 export default function A2HRunDetailPage() {
   const runId = useParams().runId as string
@@ -27,6 +69,7 @@ export default function A2HRunDetailPage() {
   const [busy, setBusy] = useState(false)
   const [validation, setValidation] = useState<RunValidationResult | null>(null)
   const [eligibility, setEligibility] = useState<Partial<Record<A2HTestCode, FixtureTestEligibility>>>({})
+  const [workEstimate, setWorkEstimate] = useState<RunWorkEstimate | null>(null)
   const [fixtureSets, setFixtureSets] = useState<FixtureSet[]>([])
   const [runningAll, setRunningAll] = useState(false)
 
@@ -114,10 +157,11 @@ export default function A2HRunDetailPage() {
     setBusy(true)
     setError(null)
     try {
-      const { run: updated, result, eligibility: nextEligibility } = await apiValidateRun(run.id)
+      const { run: updated, result, eligibility: nextEligibility, workEstimate: nextWorkEstimate } = await apiValidateRun(run.id)
       setRun(updated)
       setValidation(result)
       setEligibility(nextEligibility as Partial<Record<A2HTestCode, FixtureTestEligibility>>)
+      setWorkEstimate(nextWorkEstimate)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Validation failed.')
     } finally {
@@ -354,6 +398,21 @@ export default function A2HRunDetailPage() {
           </div>
         )}
 
+        {workEstimate && run.status === 'validated' && (
+          <div className="border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-900/20 rounded-2xl p-4 space-y-1.5">
+            <h2 className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider mb-1">Estimated Paid Work (§39) — review before starting</h2>
+            <dl className="space-y-1 text-sm">
+              <div className="flex justify-between"><dt className="text-gray-600 dark:text-gray-400">Normal transformations</dt><dd className="tabular-nums font-semibold">{workEstimate.normalTransformations.toLocaleString()}</dd></div>
+              <div className="flex justify-between"><dt className="text-gray-600 dark:text-gray-400">Repair attempts (A2H-06/12)</dt><dd className="tabular-nums font-semibold">{workEstimate.repairAttempts.toLocaleString()}</dd></div>
+              <div className="flex justify-between"><dt className="text-gray-600 dark:text-gray-400">Repeatability trials (A2H-07)</dt><dd className="tabular-nums font-semibold">{workEstimate.repeatabilityTrials.toLocaleString()}</dd></div>
+              <div className="flex justify-between"><dt className="text-gray-600 dark:text-gray-400">Style/tone trials (A2H-11)</dt><dd className="tabular-nums font-semibold">{workEstimate.styleToneTrials.toLocaleString()}</dd></div>
+              <div className="flex justify-between"><dt className="text-gray-600 dark:text-gray-400">Genre/audience trials (A2H-14)</dt><dd className="tabular-nums font-semibold">{workEstimate.genreAudienceTrials.toLocaleString()}</dd></div>
+              <div className="flex justify-between"><dt className="text-gray-600 dark:text-gray-400">Candidate-selection trials (A2H-15)</dt><dd className="tabular-nums font-semibold">{workEstimate.candidateSelectionTrials.toLocaleString()}</dd></div>
+              <div className="flex justify-between pt-1 border-t border-amber-200 dark:border-amber-900"><dt className="text-gray-700 dark:text-gray-300 font-medium">Estimated total model operations</dt><dd className="tabular-nums font-bold">{workEstimate.estimatedTotalModelOperations.toLocaleString()}</dd></div>
+            </dl>
+          </div>
+        )}
+
         {run.status === 'validated' && (
           <button onClick={handleStart} disabled={busy}
             className="text-xs font-medium px-3.5 py-2 rounded-xl bg-green-600 text-white disabled:opacity-40">
@@ -414,14 +473,20 @@ export default function A2HRunDetailPage() {
           </div>
         )}
 
-        {(run.status === 'running' || run.status === 'completed' || run.status === 'paused') && (
-          <div className="flex flex-wrap gap-2">
-            {ALL_TESTS.filter(code => run.enabledTests.includes(code)).map(code => (
-              <Link key={code} href={`/admin/a2h/runs/${run.id}/tests/${code.toLowerCase()}`}
-                className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">
-                {code} Results →
-              </Link>
-            ))}
+        {(run.status === 'running' || run.status === 'completed' || run.status === 'paused' || run.status === 'failed') && (
+          <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-1.5">
+            <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">Results (numerical order)</h2>
+            {ALL_TESTS.filter(code => run.enabledTests.includes(code)).map(code => {
+              const status = testDisplayStatus(run, progress, code)
+              return (
+                <Link key={code} href={`/admin/a2h/runs/${run.id}/tests/${code.toLowerCase()}`}
+                  className="flex items-center gap-3 text-sm px-2 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-colors">
+                  <span className="w-16 shrink-0 font-medium text-gray-800 dark:text-gray-200">{code}</span>
+                  <span className="flex-1 text-gray-500 dark:text-gray-400 truncate">{TEST_LABEL[code]}</span>
+                  <span className={`text-xs font-medium ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span>
+                </Link>
+              )
+            })}
           </div>
         )}
       </div>

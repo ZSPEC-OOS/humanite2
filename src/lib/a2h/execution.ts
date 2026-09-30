@@ -21,6 +21,10 @@ import { repairGrammar, repairChunk } from '@/lib/evaluation/repair'
 import { classifyGrammarRepair, A2H06_CODE, type GrammarRepairFixtureExpected, type GrammarRepairFixtureResult } from './a2h06'
 import { classifyFactualRepair, A2H12_CODE, type FactualRepairFixtureExpected, type FactualRepairFixtureResult } from './a2h12'
 import { upsertTestResult } from './testResults'
+import { runA2H07Trial, A2H07_CODE } from './a2h07'
+import { runA2H11Trial, A2H11_CODE } from './a2h11'
+import { runA2H14Trial, A2H14_CODE } from './a2h14'
+import { runA2H15Trial, A2H15_CODE } from './a2h15'
 
 // V1's one fixed repair configuration (§24) — tone is held constant, the
 // same posture outputs.ts's FIXED_TONE uses for the ordinary Humanite
@@ -47,7 +51,10 @@ const DEFAULT_MAX_JOBS_PER_STAGE = 5
 // stages — it operates on fixtures, not outputs — but is still drained in
 // its own turn per call, after any humanite/post-score/test-evaluation work
 // still queued, rather than interleaved with it.
-const STAGE_ORDER: readonly BenchmarkJobStage[] = ['baseline_gptzero', 'humanite_transform', 'post_gptzero', 'test_evaluation', 'repair_evaluation']
+// 'experimental_trial' (A2H-07/11/14/15, Phase 4) likewise has no dependency
+// on the earlier stages — it operates on the source directly, producing its
+// own BenchmarkTrial evidence rather than scoring an existing output.
+const STAGE_ORDER: readonly BenchmarkJobStage[] = ['baseline_gptzero', 'humanite_transform', 'post_gptzero', 'test_evaluation', 'repair_evaluation', 'experimental_trial']
 
 function chunkArray<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = []
@@ -121,6 +128,8 @@ async function processJob(
       await runTestEvaluationJob(firestore, run, job, detectorConfigId, fixtureCache)
     } else if (job.stage === 'repair_evaluation') {
       await runRepairEvaluationJob(firestore, run, job, options)
+    } else if (job.stage === 'experimental_trial') {
+      await runExperimentalTrialJob(firestore, run, job, options)
     }
     await markJobCompleted(firestore, job.id)
   } catch (err) {
@@ -433,4 +442,41 @@ async function runRepairEvaluationJob(
   }
 
   throw new Error(`Repair evaluation for ${job.benchmarkCode} is not implemented.`)
+}
+
+// A2H-07/11/14/15 (Phase 4, §36): dispatches to each test's own trial runner,
+// which persists a BenchmarkTrial via getOrCreateTrial's idempotency guard —
+// a resumed run never re-pays for a completed trial. Unlike every other job
+// stage, this one never writes a BenchmarkTestResult directly: the raw
+// BenchmarkTrial rows themselves ARE the evidence each test's report query
+// reads and aggregates on demand (the same "raw result records" role
+// BenchmarkTestResult plays for the other tests).
+async function runExperimentalTrialJob(
+  firestore: Firestore,
+  run: BenchmarkRun,
+  job: BenchmarkJob,
+  options: ExecuteBatchOptions,
+): Promise<void> {
+  if (!job.benchmarkCode) throw new Error(`Experimental trial job ${job.id} is missing benchmarkCode.`)
+  const source = await getSourceById(firestore, job.sourceId)
+  if (!source) throw new Error(`Source ${job.sourceId} not found.`)
+
+  if (job.benchmarkCode === A2H07_CODE) {
+    await runA2H07Trial(firestore, run, source, job, { client: options.client, model: options.model, modelProvider: options.modelProvider, gptZeroApiKey: options.gptZeroApiKey })
+    return
+  }
+  if (job.benchmarkCode === A2H11_CODE) {
+    await runA2H11Trial(firestore, run, source, job, { client: options.client, model: options.model, modelProvider: options.modelProvider })
+    return
+  }
+  if (job.benchmarkCode === A2H14_CODE) {
+    await runA2H14Trial(firestore, run, source, job, { client: options.client, model: options.model, modelProvider: options.modelProvider })
+    return
+  }
+  if (job.benchmarkCode === A2H15_CODE) {
+    await runA2H15Trial(firestore, run, source, job, { client: options.client, model: options.model, modelProvider: options.modelProvider, gptZeroApiKey: options.gptZeroApiKey })
+    return
+  }
+
+  throw new Error(`Experimental trial for ${job.benchmarkCode} is not implemented.`)
 }

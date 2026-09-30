@@ -19,6 +19,7 @@ const FIXTURE_TYPE_LABEL: Record<A2HFixtureType, string> = {
   terminology: 'Terminology',
   grammar_repair: 'Grammar Repair',
   factual_repair: 'Factual Repair',
+  claim_relationship: 'Claim Relationship',
 }
 
 // Fixture-set administration (§23-24) for a Corpus Project's A2H-04/05/09/
@@ -47,6 +48,7 @@ export default function A2HFixturesPage() {
   const [creatingSet, setCreatingSet] = useState(false)
   const [newSetName, setNewSetName] = useState('')
   const [termForm, setTermForm] = useState({ preferredTerm: '', allowedVariants: '', forbiddenVariants: '', caseSensitive: false })
+  const [claimForm, setClaimForm] = useState({ category: 'causal', sourceText: '', relation: '', approvedEquivalentForms: '', knownCorruptions: '' })
 
   const selectedSet = fixtureSets.find(s => s.id === selectedSetId) ?? null
   const isDraft = selectedSet?.status === 'draft'
@@ -225,6 +227,31 @@ export default function A2HFixturesPage() {
     }
   }
 
+  async function handleAddClaimRelationship() {
+    if (!selectedSetId || !selectedSourceId || !claimForm.sourceText.trim() || !claimForm.relation.trim()) return
+    setBusy(true)
+    setError(null)
+    try {
+      await apiCreateFixture(selectedSetId, {
+        sourceId: selectedSourceId,
+        type: 'claim_relationship',
+        expected: {
+          category: claimForm.category,
+          sourceText: claimForm.sourceText.trim(),
+          relation: claimForm.relation.trim(),
+          approvedEquivalentForms: claimForm.approvedEquivalentForms.split('|').map(v => v.trim()).filter(Boolean),
+          knownCorruptions: claimForm.knownCorruptions.split('|').map(v => v.trim()).filter(Boolean).map(text => ({ type: 'manual', text })),
+        },
+      })
+      setClaimForm({ category: 'causal', sourceText: '', relation: '', approvedEquivalentForms: '', knownCorruptions: '' })
+      await refreshFixtures()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add claim-relationship fixture.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (!projectId) {
     return (
       <div className="min-h-screen bg-white dark:bg-gray-950 p-6">
@@ -235,7 +262,7 @@ export default function A2HFixturesPage() {
     )
   }
 
-  const byType: Record<A2HFixtureType, number> = { citation: 0, numeric_unit: 0, modality: 0, protected_term: 0, terminology: 0, grammar_repair: 0, factual_repair: 0 }
+  const byType: Record<A2HFixtureType, number> = { citation: 0, numeric_unit: 0, modality: 0, protected_term: 0, terminology: 0, grammar_repair: 0, factual_repair: 0, claim_relationship: 0 }
   for (const f of allFixtures) byType[f.type]++
   const sourcesWithAnyFixture = new Set(allFixtures.map(f => f.sourceId)).size
 
@@ -379,6 +406,24 @@ export default function A2HFixturesPage() {
                             </label>
                             <button onClick={handleAddTerminology} disabled={busy || !termForm.preferredTerm.trim()}
                               className="text-xs px-3 py-1.5 rounded-lg bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">Add Terminology Fixture</button>
+                          </div>
+
+                          <div className="pt-2 border-t border-gray-100 dark:border-gray-900 space-y-1.5">
+                            <p className="text-xs text-gray-400 dark:text-gray-500">Add a claim-relationship fixture for A2H-16 (needs manual curation — quote sourceText verbatim from this source):</p>
+                            <select value={claimForm.category} onChange={e => setClaimForm({ ...claimForm, category: e.target.value })}
+                              className="w-full text-xs rounded-lg px-2 py-1.5 bg-white border border-gray-300 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300">
+                              {(['causal', 'comparative', 'attribution', 'qualifier', 'condition', 'exception'] as const).map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <textarea value={claimForm.sourceText} onChange={e => setClaimForm({ ...claimForm, sourceText: e.target.value })} placeholder="sourceText — exact claim sentence, verbatim from this source"
+                              className="w-full text-xs rounded-lg px-2 py-1.5 bg-white border border-gray-300 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300" rows={2} />
+                            <input value={claimForm.relation} onChange={e => setClaimForm({ ...claimForm, relation: e.target.value })} placeholder="relation (e.g. 'causes', 'attributed to', 'greater than')"
+                              className="w-full text-xs rounded-lg px-2 py-1.5 bg-white border border-gray-300 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300" />
+                            <input value={claimForm.approvedEquivalentForms} onChange={e => setClaimForm({ ...claimForm, approvedEquivalentForms: e.target.value })} placeholder="Approved paraphrases (separate with |)"
+                              className="w-full text-xs rounded-lg px-2 py-1.5 bg-white border border-gray-300 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300" />
+                            <input value={claimForm.knownCorruptions} onChange={e => setClaimForm({ ...claimForm, knownCorruptions: e.target.value })} placeholder="Known-bad phrasings (separate with |)"
+                              className="w-full text-xs rounded-lg px-2 py-1.5 bg-white border border-gray-300 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-300" />
+                            <button onClick={handleAddClaimRelationship} disabled={busy || !claimForm.sourceText.trim() || !claimForm.relation.trim()}
+                              className="text-xs px-3 py-1.5 rounded-lg bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">Add Claim-Relationship Fixture</button>
                           </div>
 
                           <div className="pt-2 border-t border-gray-100 dark:border-gray-900 space-y-1.5">

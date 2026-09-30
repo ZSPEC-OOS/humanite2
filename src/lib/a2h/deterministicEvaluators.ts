@@ -5,6 +5,7 @@ import { evaluateModalityPreservation } from './a2h09'
 import { evaluateProtectedTerms } from './a2h10'
 import { evaluateTerminologyConsistency } from './a2h13'
 import { evaluateGrammarDamage } from './a2h08'
+import { evaluateClaimRelationshipPreservation } from './a2h16'
 
 // The single dispatch table execution.ts uses for every OUTPUT-scoped
 // deterministic test — adding a future deterministic test means adding one
@@ -12,7 +13,10 @@ import { evaluateGrammarDamage } from './a2h08'
 // execution.ts itself. A2H-06/A2H-12 (Phase 3) are NOT here: they are
 // FIXTURE-scoped and paid (a targeted repair model call), so they run
 // through the separate repair_evaluation job stage instead (see
-// execution.ts's runRepairEvaluationJob).
+// execution.ts's runRepairEvaluationJob). A2H-07/11/14/15 (Phase 4) are also
+// NOT here: they run through the separate experimental_trial job stage
+// instead (see execution.ts's runExperimentalTrialJob) since they produce
+// their own BenchmarkTrial evidence rather than scoring an existing output.
 export const DETERMINISTIC_EVALUATORS: Partial<Record<A2HTestCode, DeterministicEvaluator>> = {
   'A2H-04': evaluateCitationPreservation,
   'A2H-05': evaluateNumericUnitPreservation,
@@ -20,6 +24,7 @@ export const DETERMINISTIC_EVALUATORS: Partial<Record<A2HTestCode, Deterministic
   'A2H-10': evaluateProtectedTerms,
   'A2H-13': evaluateTerminologyConsistency,
   'A2H-08': evaluateGrammarDamage,
+  'A2H-16': evaluateClaimRelationshipPreservation,
 }
 
 export function isDeterministicTest(code: A2HTestCode): boolean {

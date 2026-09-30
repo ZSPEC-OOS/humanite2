@@ -31,6 +31,12 @@ export function testEvaluationJobId(runId: string, outputId: string, benchmarkCo
 export function repairEvaluationJobId(runId: string, fixtureId: string, benchmarkCode: A2HTestCode, repairConfigVersion: string): string {
   return jobId('repair_evaluation', [runId, fixtureId, benchmarkCode, repairConfigVersion])
 }
+// Phase 4 (§36): identity is (run, benchmarkCode, source, condition, trial) —
+// deliberately the SAME logical key trials.ts's trialId() uses, so a job and
+// the trial it produces always share one identity.
+export function experimentalTrialJobId(runId: string, benchmarkCode: A2HTestCode, sourceId: string, conditionId: string, trialIndex: number): string {
+  return jobId('experimental_trial', [runId, benchmarkCode, sourceId, conditionId, trialIndex])
+}
 
 export interface CreateJobParams {
   id: string
@@ -42,6 +48,8 @@ export interface CreateJobParams {
   fixtureId?: string | null
   intensity?: number | null
   benchmarkCode?: A2HTestCode | null
+  conditionId?: string | null
+  trialIndex?: number | null
 }
 
 // Idempotent by construction: if a job with this exact id already exists
@@ -64,6 +72,8 @@ export async function getOrCreateJob(firestore: Firestore, params: CreateJobPara
     fixtureId: params.fixtureId ?? null,
     intensity: params.intensity ?? null,
     benchmarkCode: params.benchmarkCode ?? null,
+    conditionId: params.conditionId ?? null,
+    trialIndex: params.trialIndex ?? null,
     status: 'queued',
     attemptCount: 0,
     createdAt: now,

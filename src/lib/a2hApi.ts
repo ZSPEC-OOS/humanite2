@@ -1,11 +1,13 @@
 import { apiFetch } from '@/lib/api'
 import type {
   BenchmarkTopic, CorpusSource, BenchmarkOutput, CorpusProject, CorpusManifest, DetectorResult,
-  BenchmarkRun, BenchmarkRunSource, FixtureSet, BenchmarkFixture, A2HFixtureType,
+  BenchmarkRun, BenchmarkRunSource, FixtureSet, BenchmarkFixture, A2HFixtureType, A2HTestCode,
+  BenchmarkExperimentConfig, StyleToneContrast, GenreAudienceContrast, A2HTestDefinition,
 } from '@/lib/a2h/types'
+import { IMPLEMENTED_A2H_TESTS, A2H_TEST_LABELS, A2H_TEST_DEFINITIONS } from '@/lib/a2h/types'
 import type { CreateTopicInput } from '@/lib/a2h/topics'
 import type { ProjectDraftPatch, FreezeValidationResult } from '@/lib/a2h/corpusProject'
-import type { RunDraftPatch, RunValidationResult, RunProgress, FixtureTestEligibility } from '@/lib/a2h/runs'
+import type { RunDraftPatch, RunValidationResult, RunProgress, FixtureTestEligibility, RunWorkEstimate } from '@/lib/a2h/runs'
 import type { ExecuteBatchResult } from '@/lib/a2h/execution'
 import type { A2H01Report, A2H01Filters } from '@/lib/a2h/a2h01'
 import type { A2H02Report, A2H02Filters } from '@/lib/a2h/a2h02'
@@ -18,18 +20,29 @@ import type { A2H13Report, A2H13Filters } from '@/lib/a2h/a2h13'
 import type { A2H06Report } from '@/lib/a2h/a2h06'
 import type { A2H08Report, A2H08Filters } from '@/lib/a2h/a2h08'
 import type { A2H12Report } from '@/lib/a2h/a2h12'
+import type { A2H07Report } from '@/lib/a2h/a2h07'
+import type { A2H11Report } from '@/lib/a2h/a2h11'
+import type { A2H14Report } from '@/lib/a2h/a2h14'
+import type { A2H15Report } from '@/lib/a2h/a2h15'
+import type { A2H16Report } from '@/lib/a2h/a2h16'
+import type { A2H17Report } from '@/lib/a2h/a2h17'
+import type { ClaimVerifierCalibrationResult } from '@/lib/a2h/a2h16'
 import type { CreateFixtureInput, FixtureUpdatePatch, FixtureSetValidationResult, LockFixtureSetResult, FixtureCandidates } from '@/lib/a2h/fixtures'
 import type { OutputDetail } from '@/lib/a2h/outputDetail'
 import type { Domain } from '@/lib/style/types'
 
 export type {
   BenchmarkTopic, CorpusSource, BenchmarkOutput, CreateTopicInput, DetectorResult, CorpusProject, ProjectDraftPatch, CorpusManifest, FreezeValidationResult,
-  BenchmarkRun, BenchmarkRunSource, RunDraftPatch, RunValidationResult, RunProgress, ExecuteBatchResult, FixtureTestEligibility,
+  BenchmarkRun, BenchmarkRunSource, RunDraftPatch, RunValidationResult, RunProgress, ExecuteBatchResult, FixtureTestEligibility, RunWorkEstimate,
   A2H01Report, A2H01Filters, A2H02Report, A2H02Filters, A2H03Report, A2H03Filters, A2H03Stratum, OutputDetail,
   A2H04Report, A2H04Filters, A2H05Report, A2H05Filters, A2H09Report, A2H09Filters, A2H10Report, A2H10Filters, A2H13Report, A2H13Filters,
   A2H06Report, A2H08Report, A2H08Filters, A2H12Report,
+  A2H07Report, A2H11Report, A2H14Report, A2H15Report, A2H16Report, A2H17Report, ClaimVerifierCalibrationResult,
   FixtureSet, BenchmarkFixture, A2HFixtureType, CreateFixtureInput, FixtureUpdatePatch, FixtureSetValidationResult, LockFixtureSetResult, FixtureCandidates,
+  A2HTestCode, BenchmarkExperimentConfig, StyleToneContrast, GenreAudienceContrast, A2HTestDefinition,
 }
+
+export { IMPLEMENTED_A2H_TESTS, A2H_TEST_LABELS, A2H_TEST_DEFINITIONS }
 
 // ── Corpus projects ──────────────────────────────────────────────────────
 
@@ -213,6 +226,7 @@ export interface ValidateRunResponse {
   run: BenchmarkRun
   result: RunValidationResult
   eligibility: Partial<Record<string, FixtureTestEligibility>>
+  workEstimate: RunWorkEstimate | null
 }
 
 export async function apiValidateRun(runId: string): Promise<ValidateRunResponse> {
@@ -316,6 +330,45 @@ export async function apiGetA2H08Report(runId: string, filters?: A2H08Filters): 
 
 export async function apiGetA2H12Report(runId: string): Promise<A2H12Report> {
   return apiFetch<A2H12Report>(`/admin/a2h/runs/${runId}/tests/a2h-12`)
+}
+
+// ── Phase 4: experimental trials + claim relationships + operational efficiency ──
+
+export async function apiGetA2H07Report(runId: string): Promise<A2H07Report> {
+  return apiFetch<A2H07Report>(`/admin/a2h/runs/${runId}/tests/a2h-07`)
+}
+
+export async function apiGetA2H11Report(runId: string): Promise<A2H11Report> {
+  return apiFetch<A2H11Report>(`/admin/a2h/runs/${runId}/tests/a2h-11`)
+}
+
+export async function apiGetA2H14Report(runId: string): Promise<A2H14Report> {
+  return apiFetch<A2H14Report>(`/admin/a2h/runs/${runId}/tests/a2h-14`)
+}
+
+export async function apiGetA2H15Report(runId: string): Promise<A2H15Report> {
+  return apiFetch<A2H15Report>(`/admin/a2h/runs/${runId}/tests/a2h-15`)
+}
+
+export async function apiGetA2H16Report(runId: string): Promise<A2H16Report> {
+  return apiFetch<A2H16Report>(`/admin/a2h/runs/${runId}/tests/a2h-16`)
+}
+
+export async function apiGetA2H17Report(runId: string): Promise<A2H17Report> {
+  return apiFetch<A2H17Report>(`/admin/a2h/runs/${runId}/tests/a2h-17`)
+}
+
+export async function apiGetClaimVerifierCalibration(): Promise<ClaimVerifierCalibrationResult | null> {
+  const data = await apiFetch<{ result: ClaimVerifierCalibrationResult | null }>('/admin/a2h/claim-verifier-calibration')
+  return data.result
+}
+
+export async function apiRunClaimVerifierCalibration(force = false): Promise<ClaimVerifierCalibrationResult> {
+  const data = await apiFetch<{ result: ClaimVerifierCalibrationResult }>('/admin/a2h/claim-verifier-calibration', {
+    method: 'POST',
+    body: JSON.stringify({ force }),
+  })
+  return data.result
 }
 
 // ── Fixture sets & fixtures ──────────────────────────────────────────────

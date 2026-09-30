@@ -12,11 +12,12 @@ import { validateProtectedTermFixtureExpected, extractProtectedTermCandidates } 
 import { validateTerminologyFixtureExpected } from './a2h13'
 import { validateGrammarRepairFixtureExpected, proposeGrammarRepairCandidates } from './a2h06'
 import { validateFactualRepairFixtureExpected, proposeFactualRepairCandidates } from './a2h12'
+import { validateClaimRelationshipFixtureExpected } from './a2h16'
 
 const SETS = A2H_COLLECTIONS.fixtureSets
 const FIXTURES = A2H_COLLECTIONS.fixtures
 
-const VALID_TYPES: A2HFixtureType[] = ['citation', 'numeric_unit', 'modality', 'protected_term', 'terminology', 'grammar_repair', 'factual_repair']
+const VALID_TYPES: A2HFixtureType[] = ['citation', 'numeric_unit', 'modality', 'protected_term', 'terminology', 'grammar_repair', 'factual_repair', 'claim_relationship']
 
 function validateExpectedShape(type: A2HFixtureType, expected: Record<string, unknown>): string[] {
   switch (type) {
@@ -27,6 +28,7 @@ function validateExpectedShape(type: A2HFixtureType, expected: Record<string, un
     case 'terminology': return validateTerminologyFixtureExpected(expected)
     case 'grammar_repair': return validateGrammarRepairFixtureExpected(expected)
     case 'factual_repair': return validateFactualRepairFixtureExpected(expected)
+    case 'claim_relationship': return validateClaimRelationshipFixtureExpected(expected)
   }
 }
 
@@ -241,7 +243,7 @@ export async function validateFixtureSet(firestore: Firestore, fixtureSetId: str
 
   const seenId = new Set<string>()
   const seenOrdinal = new Set<string>()
-  const byType: Record<A2HFixtureType, number> = { citation: 0, numeric_unit: 0, modality: 0, protected_term: 0, terminology: 0, grammar_repair: 0, factual_repair: 0 }
+  const byType: Record<A2HFixtureType, number> = { citation: 0, numeric_unit: 0, modality: 0, protected_term: 0, terminology: 0, grammar_repair: 0, factual_repair: 0, claim_relationship: 0 }
 
   for (const fixture of allFixtures) {
     if (seenId.has(fixture.id)) errors.push(`Duplicate fixture id ${fixture.id}.`)
