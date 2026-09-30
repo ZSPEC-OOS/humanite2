@@ -1,11 +1,23 @@
 import { apiFetch } from '@/lib/api'
-import type { BenchmarkTopic, CorpusSource, BenchmarkOutput, CorpusProject, CorpusManifest } from '@/lib/a2h/types'
+import type {
+  BenchmarkTopic, CorpusSource, BenchmarkOutput, CorpusProject, CorpusManifest, DetectorResult,
+  BenchmarkRun, BenchmarkRunSource,
+} from '@/lib/a2h/types'
 import type { CreateTopicInput } from '@/lib/a2h/topics'
 import type { ProjectDraftPatch, FreezeValidationResult } from '@/lib/a2h/corpusProject'
-import type { DetectorResult } from '@/lib/a2h/baseline'
+import type { RunDraftPatch, RunValidationResult, RunProgress } from '@/lib/a2h/runs'
+import type { ExecuteBatchResult } from '@/lib/a2h/execution'
+import type { A2H01Report, A2H01Filters } from '@/lib/a2h/a2h01'
+import type { A2H02Report, A2H02Filters } from '@/lib/a2h/a2h02'
+import type { A2H03Report, A2H03Filters, A2H03Stratum } from '@/lib/a2h/a2h03'
+import type { OutputDetail } from '@/lib/a2h/outputDetail'
 import type { Domain } from '@/lib/style/types'
 
-export type { BenchmarkTopic, CorpusSource, BenchmarkOutput, CreateTopicInput, DetectorResult, CorpusProject, ProjectDraftPatch, CorpusManifest, FreezeValidationResult }
+export type {
+  BenchmarkTopic, CorpusSource, BenchmarkOutput, CreateTopicInput, DetectorResult, CorpusProject, ProjectDraftPatch, CorpusManifest, FreezeValidationResult,
+  BenchmarkRun, BenchmarkRunSource, RunDraftPatch, RunValidationResult, RunProgress, ExecuteBatchResult,
+  A2H01Report, A2H01Filters, A2H02Report, A2H02Filters, A2H03Report, A2H03Filters, A2H03Stratum, OutputDetail,
+}
 
 // ── Corpus projects ──────────────────────────────────────────────────────
 
@@ -138,49 +150,107 @@ export async function apiFreezeSource(corpusProjectId: string, topicId: string, 
   return data.source
 }
 
-// ── Detector baselines / post-scores ─────────────────────────────────────
+// ── Benchmark runs ───────────────────────────────────────────────────────
+// Baseline/transform/post-score acquisition are no longer driven per-cell
+// from the client — they run inside the run engine's checkpointed job
+// pipeline (see src/lib/a2h/execution.ts) via apiExecuteRunBatch.
 
-export async function apiListBaselines(corpusProjectId: string, domainId?: Domain): Promise<Record<string, DetectorResult>> {
-  const params = new URLSearchParams({ corpusProjectId })
-  if (domainId) params.set('domainId', domainId)
-  const data = await apiFetch<{ baselines: Record<string, DetectorResult> }>(`/admin/a2h/corpus/baseline?${params.toString()}`)
-  return data.baselines
+export async function apiListRuns(corpusProjectId: string): Promise<BenchmarkRun[]> {
+  const data = await apiFetch<{ runs: BenchmarkRun[] }>(`/admin/a2h/runs?corpusProjectId=${corpusProjectId}`)
+  return data.runs
 }
 
-export async function apiAcquireBaseline(corpusProjectId: string, topicId: string, targetWords: number, force = false): Promise<DetectorResult> {
-  const data = await apiFetch<{ baseline: DetectorResult }>('/admin/a2h/corpus/baseline', {
-    method: 'POST',
-    body: JSON.stringify({ corpusProjectId, topicId, targetWords, force }),
-  })
-  return data.baseline
+export async function apiGetRun(runId: string): Promise<BenchmarkRun> {
+  const data = await apiFetch<{ run: BenchmarkRun }>(`/admin/a2h/runs/${runId}`)
+  return data.run
 }
 
-export async function apiListPostScores(corpusProjectId: string, topicId: string, targetWords: number): Promise<Record<string, DetectorResult>> {
-  const params = new URLSearchParams({ corpusProjectId, topicId, targetWords: String(targetWords) })
-  const data = await apiFetch<{ postScores: Record<string, DetectorResult> }>(`/admin/a2h/corpus/post-score?${params.toString()}`)
-  return data.postScores
+export interface CreateRunBody {
+  corpusProjectId: string
+  name: string
+  // Omitted client-side to let the server snapshot the admin's own
+  // currently-configured model/provider at creation time (see the route).
+  modelProvider?: string
+  model?: string
+  detectorConfigId?: string
+  concurrency?: number
 }
 
-export async function apiAcquirePostScore(corpusProjectId: string, topicId: string, targetWords: number, intensity: number, force = false): Promise<DetectorResult> {
-  const data = await apiFetch<{ postScore: DetectorResult }>('/admin/a2h/corpus/post-score', {
-    method: 'POST',
-    body: JSON.stringify({ corpusProjectId, topicId, targetWords, intensity, force }),
-  })
-  return data.postScore
+export async function apiCreateRun(body: CreateRunBody): Promise<BenchmarkRun> {
+  const data = await apiFetch<{ run: BenchmarkRun }>('/admin/a2h/runs', { method: 'POST', body: JSON.stringify(body) })
+  return data.run
 }
 
-// ── Humanite outputs ─────────────────────────────────────────────────────
-
-export async function apiListOutputs(corpusProjectId: string, topicId: string, targetWords: number): Promise<BenchmarkOutput[]> {
-  const params = new URLSearchParams({ corpusProjectId, topicId, targetWords: String(targetWords) })
-  const data = await apiFetch<{ outputs: BenchmarkOutput[] }>(`/admin/a2h/corpus/transform?${params.toString()}`)
-  return data.outputs
+export async function apiUpdateRunDraft(runId: string, patch: RunDraftPatch): Promise<BenchmarkRun> {
+  const data = await apiFetch<{ run: BenchmarkRun }>(`/admin/a2h/runs/${runId}`, { method: 'PATCH', body: JSON.stringify(patch) })
+  return data.run
 }
 
-export async function apiTransformSource(corpusProjectId: string, topicId: string, targetWords: number, intensity: number, force = false): Promise<BenchmarkOutput> {
-  const data = await apiFetch<{ output: BenchmarkOutput }>('/admin/a2h/corpus/transform', {
-    method: 'POST',
-    body: JSON.stringify({ corpusProjectId, topicId, targetWords, intensity, force }),
-  })
-  return data.output
+export async function apiValidateRun(runId: string): Promise<{ run: BenchmarkRun; result: RunValidationResult }> {
+  return apiFetch<{ run: BenchmarkRun; result: RunValidationResult }>(`/admin/a2h/runs/${runId}/validate`, { method: 'POST' })
+}
+
+export async function apiStartRun(runId: string): Promise<BenchmarkRun> {
+  const data = await apiFetch<{ run: BenchmarkRun }>(`/admin/a2h/runs/${runId}/start`, { method: 'POST' })
+  return data.run
+}
+
+export async function apiPauseRun(runId: string): Promise<BenchmarkRun> {
+  const data = await apiFetch<{ run: BenchmarkRun }>(`/admin/a2h/runs/${runId}/pause`, { method: 'POST' })
+  return data.run
+}
+
+export async function apiResumeRun(runId: string): Promise<BenchmarkRun> {
+  const data = await apiFetch<{ run: BenchmarkRun }>(`/admin/a2h/runs/${runId}/resume`, { method: 'POST' })
+  return data.run
+}
+
+export async function apiCancelRun(runId: string): Promise<BenchmarkRun> {
+  const data = await apiFetch<{ run: BenchmarkRun }>(`/admin/a2h/runs/${runId}/cancel`, { method: 'POST' })
+  return data.run
+}
+
+export async function apiGetRunProgress(runId: string): Promise<RunProgress> {
+  const data = await apiFetch<{ progress: RunProgress }>(`/admin/a2h/runs/${runId}/progress`)
+  return data.progress
+}
+
+export async function apiListRunSources(runId: string): Promise<BenchmarkRunSource[]> {
+  const data = await apiFetch<{ sources: BenchmarkRunSource[] }>(`/admin/a2h/runs/${runId}/sources`)
+  return data.sources
+}
+
+// Advances one bounded batch of the run's queued work — call this
+// repeatedly (the UI loops it) until run.status is no longer 'running'.
+export async function apiExecuteRunBatch(runId: string): Promise<ExecuteBatchResult> {
+  return apiFetch<ExecuteBatchResult>(`/admin/a2h/runs/${runId}/execute`, { method: 'POST' })
+}
+
+// ── A2H test results ─────────────────────────────────────────────────────
+
+function toQuery(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) if (value !== undefined) search.set(key, String(value))
+  const qs = search.toString()
+  return qs ? `?${qs}` : ''
+}
+
+export async function apiGetA2H01Report(runId: string, filters?: A2H01Filters): Promise<A2H01Report> {
+  const qs = toQuery({ ...filters })
+  return apiFetch<A2H01Report>(`/admin/a2h/runs/${runId}/tests/a2h-01${qs}`)
+}
+
+export async function apiGetA2H02Report(runId: string, filters?: A2H02Filters): Promise<A2H02Report> {
+  const qs = toQuery({ ...filters })
+  return apiFetch<A2H02Report>(`/admin/a2h/runs/${runId}/tests/a2h-02${qs}`)
+}
+
+export async function apiGetA2H03Report(runId: string, filters?: A2H03Filters, stratifyBy?: A2H03Stratum): Promise<A2H03Report> {
+  const qs = toQuery({ ...filters, stratifyBy })
+  return apiFetch<A2H03Report>(`/admin/a2h/runs/${runId}/tests/a2h-03${qs}`)
+}
+
+export async function apiGetOutputDetail(runId: string, outputId: string): Promise<OutputDetail> {
+  const data = await apiFetch<{ detail: OutputDetail }>(`/admin/a2h/runs/${runId}/outputs/${outputId}`)
+  return data.detail
 }

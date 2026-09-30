@@ -6,6 +6,7 @@ import { chunkFactLockedText } from '@/lib/chunk'
 import { humanizeChunk, aggregateChunkResults, joinChunkResults } from '@/lib/humanizePipeline'
 import { resolveProvider } from '@/lib/providerResolution'
 import { measureIntensity } from '@/lib/evaluation/intensity'
+import { pearsonCorrelation } from '@/lib/a2h/statistics'
 import { CORPUS } from '../corpus'
 
 // Phase 4's own acceptance criterion: "mean transformation magnitude
@@ -59,20 +60,9 @@ const SAMPLE_SIZE = 6
 //   3. Band separation: low (1-3) < mid (4-7) < high (8-10) as banded
 //      means, each gap at least 0.03 of transformation magnitude — so a
 //      technically-positive but meaningless sliver of a gap can't pass.
-function pearsonCorrelation(xs: number[], ys: number[]): number {
-  const n = xs.length
-  const meanX = xs.reduce((a, b) => a + b, 0) / n
-  const meanY = ys.reduce((a, b) => a + b, 0) / n
-  let cov = 0, varX = 0, varY = 0
-  for (let i = 0; i < n; i++) {
-    const dx = xs[i]! - meanX
-    const dy = ys[i]! - meanY
-    cov += dx * dy
-    varX += dx * dx
-    varY += dy * dy
-  }
-  return cov / Math.sqrt(varX * varY)
-}
+// pearsonCorrelation now lives in src/lib/a2h/statistics.ts (also used by
+// A2H-02's intensity-response trend diagnostics) rather than being defined
+// only here.
 
 function bandMean(values: number[], startLevel: number, endLevel: number): number {
   const slice = values.slice(startLevel - 1, endLevel)

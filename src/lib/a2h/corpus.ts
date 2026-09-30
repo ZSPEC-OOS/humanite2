@@ -36,6 +36,16 @@ export async function getSource(
   return doc.exists ? (doc.data() as CorpusSource) : null
 }
 
+// A source's own id already IS its deterministic (corpusProjectId, topicId,
+// targetWords) key, so a caller that only holds that id (e.g. a
+// BenchmarkJob, which carries sourceId but not the topicId/targetWords
+// separately) can fetch it directly without re-deriving the other two
+// parts. Read-only — the benchmark run layer never mutates a corpus source.
+export async function getSourceById(firestore: Firestore, sourceId: string): Promise<CorpusSource | null> {
+  const doc = await firestore.collection(COLLECTION).doc(sourceId).get()
+  return doc.exists ? (doc.data() as CorpusSource) : null
+}
+
 export async function listSources(firestore: Firestore, corpusProjectId: string, domainId?: Domain): Promise<CorpusSource[]> {
   let query: Query<DocumentData> = firestore.collection(COLLECTION).where('corpusProjectId', '==', corpusProjectId)
   if (domainId) query = query.where('domainId', '==', domainId)
