@@ -88,3 +88,32 @@ export interface CorpusSource {
   frozenAt: string | null
   status: CorpusSourceStatus
 }
+
+export type BenchmarkOutputStatus = 'success' | 'failed'
+
+// One Humanize transformation of a frozen source at a single intensity
+// (1-10) — the repeated-measures unit §1/§9 describe: the same frozen
+// source run through the real product pipeline once per intensity level.
+export interface BenchmarkOutput {
+  id: string
+  sourceId: string
+  domainId: Domain
+  topicId: string
+  targetWords: number
+  intensity: number
+  outputText: string
+  outputWords: number
+  outputSha256: string
+  modelUsed: string
+  retryCount: number
+  candidateCount: number
+  latencyMs: number
+  // Not available from the current humanize pipeline (humanizeChunk doesn't
+  // surface completion usage) — null rather than fabricated; see outputs.ts.
+  inputTokens: number | null
+  outputTokens: number | null
+  estimatedCostUsd: number | null
+  generatedAt: string
+  status: BenchmarkOutputStatus
+  errorMessage: string | null
+}

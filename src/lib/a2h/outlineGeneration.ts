@@ -1,5 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore'
 import type OpenAI from 'openai'
+import { resolveCapabilities } from '@/lib/providers'
 import type { Domain } from '@/lib/style/types'
 import type { BenchmarkTopic } from './types'
 import { DEFAULT_GENERATION_PROMPT_VERSION } from './types'
@@ -29,8 +30,45 @@ export function buildOutlinePrompt(domainId: Domain, topicCount: number): string
   ].join('\n')
 }
 
+// Generous per-topic budget — a real topic entry (title + writingType +
+// one-sentence description + audience + 4-6 coreConcepts phrases, plus JSON
+// punctuation) tends to run well past a tight estimate once a model pads
+// wording despite the prompt's instructions; a too-low ceiling here truncates
+// the response mid-JSON, which is indistinguishable downstream from the
+// model simply failing to produce JSON at all.
 export function outlineMaxTokensFor(topicCount: number): number {
-  return Math.min(8192, topicCount * 150 + 500)
+  return Math.min(16384, topicCount * 250 + 800)
+}
+
+// Defensive extraction rather than a bare JSON.parse: response_format:
+// json_object is honored inconsistently across providers/models — some
+// still wrap the object in a ```json fence despite the prompt saying not
+// to. Strips a fence if present, then falls back to the first balanced
+// {...} substring, before giving up. Throws with a snippet of the actual
+// response so a real failure is diagnosable instead of a bare "not valid
+// JSON".
+function extractJson(content: string): unknown {
+  const trimmed = content.trim()
+  const withoutFences = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
+
+  try {
+    return JSON.parse(withoutFences)
+  } catch {
+    // fall through to brace extraction below
+  }
+
+  const start = withoutFences.indexOf('{')
+  const end = withoutFences.lastIndexOf('}')
+  if (start !== -1 && end > start) {
+    try {
+      return JSON.parse(withoutFences.slice(start, end + 1))
+    } catch {
+      // fall through to the error below
+    }
+  }
+
+  const snippet = trimmed.slice(0, 300)
+  throw new Error(`Model did not return valid JSON. First 300 characters of its response: ${snippet || '(empty response)'}`)
 }
 
 export interface ParsedOutlineTopic {
@@ -99,21 +137,28 @@ export async function generateOutline(
     throw new Error('Topics already exist for this domain — pass force to regenerate.')
   }
 
+  // Omitted (rather than always sent) for a provider whose endpoint doesn't
+  // support strict JSON mode — some non-OpenAI-compliant endpoints reject an
+  // unrecognized response_format outright instead of ignoring it, which
+  // would otherwise fail the whole call before extractJson ever gets a
+  // chance to parse anything.
+  const jsonModeSupported = resolveCapabilities(client.baseURL).jsonOutput
   const completion = await client.chat.completions.create({
     model,
     messages: [{ role: 'user', content: buildOutlinePrompt(domainId, config.topicCount) }],
-    response_format: { type: 'json_object' },
+    ...(jsonModeSupported ? { response_format: { type: 'json_object' as const } } : {}),
     max_tokens: outlineMaxTokensFor(config.topicCount),
     temperature: 0.7,
   })
 
-  let raw: unknown
-  try {
-    raw = JSON.parse(completion.choices[0]?.message?.content ?? '{}')
-  } catch {
-    throw new Error('Model did not return valid JSON.')
+  const choice = completion.choices[0]
+  if (choice?.finish_reason === 'length') {
+    throw new Error(
+      `Model response was cut off before completing (hit the ${outlineMaxTokensFor(config.topicCount)}-token limit) — retry with a smaller topic count, or the model may need a larger output budget.`,
+    )
   }
 
+  const raw = extractJson(choice?.message?.content ?? '')
   const parsed = parseOutlineResponse(raw, config.topicCount)
   if ('error' in parsed) throw new Error(parsed.error)
 

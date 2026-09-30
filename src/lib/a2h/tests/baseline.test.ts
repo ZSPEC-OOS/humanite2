@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import type { Firestore } from 'firebase-admin/firestore'
-import { acquireBaseline, getBaseline, listBaselines } from '../baseline'
-import type { CorpusSource } from '../types'
+import { acquireBaseline, getBaseline, listBaselines, acquirePostScore, getPostScore, listPostScores } from '../baseline'
+import type { CorpusSource, BenchmarkOutput } from '../types'
 
 function makeFirestore() {
   const docs = new Map<string, Record<string, unknown>>()
@@ -108,5 +108,73 @@ describe('listBaselines', () => {
 
     const map = await listBaselines(firestore, [FROZEN_SOURCE.id, 'no-such-source'])
     expect(Object.keys(map)).toEqual([FROZEN_SOURCE.id])
+  })
+})
+
+const SUCCESSFUL_OUTPUT: BenchmarkOutput = {
+  id: `${FROZEN_SOURCE.id}__I5`,
+  sourceId: FROZEN_SOURCE.id,
+  domainId: 'general',
+  topicId: 'topic-1',
+  targetWords: 100,
+  intensity: 5,
+  outputText: 'The transformed output text.',
+  outputWords: 5,
+  outputSha256: 'b'.repeat(64),
+  modelUsed: 'stub-model',
+  retryCount: 0,
+  candidateCount: 1,
+  latencyMs: 120,
+  inputTokens: null,
+  outputTokens: null,
+  estimatedCostUsd: null,
+  generatedAt: '2026-01-01T00:10:00.000Z',
+  status: 'success',
+  errorMessage: null,
+}
+
+describe('acquirePostScore', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('refuses to score a failed output', async () => {
+    const { firestore } = makeFirestore()
+    const failed: BenchmarkOutput = { ...SUCCESSFUL_OUTPUT, status: 'failed', errorMessage: 'boom' }
+    await expect(acquirePostScore(firestore, failed, 'test-key')).rejects.toThrow(/failed transformation/i)
+  })
+
+  it('acquires and persists a post-score keyed to the output, distinct from the source baseline', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { classification: 'human', class_probabilities: { human: 0.9, ai: 0.1, mixed: 0 } })))
+    const { firestore } = makeFirestore()
+
+    const postScore = await acquirePostScore(firestore, SUCCESSFUL_OUTPUT, 'test-key')
+    expect(postScore.outputId).toBe(SUCCESSFUL_OUTPUT.id)
+    expect(postScore.sourceId).toBe(FROZEN_SOURCE.id)
+    expect(postScore.classification).toBe('human-written')
+
+    const fetched = await getPostScore(firestore, SUCCESSFUL_OUTPUT.id)
+    expect(fetched).toEqual(postScore)
+    // A baseline (keyed by sourceId alone) and a post-score (keyed by
+    // outputId) must never collide in storage.
+    expect(await getBaseline(firestore, FROZEN_SOURCE.id)).toBeNull()
+  })
+
+  it('refuses to silently re-acquire an existing post-score without force', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { classification: 'human' })))
+    const { firestore } = makeFirestore()
+    await acquirePostScore(firestore, SUCCESSFUL_OUTPUT, 'test-key')
+    await expect(acquirePostScore(firestore, SUCCESSFUL_OUTPUT, 'test-key')).rejects.toThrow(/already exists/i)
+  })
+})
+
+describe('listPostScores', () => {
+  it('returns a map keyed by outputId', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { classification: 'human' })))
+    const { firestore } = makeFirestore()
+    await acquirePostScore(firestore, SUCCESSFUL_OUTPUT, 'test-key')
+
+    const map = await listPostScores(firestore, [SUCCESSFUL_OUTPUT.id, 'no-such-output'])
+    expect(Object.keys(map)).toEqual([SUCCESSFUL_OUTPUT.id])
   })
 })

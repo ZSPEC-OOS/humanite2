@@ -6,9 +6,18 @@ import { LENGTH_LADDER, DEFAULT_CORPUS_VERSION } from '@/lib/a2h/types'
 import {
   apiListTopics, apiListCorpus, apiGenerateSource, apiFreezeSource,
   apiListBaselines, apiAcquireBaseline,
-  type BenchmarkTopic, type CorpusSource, type DetectorResult,
+  apiListOutputs, apiTransformSource, apiListPostScores, apiAcquirePostScore,
+  type BenchmarkTopic, type CorpusSource, type BenchmarkOutput, type DetectorResult,
 } from '@/lib/a2hApi'
 import { Spinner } from '@/components/ui/Spinner'
+
+const INTENSITIES = Array.from({ length: 10 }, (_, i) => i + 1)
+
+const OUTPUT_CELL_STYLES: Record<string, string> = {
+  empty: 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600',
+  success: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  failed: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+}
 
 type CellKey = string
 function cellKey(topicId: string, targetWords: number): CellKey {
@@ -31,6 +40,10 @@ export default function A2HCorpusPage() {
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<{ topic: BenchmarkTopic; targetWords: number } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [outputs, setOutputs] = useState<Record<number, BenchmarkOutput>>({})
+  const [postScores, setPostScores] = useState<Record<string, DetectorResult>>({})
+  const [selectedIntensity, setSelectedIntensity] = useState<number | null>(null)
+  const [outputsLoading, setOutputsLoading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -53,6 +66,33 @@ export default function A2HCorpusPage() {
 
   const selectedSource = selected ? sources[cellKey(selected.topic.id, selected.targetWords)] : undefined
   const selectedBaseline = selectedSource ? baselines[selectedSource.id] : undefined
+
+  useEffect(() => {
+    setOutputs({})
+    setPostScores({})
+    setSelectedIntensity(null)
+    if (!selected || selectedSource?.status !== 'frozen') return
+    let cancelled = false
+    setOutputsLoading(true)
+    apiListOutputs(selected.topic.id, selected.targetWords, DEFAULT_CORPUS_VERSION)
+      .then(async outputsData => {
+        if (cancelled) return
+        const map: Record<number, BenchmarkOutput> = {}
+        for (const o of outputsData) map[o.intensity] = o
+        setOutputs(map)
+        if (outputsData.length > 0) {
+          const scores = await apiListPostScores(selected.topic.id, selected.targetWords, DEFAULT_CORPUS_VERSION)
+          if (!cancelled) setPostScores(scores)
+        }
+      })
+      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load outputs.') })
+      .finally(() => { if (!cancelled) setOutputsLoading(false) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.topic.id, selected?.targetWords, selectedSource?.status])
+
+  const selectedOutput = selectedIntensity != null ? outputs[selectedIntensity] : undefined
+  const selectedPostScore = selectedOutput ? postScores[selectedOutput.id] : undefined
 
   async function handleGenerate(force: boolean) {
     if (!selected) return
@@ -91,6 +131,34 @@ export default function A2HCorpusPage() {
       setBaselines(prev => ({ ...prev, [baseline.sourceId]: baseline }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Baseline acquisition failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleTransform(force: boolean) {
+    if (!selected || selectedIntensity == null) return
+    setBusy(true)
+    setError(null)
+    try {
+      const output = await apiTransformSource(selected.topic.id, selected.targetWords, selectedIntensity, force)
+      setOutputs(prev => ({ ...prev, [output.intensity]: output }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Transformation failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleAcquirePostScore(force: boolean) {
+    if (!selected || selectedIntensity == null) return
+    setBusy(true)
+    setError(null)
+    try {
+      const postScore = await apiAcquirePostScore(selected.topic.id, selected.targetWords, selectedIntensity, force)
+      setPostScores(prev => ({ ...prev, [postScore.outputId ?? postScore.id]: postScore }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Post-score acquisition failed.')
     } finally {
       setBusy(false)
     }
@@ -245,6 +313,88 @@ export default function A2HCorpusPage() {
                   className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40 shrink-0">
                   {busy ? 'Working…' : selectedBaseline ? 'Re-acquire' : 'Acquire baseline'}
                 </button>
+              </div>
+            )}
+
+            {selectedSource?.status === 'frozen' && (
+              <div className="border-t border-gray-200 dark:border-gray-800 pt-3 space-y-3">
+                <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Intensity Transformations</h3>
+                {outputsLoading ? (
+                  <Spinner className="w-4 h-4 border-gray-200 border-t-gray-700 dark:border-gray-700 dark:border-t-gray-300" />
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {INTENSITIES.map(i => {
+                      const output = outputs[i]
+                      const state = output?.status ?? 'empty'
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => setSelectedIntensity(i)}
+                          className={`w-9 h-9 rounded-lg text-[10px] font-semibold transition-all ${OUTPUT_CELL_STYLES[state]} ${
+                            selectedIntensity === i ? 'ring-2 ring-gray-900 dark:ring-gray-100' : ''
+                          }`}
+                          title={output ? `${output.status} · ${output.outputWords} words` : 'Not transformed'}
+                        >
+                          I{i}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {selectedIntensity != null && (
+                  <div className="space-y-2 pl-0.5">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {selectedOutput
+                          ? `${selectedOutput.status} · ${selectedOutput.outputWords} words · ${selectedOutput.latencyMs}ms · ${selectedOutput.retryCount} retries`
+                          : `Intensity ${selectedIntensity} not yet transformed`}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        {!selectedOutput && (
+                          <button onClick={() => handleTransform(false)} disabled={busy}
+                            className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">
+                            {busy ? 'Transforming…' : 'Transform'}
+                          </button>
+                        )}
+                        {selectedOutput && (
+                          <button onClick={() => handleTransform(true)} disabled={busy}
+                            className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
+                            {busy ? 'Working…' : 'Regenerate'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {selectedOutput?.status === 'success' && (
+                      <div className="max-h-48 overflow-y-auto text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/50 rounded-xl p-3 whitespace-pre-wrap">
+                        {selectedOutput.outputText}
+                      </div>
+                    )}
+                    {selectedOutput?.status === 'failed' && (
+                      <p className="text-xs text-red-600 dark:text-red-400">{selectedOutput.errorMessage}</p>
+                    )}
+
+                    {selectedOutput?.status === 'success' && (
+                      <div className="flex items-center justify-between border-t border-gray-100 dark:border-gray-900 pt-2">
+                        <div>
+                          <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Post-transform GPTZero</p>
+                          {selectedPostScore ? (
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+                              {selectedPostScore.classification} · AI {formatPct(selectedPostScore.aiProbability)} · Human {formatPct(selectedPostScore.humanProbability)}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Not yet acquired</p>
+                          )}
+                        </div>
+                        <button onClick={() => handleAcquirePostScore(Boolean(selectedPostScore))} disabled={busy}
+                          className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40 shrink-0">
+                          {busy ? 'Working…' : selectedPostScore ? 'Re-acquire' : 'Acquire score'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
