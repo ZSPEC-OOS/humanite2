@@ -1,18 +1,33 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { DOMAINS, type Domain } from '@/lib/style/types'
 import { A2H_TEST_LABELS, IMPLEMENTED_A2H_TESTS, FIXTURE_REQUIRING_TESTS, type A2HTestCode } from '@/lib/a2h/types'
 import {
   apiGetRun, apiGetProject, apiListTopics, apiUpdateRunDraft, apiValidateRun,
-  apiStartRun, apiPauseRun, apiResumeRun, apiCancelRun, apiGetRunProgress, apiExecuteRunBatch,
+  apiStartRun, apiPauseRun, apiResumeRun, apiRecoverRun, apiCancelRun, apiGetRunProgress, apiExecuteRunBatch,
   apiListFixtureSets, type FixtureSet, type FixtureTestEligibility,
   apiRetryFailedJobs, apiGetReleaseReadiness, apiCreateRelease, apiVerifyReleaseIntegrity, apiDownloadExportFile,
-  EXPORT_FILE_NAMES, type ExportFileName, type ReleaseReadiness,
+  EXPORT_FILE_NAMES, type ExportFileName, type ReleaseReadiness, type RecoverySummary,
   type BenchmarkRun, type CorpusProject, type BenchmarkTopic, type RunValidationResult, type RunProgress, type RunWorkEstimate,
 } from '@/lib/a2hApi'
 import { Spinner } from '@/components/ui/Spinner'
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// §50 of the Phase 5A spec: keep the browser's Run All loop moving briskly
+// while progress is being made, back off when there's genuinely nothing to
+// do, and never sleep longer than this between checks so a Pause click is
+// noticed promptly even while waiting out a retry backoff window.
+const ACTIVE_POLL_MS = 300
+const IDLE_POLL_MS = 1000
+const MAX_RETRY_WAIT_MS = 5000
+// §52: after this many consecutive empty, non-retrying polls, stop rather
+// than spin forever — something needs a human look (recovery, most likely).
+const MAX_CONSECUTIVE_NO_PROGRESS = 4
 
 // §44: presented in NUMERICAL order, not implementation order — IMPLEMENTED_A2H_TESTS
 // itself is ordered by when each phase shipped, so this page sorts by the
@@ -76,6 +91,13 @@ export default function A2HRunDetailPage() {
   const [runningAll, setRunningAll] = useState(false)
   const [releaseInfo, setReleaseInfo] = useState<ReleaseReadiness | null>(null)
   const [integrityResult, setIntegrityResult] = useState<{ ok: boolean; errors: string[] } | null>(null)
+  // Phase 5A: the browser loop's own cancellation signal — set immediately
+  // on a Pause click so the loop stops requesting new batches without
+  // waiting for a round-trip race against the in-flight one (§20-22).
+  const cancelRequestedRef = useRef(false)
+  const [resumeFeedback, setResumeFeedback] = useState<RecoverySummary | null>(null)
+  const [recoverFeedback, setRecoverFeedback] = useState<RecoverySummary | null>(null)
+  const [runAllNotice, setRunAllNotice] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     const r = await apiGetRun(runId)
@@ -187,8 +209,13 @@ export default function A2HRunDetailPage() {
     }
   }
 
+  // §20-22: signals the Run All loop to stop BEFORE the server call even
+  // resolves — the loop checks this flag at the top of every iteration —
+  // and only then asks the server to pause. Already-claimed jobs finish and
+  // checkpoint normally; this never cancels an in-flight request.
   async function handlePause() {
     if (!run) return
+    cancelRequestedRef.current = true
     setBusy(true)
     try {
       setRun(await apiPauseRun(run.id))
@@ -202,10 +229,34 @@ export default function A2HRunDetailPage() {
   async function handleResume() {
     if (!run) return
     setBusy(true)
+    setResumeFeedback(null)
     try {
-      setRun(await apiResumeRun(run.id))
+      const { run: updated, recovery } = await apiResumeRun(run.id)
+      setRun(updated)
+      setResumeFeedback(recovery)
+      setProgress(await apiGetRunProgress(run.id))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Resume failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // §19: reconciles stale/interrupted jobs WITHOUT changing the run's own
+  // status — available for a paused, needs_attention, or running run so an
+  // admin can force reconciliation (after a crash, network outage, or
+  // deployment) before deciding what to do next.
+  async function handleRecover() {
+    if (!run) return
+    setBusy(true)
+    setRecoverFeedback(null)
+    try {
+      const { run: updated, recovery } = await apiRecoverRun(run.id)
+      setRun(updated)
+      setRecoverFeedback(recovery)
+      setProgress(await apiGetRunProgress(run.id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Recovery failed.')
     } finally {
       setBusy(false)
     }
@@ -230,9 +281,12 @@ export default function A2HRunDetailPage() {
     setBusy(true)
     setError(null)
     try {
-      const { run: updated } = await apiRetryFailedJobs(run.id)
+      const { run: updated, retriedCount, reconciledCount } = await apiRetryFailedJobs(run.id)
       setRun(updated)
       setProgress(await apiGetRunProgress(run.id))
+      if (reconciledCount > 0) {
+        setRunAllNotice(`${reconciledCount} failed job(s) already had valid evidence and were marked completed without retrying; ${retriedCount} were requeued.`)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Retry failed.')
     } finally {
@@ -295,26 +349,48 @@ export default function A2HRunDetailPage() {
     }
   }
 
-  // Loops apiExecuteRunBatch — the interactive equivalent of a worker
-  // picking jobs off a queue. A Vercel Cron job (see
-  // /api/cron/a2h-worker) also drives the run forward independently of any
-  // open browser tab; this loop is a convenience for watching progress
-  // live, not the only thing keeping the run moving. Stops when the run
-  // leaves 'running' (paused, needs_attention, completed, or cancelled
-  // elsewhere) or on any error.
+  // §22/§50-52: loops apiExecuteRunBatch — the browser IS the primary
+  // driver of execution (this deployment has no required background
+  // worker). Bounded by run state, not an arbitrary iteration cap: stops on
+  // paused/cancelled/needs_attention/completed/failed, on any error, and on
+  // a pathological no-progress state (surfaces a message rather than
+  // spinning forever). Polls with a short delay between active batches and
+  // a longer one while idle, and waits (capped) for a scheduled retry
+  // rather than hammering the API. cancelRequestedRef lets Pause stop the
+  // loop immediately, before its next batch call even starts.
   async function handleRunAll() {
     if (!run) return
+    cancelRequestedRef.current = false
     setRunningAll(true)
     setError(null)
+    setRunAllNotice(null)
+    let consecutiveNoProgress = 0
     try {
-      for (let i = 0; i < 2000; i++) {
+      while (!cancelRequestedRef.current) {
         const result = await apiExecuteRunBatch(run.id)
         setProgress(await apiGetRunProgress(run.id))
-        if (result.run.status !== 'running') {
-          setRun(result.run)
+        setRun(result.run)
+
+        if (result.run.status !== 'running') break
+
+        if (result.processed > 0) {
+          consecutiveNoProgress = 0
+          await delay(ACTIVE_POLL_MS)
+          continue
+        }
+
+        if (result.nextRetryAt) {
+          const waitMs = Math.max(0, new Date(result.nextRetryAt).getTime() - Date.now())
+          await delay(Math.min(waitMs, MAX_RETRY_WAIT_MS))
+          continue
+        }
+
+        consecutiveNoProgress++
+        if (consecutiveNoProgress >= MAX_CONSECUTIVE_NO_PROGRESS) {
+          setRunAllNotice('No executable work found. Run may require recovery.')
           break
         }
-        setRun(result.run)
+        await delay(IDLE_POLL_MS)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Execution failed.')
@@ -505,17 +581,23 @@ export default function A2HRunDetailPage() {
                   className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">
                   {runningAll ? 'Running…' : 'Run All'}
                 </button>
-                <button onClick={handlePause} disabled={busy || runningAll}
+                <button onClick={handlePause} disabled={busy}
                   className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
                   Pause
                 </button>
               </>
             )}
             {run.status === 'paused' && (
-              <button onClick={handleResume} disabled={busy}
-                className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">
-                Resume
-              </button>
+              <>
+                <button onClick={handleResume} disabled={busy}
+                  className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">
+                  {busy ? 'Resuming…' : 'Resume'}
+                </button>
+                <button onClick={handleRecover} disabled={busy}
+                  className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
+                  Recover Interrupted Work
+                </button>
+              </>
             )}
             <button onClick={handleCancel} disabled={busy || runningAll}
               className="text-xs font-medium px-3.5 py-2 rounded-xl border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 disabled:opacity-40">
@@ -524,18 +606,57 @@ export default function A2HRunDetailPage() {
           </div>
         )}
 
+        {run.status === 'running' && !runningAll && progress && progress.staleRunningJobs > 0 && (
+          <div className="text-sm text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3">
+            <span>Interrupted — {progress.staleRunningJobs} job(s) look stuck from a previous session and are ready to reconcile.</span>
+            <button onClick={handleRecover} disabled={busy} className="text-xs font-medium underline shrink-0 disabled:opacity-40">
+              Recover Interrupted Work
+            </button>
+          </div>
+        )}
+
+        {(run.status === 'running' || run.status === 'paused') && (
+          <p className="text-xs text-gray-400 dark:text-gray-500">
+            You may close this page or lose connection. Completed benchmark work is checkpointed. When you return, Resume (or
+            Recover Interrupted Work) will reconcile interrupted jobs and continue from unfinished work — a job whose result was
+            never confirmed as saved may need to run again, but nothing already checkpointed is ever repeated.
+          </p>
+        )}
+
+        {resumeFeedback && (
+          <RecoverySummaryCard title="Recovery complete" summary={resumeFeedback} onDismiss={() => setResumeFeedback(null)} />
+        )}
+        {recoverFeedback && (
+          <RecoverySummaryCard title="Recovery complete" summary={recoverFeedback} onDismiss={() => setRecoverFeedback(null)} />
+        )}
+        {runAllNotice && (
+          <div className="text-sm text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3">
+            <span>{runAllNotice}</span>
+            <button onClick={() => setRunAllNotice(null)} className="text-xs font-medium underline shrink-0">Dismiss</button>
+          </div>
+        )}
+
         {run.status === 'needs_attention' && (
           <div className="border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 rounded-2xl p-4 space-y-2">
             <h2 className="text-xs font-semibold text-red-700 dark:text-red-400 uppercase tracking-wider">Needs Attention</h2>
             <p className="text-sm text-red-700 dark:text-red-400">
-              Every job reached a terminal state, but at least one FAILED — this run cannot be released until every failure is
-              resolved. Retry to requeue the failed jobs, or cancel the run to abandon it.
+              Execution finished with unresolved failures ({progress?.failedJobs ?? 0} failed job(s)) — this run cannot be
+              released until every failure is resolved. Recover checks whether interrupted work already succeeded; Retry
+              requeues genuine failures; Cancel abandons the run.
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button onClick={handleRetryFailedJobs} disabled={busy}
                 className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40">
                 {busy ? 'Retrying…' : 'Retry Failed Jobs'}
               </button>
+              <button onClick={handleRecover} disabled={busy}
+                className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40">
+                Recover Interrupted Work
+              </button>
+              <Link href={`/admin/a2h/runs/${run.id}/failed-jobs`}
+                className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">
+                View Failed Jobs
+              </Link>
               <button onClick={handleCancel} disabled={busy}
                 className="text-xs font-medium px-3.5 py-2 rounded-xl border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 disabled:opacity-40">
                 Cancel
@@ -560,13 +681,42 @@ export default function A2HRunDetailPage() {
               </div>
             )}
             <div className="flex items-center justify-between text-sm pt-1 border-t border-gray-100 dark:border-gray-900 mt-1">
-              <span className="text-gray-500 dark:text-gray-400">Failed jobs</span>
-              <span className={progress.failedJobs > 0 ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-700 dark:text-gray-300'}>{progress.failedJobs}</span>
+              <span className="text-gray-500 dark:text-gray-400">Jobs completed</span>
+              <span className="tabular-nums text-gray-700 dark:text-gray-300">{progress.completedJobs.toLocaleString()} / {progress.totalJobs.toLocaleString()}</span>
             </div>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-gray-500 dark:text-gray-400">Queued jobs</span>
-              <span className="text-gray-700 dark:text-gray-300">{progress.queuedJobs}</span>
+              <span className="text-gray-500 dark:text-gray-400">Running</span>
+              <span className="tabular-nums text-gray-700 dark:text-gray-300">
+                {progress.runningJobs}{progress.staleRunningJobs > 0 ? ` (${progress.staleRunningJobs} stale)` : ''}
+              </span>
             </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-gray-500 dark:text-gray-400">Queued</span>
+              <span className="text-gray-700 dark:text-gray-300">{progress.queuedJobs - progress.retryingJobs}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-gray-500 dark:text-gray-400">Waiting to retry</span>
+              <span className="text-gray-700 dark:text-gray-300">{progress.retryingJobs}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-gray-500 dark:text-gray-400">Failed</span>
+              <span className={progress.failedJobs > 0 ? 'text-red-600 dark:text-red-400 font-medium' : 'text-gray-700 dark:text-gray-300'}>{progress.failedJobs}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm pt-1 border-t border-gray-100 dark:border-gray-900 mt-1">
+              <span className="text-gray-500 dark:text-gray-400">Last checkpoint</span>
+              <span className="text-gray-700 dark:text-gray-300">{progress.lastCheckpointAt ? new Date(progress.lastCheckpointAt).toLocaleTimeString() : '—'}</span>
+            </div>
+            {progress.nextRetryAt && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Next retry</span>
+                <span className="text-gray-700 dark:text-gray-300">{new Date(progress.nextRetryAt).toLocaleTimeString()}</span>
+              </div>
+            )}
+            {run.status === 'paused' && (
+              <p className="text-xs text-gray-400 dark:text-gray-500 pt-1 border-t border-gray-100 dark:border-gray-900 mt-1">
+                No new jobs will start.{progress.runningJobs > 0 ? ` ${progress.runningJobs} in-flight job(s) may still finish and checkpoint.` : ''}
+              </p>
+            )}
           </div>
         )}
 
@@ -664,6 +814,37 @@ function ProgressRow({ label, value, total }: { label: string; value: number; to
     <div className="flex items-center justify-between text-sm">
       <span className="text-gray-500 dark:text-gray-400">{label}</span>
       <span className={`tabular-nums ${total > 0 && value === total ? 'text-green-700 dark:text-green-400' : 'text-gray-700 dark:text-gray-300'}`}>{value.toLocaleString()} / {total.toLocaleString()}</span>
+    </div>
+  )
+}
+
+// §39 of the Phase 5A spec — the feedback shown after Resume or a manual
+// Recover action: how many stale/interrupted jobs were found, how many
+// already had valid evidence (reused, never re-paid for), how many were
+// returned to the queue, and how many couldn't be resolved automatically.
+function RecoverySummaryCard({ title, summary, onDismiss }: { title: string; summary: RecoverySummary; onDismiss: () => void }) {
+  return (
+    <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-1.5">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">{title}</h2>
+        <button onClick={onDismiss} className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300">Dismiss</button>
+      </div>
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-gray-500 dark:text-gray-400">Interrupted jobs found</span>
+        <span className="tabular-nums text-gray-700 dark:text-gray-300">{summary.staleJobsFound}</span>
+      </div>
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-gray-500 dark:text-gray-400">Recovered from saved evidence</span>
+        <span className="tabular-nums text-green-700 dark:text-green-400">{summary.reconciledCompleted}</span>
+      </div>
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-gray-500 dark:text-gray-400">Returned to queue</span>
+        <span className="tabular-nums text-gray-700 dark:text-gray-300">{summary.requeued}</span>
+      </div>
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-gray-500 dark:text-gray-400">Unresolved</span>
+        <span className={summary.unresolved > 0 ? 'tabular-nums text-red-600 dark:text-red-400 font-medium' : 'tabular-nums text-gray-700 dark:text-gray-300'}>{summary.unresolved}</span>
+      </div>
     </div>
   )
 }

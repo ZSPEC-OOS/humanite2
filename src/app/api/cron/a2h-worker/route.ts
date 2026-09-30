@@ -5,14 +5,17 @@ import { resolveProvider } from '@/lib/providerResolution'
 import { listRunningRuns } from '@/lib/a2h/runs'
 import { executeRunBatch } from '@/lib/a2h/execution'
 
-// Phase 5's "server-side durable execution" worker — a Vercel Cron job
-// invokes this route on a schedule (see vercel.json's `crons` entry),
-// replacing the browser tab as what actually drives a run forward. It uses
-// the EXACT SAME executeRunBatch/claimJob machinery the interactive
+// Phase 5A: this OPTIONAL worker endpoint is no longer wired to Vercel Cron
+// (a frequent cron schedule requires a paid Vercel plan — see vercel.json's
+// history) — the browser remains the primary driver of execution (§1/§48 of
+// the Phase 5A spec). This route still exists for whoever wants to invoke it
+// manually, or point their own external scheduler/infrastructure at it later.
+// It uses the EXACT SAME executeRunBatch/claimJob machinery the interactive
 // "Run All" button does (see execution.ts), so the two can run concurrently
 // without ever double-claiming (and double-paying for) the same job — this
-// is not a second execution engine, just a second caller of the one that
-// already exists.
+// is not a second execution engine, just a second, optional caller of the
+// one that already exists. Benchmark correctness must never depend on this
+// route being scheduled.
 //
 // Credentials are always PLATFORM defaults (resolveProvider(null) ->
 // process.env.OPENAI_API_KEY/OPENAI_MODEL, plus process.env.GPTZERO_API_KEY)

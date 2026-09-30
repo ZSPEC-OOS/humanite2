@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import type { Firestore } from 'firebase-admin/firestore'
 import {
   baselineJobId, transformJobId, postScoreJobId, testEvaluationJobId,
-  getOrCreateJob, getJob, claimJob, reclaimStaleJobs, markJobCompleted, markJobFailed, retryFailedJobs,
+  getOrCreateJob, getJob, claimJob, isJobStale, heartbeatJob, resetJobForRetry, getEarliestNextAttempt,
+  markJobCompleted, markJobFailed, retryFailedJobs,
   listJobsForRun, listJobsByStageAndStatus, listDueRetryJobs, cancelQueuedJobs,
 } from '../jobs'
 
@@ -72,6 +73,7 @@ describe('getOrCreateJob', () => {
     expect(job.startedAt).toBeNull()
     expect(job.completedAt).toBeNull()
     expect(job.leaseOwner).toBeNull()
+    expect(job.leaseAcquiredAt).toBeNull()
     expect(job.leaseExpiresAt).toBeNull()
     expect(job.failureClass).toBeNull()
   })
@@ -153,21 +155,95 @@ describe('claimJob — transactional queued/retry-due/stale-lease claiming (Phas
   })
 })
 
-describe('reclaimStaleJobs', () => {
-  it('resets a running job with an expired lease back to queued, leaving a fresh lease untouched', async () => {
+describe('isJobStale', () => {
+  it('is false for a non-running job regardless of lease fields', async () => {
+    const { firestore } = makeFirestore()
+    const id = baselineJobId('run-1', 's1', 'cfg')
+    const job = await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's1' })
+    expect(isJobStale(job)).toBe(false)
+  })
+
+  it('is true once a running job\'s lease has expired, false while it has not', async () => {
     const { firestore } = makeFirestore()
     const staleId = baselineJobId('run-1', 's1', 'cfg')
     const freshId = baselineJobId('run-1', 's2', 'cfg')
     await getOrCreateJob(firestore, { id: staleId, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's1' })
     await getOrCreateJob(firestore, { id: freshId, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's2' })
-    await claimJob(firestore, staleId, 'worker-a', -1)
-    await claimJob(firestore, freshId, 'worker-b', 60_000)
+    const stale = await claimJob(firestore, staleId, 'worker-a', -1)
+    const fresh = await claimJob(firestore, freshId, 'worker-b', 60_000)
 
-    const reclaimedCount = await reclaimStaleJobs(firestore, 'run-1')
-    expect(reclaimedCount).toBe(1)
-    expect((await getJob(firestore, staleId))?.status).toBe('queued')
-    expect((await getJob(firestore, staleId))?.leaseOwner).toBeNull()
-    expect((await getJob(firestore, freshId))?.status).toBe('running')
+    expect(isJobStale(stale!)).toBe(true)
+    expect(isJobStale(fresh!)).toBe(false)
+  })
+
+  it('falls back to a startedAt-based check for a legacy running job with no lease fields at all', () => {
+    const legacy = {
+      status: 'running', leaseExpiresAt: null, startedAt: new Date(Date.now() - 11 * 60_000).toISOString(),
+    } as never
+    const recent = {
+      status: 'running', leaseExpiresAt: null, startedAt: new Date().toISOString(),
+    } as never
+    expect(isJobStale(legacy)).toBe(true)
+    expect(isJobStale(recent)).toBe(false)
+  })
+})
+
+describe('heartbeatJob', () => {
+  it('extends the lease for the job\'s current owner', async () => {
+    const { firestore } = makeFirestore()
+    const id = baselineJobId('run-1', 's1', 'cfg')
+    await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's1' })
+    const claimed = await claimJob(firestore, id, 'worker-a', 1000)
+
+    const ok = await heartbeatJob(firestore, id, 'worker-a', 60_000)
+    expect(ok).toBe(true)
+    const job = await getJob(firestore, id)
+    expect(new Date(job!.leaseExpiresAt!).getTime()).toBeGreaterThan(new Date(claimed!.leaseExpiresAt!).getTime())
+  })
+
+  it('refuses to extend a lease for the wrong owner or a non-running job', async () => {
+    const { firestore } = makeFirestore()
+    const id = baselineJobId('run-1', 's1', 'cfg')
+    await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's1' })
+    await claimJob(firestore, id, 'worker-a')
+
+    expect(await heartbeatJob(firestore, id, 'worker-b')).toBe(false)
+    await markJobCompleted(firestore, id)
+    expect(await heartbeatJob(firestore, id, 'worker-a')).toBe(false)
+  })
+})
+
+describe('resetJobForRetry', () => {
+  it('clears lease/error bookkeeping and returns the job to queued', async () => {
+    const { firestore } = makeFirestore()
+    const id = baselineJobId('run-1', 's1', 'cfg')
+    await getOrCreateJob(firestore, { id, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's1' })
+    await claimJob(firestore, id, 'worker-a')
+    await markJobFailed(firestore, id, new Error('boom'))
+
+    await resetJobForRetry(firestore, id)
+    const job = await getJob(firestore, id)
+    expect(job?.status).toBe('queued')
+    expect(job?.errorCode).toBeNull()
+    expect(job?.leaseOwner).toBeNull()
+  })
+})
+
+describe('getEarliestNextAttempt', () => {
+  it('returns the earliest nextAttemptAt among retrying jobs, or null if none', async () => {
+    const { firestore } = makeFirestore()
+    expect(await getEarliestNextAttempt(firestore, 'run-1')).toBeNull()
+
+    const laterId = baselineJobId('run-1', 's1', 'cfg')
+    const earlierId = baselineJobId('run-1', 's2', 'cfg')
+    await getOrCreateJob(firestore, { id: laterId, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's1' })
+    await getOrCreateJob(firestore, { id: earlierId, runId: 'run-1', corpusProjectId: 'p1', stage: 'baseline_gptzero', sourceId: 's2' })
+    const later = new Date(Date.now() + 120_000).toISOString()
+    const earlier = new Date(Date.now() + 30_000).toISOString()
+    await firestore.collection('a2hBenchmarkJobs').doc(laterId).update({ status: 'retrying', nextAttemptAt: later })
+    await firestore.collection('a2hBenchmarkJobs').doc(earlierId).update({ status: 'retrying', nextAttemptAt: earlier })
+
+    expect(await getEarliestNextAttempt(firestore, 'run-1')).toBe(earlier)
   })
 })
 

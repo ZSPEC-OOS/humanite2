@@ -618,10 +618,15 @@ export interface BenchmarkJob {
   // Opaque id of whichever worker invocation (a cron tick or an interactive
   // batch call) currently holds this job — null when not claimed.
   leaseOwner: string | null
+  // When the CURRENT lease was first acquired — distinct from
+  // lastHeartbeatAt (which advances on every heartbeat extension); kept for
+  // debugging/audit ("how long has this worker actually held this job?").
+  leaseAcquiredAt: string | null
   // A claimed 'running' job whose lease has expired (the worker that
   // claimed it never finished — a crash, a timeout, a killed request) is
-  // reclaimable: reclaimStaleJobs resets it to 'queued' so another worker
-  // can claim it, rather than leaving it stuck 'running' forever.
+  // stale: recoverStaleJobs (recovery.ts) reconciles it — checking whether
+  // its expected artifact already exists — rather than blindly resetting it
+  // to 'queued'.
   leaseExpiresAt: string | null
   // Set only on a 'retrying' job — the earliest time a worker may claim it
   // again, per retryPolicy.ts's bounded backoff schedule.

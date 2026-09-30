@@ -9,7 +9,8 @@ import { getCorpusProject, getCorpusManifest } from './corpusProject'
 import { listTopics, getTopic } from './topics'
 import { getSource } from './corpus'
 import { getHumaniteVersion, getGitCommit } from './buildInfo'
-import { getOrCreateJob, listJobsForRun, cancelQueuedJobs, retryFailedJobs, baselineJobId, repairEvaluationJobId, experimentalTrialJobId } from './jobs'
+import { getOrCreateJob, listJobsForRun, cancelQueuedJobs, baselineJobId, repairEvaluationJobId, experimentalTrialJobId, isJobStale } from './jobs'
+import { recoverStaleJobs, reconcileAndRetryFailedJobs, type RecoverySummary } from './recovery'
 import { getFixtureSet, listFixturesForSource, listFixturesForSet } from './fixtures'
 import { GRAMMAR_ENGINE_VERSION } from './grammarEngine'
 import { getOrCreateExperimentCohort, getExperimentCohort } from './experimentCohort'
@@ -585,6 +586,12 @@ export async function startRun(firestore: Firestore, runId: string): Promise<Ben
   return updated
 }
 
+// §20-21 of the Phase 5A spec: pausing only changes the run's own status —
+// it never cancels an in-flight server call. executeRunBatch reads
+// run.status fresh at the top of every call, before claiming anything, so
+// the very next batch call safely claims nothing once this has taken
+// effect; any call already in flight when this runs finishes and
+// checkpoints normally.
 export async function pauseRun(firestore: Firestore, runId: string): Promise<BenchmarkRun> {
   const run = await getRun(firestore, runId)
   if (!run) throw new Error('Benchmark run not found.')
@@ -594,13 +601,47 @@ export async function pauseRun(firestore: Firestore, runId: string): Promise<Ben
   return updated
 }
 
-export async function resumeRun(firestore: Firestore, runId: string): Promise<BenchmarkRun> {
+export interface ResumeRunResult {
+  run: BenchmarkRun
+  recovery: RecoverySummary
+}
+
+// §18: Resume always reconciles interrupted work FIRST, before putting the
+// run back into 'running' — a browser disconnect, laptop sleep, or auth
+// expiry while paused (or between the pause click and the last in-flight
+// batch actually finishing) can leave a job stuck 'running' past its lease;
+// recovery finds those, checks whether they actually finished (never
+// re-paying for evidence that already exists), and only then does the run
+// resume executing.
+export async function resumeRun(firestore: Firestore, runId: string): Promise<ResumeRunResult> {
   const run = await getRun(firestore, runId)
   if (!run) throw new Error('Benchmark run not found.')
   if (run.status !== 'paused') throw new Error(`Cannot resume — run is ${run.status}, not paused.`)
+  const recovery = await recoverStaleJobs(firestore, run)
   const updated: BenchmarkRun = { ...run, status: 'running', updatedAt: new Date().toISOString() }
   await firestore.collection(COLLECTION).doc(runId).set(updated)
-  return updated
+  return { run: updated, recovery }
+}
+
+export interface RecoverRunResult {
+  run: BenchmarkRun
+  recovery: RecoverySummary
+}
+
+// §19: the admin's explicit "Recover Interrupted Work" action — reconciles
+// stale/interrupted jobs WITHOUT changing the run's own status, for an
+// admin who wants to inspect (or simply force) reconciliation before
+// deciding to Resume or Retry Failed Jobs. Never silently starts new paid
+// work on its own (§53) — it only resolves jobs that are already stuck
+// 'running' past their lease.
+export async function recoverRun(firestore: Firestore, runId: string): Promise<RecoverRunResult> {
+  const run = await getRun(firestore, runId)
+  if (!run) throw new Error('Benchmark run not found.')
+  if (run.status !== 'paused' && run.status !== 'needs_attention' && run.status !== 'running') {
+    throw new Error(`Cannot recover — run is ${run.status}.`)
+  }
+  const recovery = await recoverStaleJobs(firestore, run)
+  return { run, recovery }
 }
 
 // Preserves every completed output/result — only queued/retrying jobs are
@@ -645,20 +686,28 @@ export async function maybeCompleteRun(firestore: Firestore, runId: string): Pro
   return updated
 }
 
-// The explicit admin action §"Fix run completion semantics" calls for: reset
-// every failed job back to queued and put the run back into 'running' so the
-// next executeRunBatch call (or cron tick) picks them up. A run can only
-// reach this action from 'needs_attention' — a 'completed' run has nothing
-// to retry, and a 'running'/'paused' run should use pause/resume instead.
-export async function retryFailedJobsAction(firestore: Firestore, runId: string): Promise<{ run: BenchmarkRun; retriedCount: number }> {
+// The explicit admin action §"Fix run completion semantics" (and §32 of the
+// Phase 5A spec) calls for: reconcile every failed job's expected artifact
+// FIRST (never pay twice for evidence that already exists — see
+// recovery.ts's reconcileAndRetryFailedJobs), reset only the genuinely
+// unresolved ones back to queued, and put the run back into 'running' so the
+// next executeRunBatch call picks them up. A run can only reach this action
+// from 'needs_attention' — a 'completed' run has nothing to retry, and a
+// 'running'/'paused' run should use pause/resume instead.
+export async function retryFailedJobsAction(firestore: Firestore, runId: string): Promise<{ run: BenchmarkRun; retriedCount: number; reconciledCount: number }> {
   const run = await getRun(firestore, runId)
   if (!run) throw new Error('Benchmark run not found.')
   if (run.status !== 'needs_attention') throw new Error(`Cannot retry failed jobs — run is ${run.status}, not needs_attention.`)
 
-  const retriedCount = await retryFailedJobs(firestore, runId)
+  const { retriedCount, reconciledCount } = await reconcileAndRetryFailedJobs(firestore, run)
   const updated: BenchmarkRun = { ...run, status: 'running', updatedAt: new Date().toISOString() }
   await firestore.collection(COLLECTION).doc(runId).set(updated)
-  return { run: updated, retriedCount }
+  // Every failed job may have reconciled straight to 'completed' (its
+  // evidence already existed) with nothing left to retry — check for
+  // immediate completion rather than leaving the run 'running' with no
+  // queued work until the next batch call happens to notice.
+  const settled = (await maybeCompleteRun(firestore, runId)) ?? updated
+  return { run: settled, retriedCount, reconciledCount }
 }
 
 export interface RunProgress {
@@ -691,6 +740,26 @@ export interface RunProgress {
   trialJobsCompleted: Partial<Record<A2HTestCode, number>>
   failedJobs: number
   queuedJobs: number
+  // Phase 5A (§36): run-wide job-state totals for the admin execution panel —
+  // deliberately whole-run counts, not per-stage, since the panel's job is
+  // "is this run healthy right now," not "which stage."
+  runningJobs: number
+  retryingJobs: number
+  // A 'running' job whose lease has already expired — present in the count
+  // even before the next executeRunBatch call actually reconciles it, so an
+  // admin watching the page sees "this needs recovery" without having to
+  // trigger a batch first.
+  staleRunningJobs: number
+  completedJobs: number
+  totalJobs: number
+  // Earliest nextAttemptAt among this run's 'retrying' jobs — lets the UI
+  // show (and the browser loop wait for) when retryable work becomes
+  // claimable again, without polling blindly.
+  nextRetryAt: string | null
+  // The most recent completedAt among this run's completed jobs (§54) — the
+  // admin's evidence that progress is actually being persisted, not just
+  // that a browser tab is spinning.
+  lastCheckpointAt: string | null
 }
 
 function countByStageStatus(
@@ -750,6 +819,20 @@ export async function getRunProgress(firestore: Firestore, runId: string): Promi
     trialJobsCompleted,
     failedJobs: jobs.filter(j => j.status === 'failed').length,
     queuedJobs: jobs.filter(j => j.status === 'queued' || j.status === 'retrying').length,
+    runningJobs: jobs.filter(j => j.status === 'running').length,
+    retryingJobs: jobs.filter(j => j.status === 'retrying').length,
+    staleRunningJobs: jobs.filter(j => j.status === 'running' && isJobStale(j)).length,
+    completedJobs: jobs.filter(j => j.status === 'completed').length,
+    totalJobs: jobs.length,
+    nextRetryAt: jobs
+      .map(j => j.nextAttemptAt)
+      .filter((t): t is string => t != null)
+      .reduce((min: string | null, t) => (min == null || t < min ? t : min), null),
+    lastCheckpointAt: jobs
+      .filter(j => j.status === 'completed')
+      .map(j => j.completedAt)
+      .filter((t): t is string => t != null)
+      .reduce((max: string | null, t) => (max == null || t > max ? t : max), null),
   }
 }
 
