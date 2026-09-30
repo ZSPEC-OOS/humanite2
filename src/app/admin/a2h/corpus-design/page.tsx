@@ -12,9 +12,32 @@ import { Spinner } from '@/components/ui/Spinner'
 
 const INTENSITY_COUNT = 10
 
+// The draft is held as strings, one per chip, so a chip can be edited
+// in-place (cleared, retyped) without the array collapsing to a parsed
+// number mid-edit — parseLadderDraft is what turns it into the validated,
+// sorted number[] actually sent to the server. lengthCount is never a
+// separate field anywhere in this flow: it's always draft.length or
+// parsedDraft.values.length, derived, never stored.
+function parseLadderDraft(draft: string[]): { values: number[] } | { error: string } {
+  if (draft.length === 0) return { error: 'Add at least one length.' }
+  const values: number[] = []
+  for (const raw of draft) {
+    const trimmed = raw.trim()
+    const n = Number(trimmed)
+    if (!trimmed || !Number.isInteger(n) || n <= 0) {
+      return { error: 'Every length must be a positive whole number.' }
+    }
+    values.push(n)
+  }
+  if (new Set(values).size !== values.length) {
+    return { error: 'Duplicate lengths are not allowed.' }
+  }
+  return { values: [...values].sort((a, b) => a - b) }
+}
+
 export default function A2HCorpusDesignPage() {
   const [ladderConfig, setLadderConfig] = useState<LengthLadderConfig | null>(null)
-  const [ladderDraft, setLadderDraft] = useState<number[]>([...DEFAULT_LENGTH_LADDER])
+  const [ladderDraft, setLadderDraft] = useState<string[]>(DEFAULT_LENGTH_LADDER.map(String))
   const [newLength, setNewLength] = useState('')
   const [ladderBusy, setLadderBusy] = useState(false)
   const [domainConfigs, setDomainConfigs] = useState<Partial<Record<Domain, DomainOutlineConfig | null>>>({})
@@ -29,7 +52,7 @@ export default function A2HCorpusDesignPage() {
       .then(([ladder, ...configs]) => {
         if (cancelled) return
         setLadderConfig(ladder)
-        setLadderDraft(ladder?.ladder ?? [...DEFAULT_LENGTH_LADDER])
+        setLadderDraft((ladder?.ladder ?? DEFAULT_LENGTH_LADDER).map(String))
         const map: Partial<Record<Domain, DomainOutlineConfig | null>> = {}
         DOMAINS.forEach((d, i) => { map[d] = configs[i] as DomainOutlineConfig | null })
         setDomainConfigs(map)
@@ -40,33 +63,32 @@ export default function A2HCorpusDesignPage() {
   }, [])
 
   function applyPreset() {
-    setLadderDraft([...DEFAULT_LENGTH_LADDER])
+    setLadderDraft(DEFAULT_LENGTH_LADDER.map(String))
   }
 
   function addDraftLength() {
-    const n = Number(newLength)
-    if (!Number.isInteger(n) || n <= 0) {
-      setError('Enter a positive whole number.')
-      return
-    }
-    if (ladderDraft.includes(n)) {
-      setError(`${n} is already in the ladder.`)
-      return
-    }
-    setError(null)
-    setLadderDraft(prev => [...prev, n].sort((a, b) => a - b))
+    const trimmed = newLength.trim()
+    if (!trimmed) return
+    setLadderDraft(prev => [...prev, trimmed])
     setNewLength('')
   }
 
-  function removeDraftLength(n: number) {
-    setLadderDraft(prev => prev.filter(x => x !== n))
+  function updateDraftValue(index: number, value: string) {
+    setLadderDraft(prev => prev.map((v, i) => (i === index ? value : v)))
   }
 
+  function removeDraftIndex(index: number) {
+    setLadderDraft(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const parsedDraft = parseLadderDraft(ladderDraft)
+
   async function handleSaveLadder() {
+    if ('error' in parsedDraft) return
     setLadderBusy(true)
     setError(null)
     try {
-      setLadderConfig(await apiSaveLengthLadder(ladderDraft))
+      setLadderConfig(await apiSaveLengthLadder(parsedDraft.values))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed.')
     } finally {
@@ -75,10 +97,11 @@ export default function A2HCorpusDesignPage() {
   }
 
   async function handleLockLadder() {
+    if ('error' in parsedDraft) return
     setLadderBusy(true)
     setError(null)
     try {
-      setLadderConfig(await apiLockLengthLadder(ladderDraft))
+      setLadderConfig(await apiLockLengthLadder(parsedDraft.values))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Lock failed.')
     } finally {
@@ -97,7 +120,7 @@ export default function A2HCorpusDesignPage() {
     try {
       const config = await apiExpandLengthLadder([n])
       setLadderConfig(config)
-      setLadderDraft(config.ladder)
+      setLadderDraft(config.ladder.map(String))
       setNewLength('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Expand failed.')
@@ -136,33 +159,44 @@ export default function A2HCorpusDesignPage() {
           <>
             {/* Length ladder */}
             <div className="border border-gray-200 dark:border-gray-800 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <div>
-                  <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Length Ladder</h2>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                    {ladderConfig?.locked ? `${ladderConfig.ladder.length} lengths · locked` : `${ladderDraft.length} lengths (draft) — lock before generating corpus`}
-                  </p>
-                </div>
-                {!ladderConfig?.locked && (
-                  <button onClick={applyPreset} className="text-xs text-gray-500 hover:text-gray-800 dark:hover:text-gray-300 underline">
-                    Reset to A2H Standard (10)
-                  </button>
-                )}
+              <div>
+                <h2 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Length Ladder</h2>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                  {ladderConfig?.locked ? `${ladderConfig.ladder.length} lengths · locked` : `${ladderDraft.length} lengths (draft) — lock before generating corpus`}
+                </p>
               </div>
 
-              <div className="flex flex-wrap gap-1.5">
-                {(ladderConfig?.locked ? ladderConfig.ladder : ladderDraft).map(len => (
-                  <span
-                    key={len}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
-                  >
-                    {len}
-                    {!ladderConfig?.locked && (
-                      <button onClick={() => removeDraftLength(len)} className="text-gray-400 hover:text-gray-800 dark:hover:text-gray-100">×</button>
-                    )}
-                  </span>
-                ))}
-              </div>
+              {ladderConfig?.locked ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {ladderConfig.ladder.map(len => (
+                    <span key={len}
+                      className="inline-flex items-center text-xs font-medium px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                      {len}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {ladderDraft.map((val, i) => (
+                    <span key={i}
+                      className="inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-800 pl-2 pr-1 py-0.5">
+                      <input
+                        type="text" inputMode="numeric" value={val}
+                        onChange={e => updateDraftValue(i, e.target.value)}
+                        className="w-14 text-xs font-medium bg-transparent text-gray-700 dark:text-gray-300 py-1 focus:outline-none"
+                      />
+                      <button onClick={() => removeDraftIndex(i)}
+                        className="w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:text-gray-800 hover:bg-gray-200 dark:hover:text-gray-100 dark:hover:bg-gray-700">
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {!ladderConfig?.locked && 'error' in parsedDraft && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">{parsedDraft.error}</p>
+              )}
 
               <div className="flex items-center gap-2 pt-1">
                 <input
@@ -176,20 +210,26 @@ export default function A2HCorpusDesignPage() {
                     {ladderBusy ? 'Working…' : '+ Add Length'}
                   </button>
                 ) : (
-                  <button onClick={addDraftLength}
-                    className="text-xs font-medium px-3 py-1.5 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">
-                    + Add Length
-                  </button>
+                  <>
+                    <button onClick={addDraftLength}
+                      className="text-xs font-medium px-3 py-1.5 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">
+                      + Add Length
+                    </button>
+                    <button onClick={applyPreset}
+                      className="text-xs font-medium px-3 py-1.5 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">
+                      Restore Defaults
+                    </button>
+                  </>
                 )}
               </div>
 
               {!ladderConfig?.locked && (
                 <div className="flex items-center gap-2 pt-1 border-t border-gray-100 dark:border-gray-900">
-                  <button onClick={handleSaveLadder} disabled={ladderBusy || ladderDraft.length === 0}
+                  <button onClick={handleSaveLadder} disabled={ladderBusy || 'error' in parsedDraft}
                     className="text-xs font-medium px-3.5 py-2 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-40 mt-2">
                     Save
                   </button>
-                  <button onClick={handleLockLadder} disabled={ladderBusy || ladderDraft.length === 0}
+                  <button onClick={handleLockLadder} disabled={ladderBusy || 'error' in parsedDraft}
                     className="text-xs font-medium px-3.5 py-2 rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 disabled:opacity-40 mt-2">
                     {ladderBusy ? 'Working…' : 'Lock'}
                   </button>
