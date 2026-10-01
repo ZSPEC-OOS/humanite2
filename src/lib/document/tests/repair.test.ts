@@ -71,4 +71,36 @@ describe('repairTerminologyDrift', () => {
     expect(result.succeeded).toBe(false)
     expect(result.text).toBe(output)
   })
+
+  it('still applies a surviving sentence repair when a DIFFERENT sentence\'s repair call rejects (deep-audit regression)', async () => {
+    // Each flagged sentence is repaired independently and concurrently
+    // (Promise.allSettled) — one sentence's transient failure must not
+    // discard another sentence's already-successful repair, the same
+    // isolation principle as generateCandidates' fix.
+    const output = 'The Corporation did X. Something unrelated. The Corporation did Y.'
+    const create = vi.fn()
+      .mockRejectedValueOnce(new Error('rate limited')) // repair for "The Corporation did X."
+      .mockResolvedValueOnce({ model: 'gpt-4o-mini', choices: [{ message: { content: 'The Company did Y.' } }] }) // repair for "The Corporation did Y."
+    const client = { chat: { completions: { create } } } as unknown as OpenAI
+
+    const result = await repairTerminologyDrift(client, 'gpt-4o-mini', output, [violation()])
+
+    expect(result.attempted).toBe(true)
+    expect(result.succeeded).toBe(true)
+    expect(result.sentencesRepaired).toBe(1)
+    expect(result.text).toBe('The Corporation did X. Something unrelated. The Company did Y.')
+  })
+
+  it('reports attempted: true (not a propagated throw) when EVERY sentence repair rejects', async () => {
+    const output = 'The Corporation filed its report.'
+    const create = vi.fn().mockRejectedValue(new Error('provider unavailable'))
+    const client = { chat: { completions: { create } } } as unknown as OpenAI
+
+    const result = await repairTerminologyDrift(client, 'gpt-4o-mini', output, [violation()])
+
+    expect(result.attempted).toBe(true)
+    expect(result.succeeded).toBe(false)
+    expect(result.sentencesRepaired).toBe(0)
+    expect(result.text).toBe(output)
+  })
 })

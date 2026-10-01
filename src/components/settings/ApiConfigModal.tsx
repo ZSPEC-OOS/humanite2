@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useApiConfigStore, ModelConfigDraft } from '@/stores/apiConfigStore'
 
 interface Props {
@@ -20,12 +20,24 @@ export function ApiConfigModal({ open, onClose }: Props) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  // Populates the draft from `config` exactly once per time the modal opens
+  // — NOT on every `config` change while it stays open. syncFromServer()
+  // below always replaces `config` with a freshly-parsed object (a new
+  // reference even when values are unchanged), so if this effect reacted to
+  // `config` on every render, a GET that resolves while the user is already
+  // typing (e.g. pasting an API key right after opening the modal) would
+  // silently wipe out their in-progress input the moment it lands.
+  const didInitRef = useRef(false)
   useEffect(() => {
-    if (open) {
+    if (open && !didInitRef.current) {
+      didInitRef.current = true
       setDraft({ nickname: config.nickname, modelId: config.modelId, baseUrl: config.baseUrl, apiKey: '', gptzeroApiKey: '' })
       setSaved(false)
       setShowKey(false)
       setShowGptzeroKey(false)
+    }
+    if (!open) {
+      didInitRef.current = false
     }
   }, [open, config])
 

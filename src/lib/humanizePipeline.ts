@@ -292,7 +292,16 @@ async function generateCandidates(
   count: number,
 ): Promise<GeneratedCandidates> {
   const maxTokens = resolveMaxTokens(client, intensity)
-  const completions = await Promise.all(
+  // Promise.allSettled, not Promise.all: these `count` completions are
+  // independent candidates for the SAME rewrite, not steps of one operation
+  // — at the common candidateCountForIntensity() >= 2, a single transient
+  // provider error (a rate limit, a 500, a timeout) must not discard an
+  // already-successful sibling candidate and fail the whole chunk. The
+  // candidate-selection funnel below already tolerates fewer candidates
+  // than requested (that's exactly what fallbackToScoredCandidate exists
+  // for), so surviving on a partial batch is safe; only a FULLY failed
+  // batch (every completion rejected) is a real failure to propagate.
+  const settled = await Promise.allSettled(
     Array.from({ length: count }, () => client.chat.completions.create({
       model,
       messages: [
@@ -303,6 +312,19 @@ async function generateCandidates(
       temperature: 0.7,
     })),
   )
+  // `any` here only sidesteps TS's overload-driven union on create()'s
+  // return type (it includes a streaming variant we never request, since
+  // `stream` is never passed above) — every element is a real ChatCompletion.
+  const fulfilled = settled.filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
+  if (fulfilled.length === 0) {
+    throw (settled[0] as PromiseRejectedResult).reason
+  }
+  if (fulfilled.length < count) {
+    console.warn(`Candidate generation: ${count - fulfilled.length} of ${count} parallel completions failed — continuing with ${fulfilled.length}`, {
+      errors: settled.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map(r => (r.reason instanceof Error ? r.reason.constructor.name : typeof r.reason)),
+    })
+  }
+  const completions = fulfilled.map(r => r.value)
   const attempts = completions.map(completion => {
     const choice = completion.choices[0]
     const rewritten = choice?.message?.content?.trim() ?? fallbackText
@@ -777,7 +799,14 @@ export async function humanizeChunk(
   // calls when verification actually finds a localized failure.
   let claimVerification: ClaimVerificationSummary | null = null
   let relationRepair: RelationRepairSummary = { attempted: false, strategy: 'none', succeeded: false, sentencesRepaired: 0 }
-  if (best) {
+  // Never attempted at all when the provider has no jsonOutput capability —
+  // verifyClaims relies on response_format: json_object to parse reliably,
+  // same as the structured judge call above. Without this gate, every chunk
+  // on an Anthropic/OpenRouter/generic-adapter configuration (jsonOutput:
+  // false) paid for a completion that was always going to fail parsing,
+  // silently swallowed by the catch below as "claim verification
+  // unavailable" — a real, avoidable cost and latency hit on every request.
+  if (best && resolveCapabilities(client.baseURL).jsonOutput) {
     try {
       const coveredFacts = buildFactLedger(sanitizedText).map(f => f.text)
       let verification: ClaimVerificationResult = await verifyClaims(client, judgeModel, sanitizedText, best.text, coveredFacts)

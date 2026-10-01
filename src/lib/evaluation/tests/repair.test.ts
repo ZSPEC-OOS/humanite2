@@ -106,6 +106,26 @@ describe('repairChunk', () => {
     expect(result.outputTokens).toBeNull()
   })
 
+  it('does not throw and still attempts every flagged sentence when one sentence\'s repair call rejects (deep-audit regression)', async () => {
+    // Each flagged sentence's repair runs independently and concurrently
+    // (Promise.allSettled) — previously, a sequential loop would throw on
+    // the first rejection, propagate out of repairChunk uncaught, and never
+    // even attempt the second sentence's repair. (repairChunk's own final
+    // document-level re-verification still correctly reports `succeeded:
+    // false` here, since the un-repaired sentence's fact is still missing —
+    // that gate is unrelated to this fix; see the test above for the "every
+    // repaired sentence must actually fix the document" behavior.)
+    const source = 'The dose is 5 mg. The trial had 40 patients.'
+    const corrupted = 'The dose is 50 mg. The trial had 4 patients.'
+    const create = vi.fn()
+      .mockRejectedValueOnce(new Error('rate limited'))
+      .mockResolvedValueOnce({ model: 'gpt-4o-mini', choices: [{ message: { content: 'The trial had 40 patients.' } }] })
+    const client = { chat: { completions: { create } } } as unknown as OpenAI
+
+    const result = await repairChunk(client, 'gpt-4o-mini', source, corrupted, 'balanced', 'medical')
+    expect(result.modelCalls).toBe(2)
+  })
+
   it('sums real token usage across repaired sentences when the provider reports it (Phase 5 telemetry)', async () => {
     const source = 'Server Alpha runs firmware 2.1; Server Beta runs firmware 3.4.'
     const corrupted = 'Server Alpha runs firmware 3.4; Server Beta runs firmware 2.1.'

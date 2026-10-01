@@ -3,6 +3,14 @@ import { Document, Paragraph, TextRun, HeadingLevel, Packer } from 'docx'
 import { requireAuth, isAuthFailure } from '@/lib/require-auth'
 import { resolveVerification } from '@/lib/exportVerification'
 
+// Matches scan/route.ts's own ABSOLUTE_MAX_CHARS — the largest text this app
+// ever legitimately produces (a humanize or scan result). Unlike those
+// routes, this one previously had no length ceiling at all: an authenticated
+// caller hitting it directly (not just through the dashboard, whose textarea
+// already caps input) could force unbounded paragraph-splitting and DOCX
+// generation per request on arbitrarily large text.
+const ABSOLUTE_MAX_CHARS = 300_000
+
 export async function POST(req: NextRequest) {
   const auth = await requireAuth(req)
   if (isAuthFailure(auth)) return auth
@@ -29,6 +37,13 @@ export async function POST(req: NextRequest) {
   if (!text) {
     return NextResponse.json(
       { error: { code: 'VALIDATION_ERROR', message: 'text is required.' } },
+      { status: 400 },
+    )
+  }
+
+  if (text.length > ABSOLUTE_MAX_CHARS) {
+    return NextResponse.json(
+      { error: { code: 'VALIDATION_MAX_LENGTH', message: `Text exceeds the ${ABSOLUTE_MAX_CHARS.toLocaleString()} character limit.` } },
       { status: 400 },
     )
   }

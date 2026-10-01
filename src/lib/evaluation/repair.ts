@@ -125,20 +125,30 @@ export async function repairChunk(
   }
 
   const spans = locateSentenceSpans(trimmedOutput, outputSentences)
+  // Each flagged sentence is repaired independently and concurrently
+  // (Promise.allSettled) — no data dependency between them, and one
+  // sentence's transient failure must not discard another sentence's
+  // already-successful repair.
+  const entries = [...failuresByOutputIndex]
+  const settled = await Promise.allSettled(
+    entries.map(([outputIndex, failures]) => {
+      const sourceIndex = failures[0]!.fact.sentenceIndex
+      return repairSentence(client, model, sourceSentences[sourceIndex]!, outputSentences[outputIndex]!, failures, tone, domain)
+    }),
+  )
   const replacements = new Map<number, string>()
   let modelCalls = 0
   let inputTokens: number | null = null
   let outputTokens: number | null = null
-  for (const [outputIndex, failures] of failuresByOutputIndex) {
-    const sourceIndex = failures[0]!.fact.sentenceIndex
-    const repaired = await repairSentence(client, model, sourceSentences[sourceIndex]!, outputSentences[outputIndex]!, failures, tone, domain)
+  settled.forEach((result, i) => {
     modelCalls++
-    if (repaired) {
-      replacements.set(outputIndex, repaired.text)
-      if (repaired.inputTokens != null) inputTokens = (inputTokens ?? 0) + repaired.inputTokens
-      if (repaired.outputTokens != null) outputTokens = (outputTokens ?? 0) + repaired.outputTokens
-    }
-  }
+    if (result.status !== 'fulfilled') return
+    const repaired = result.value
+    if (!repaired) return
+    replacements.set(entries[i]![0], repaired.text)
+    if (repaired.inputTokens != null) inputTokens = (inputTokens ?? 0) + repaired.inputTokens
+    if (repaired.outputTokens != null) outputTokens = (outputTokens ?? 0) + repaired.outputTokens
+  })
 
   if (replacements.size === 0) {
     return { attempted: true, strategy, succeeded: false, text: outputText, sentencesRepaired: 0, modelCalls, inputTokens, outputTokens }

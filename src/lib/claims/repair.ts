@@ -101,13 +101,21 @@ export async function restoreRelations(
     failuresByOutputIndex.set(index, list)
   }
 
+  // Each flagged sentence is repaired independently and concurrently
+  // (Promise.allSettled) — no data dependency between them, and one
+  // sentence's transient failure must not discard another sentence's
+  // already-successful repair, nor propagate up and abandon the
+  // verification telemetry the caller already computed (see
+  // humanizePipeline.ts's claimVerification assignment, which sits after
+  // this call inside the same try block).
+  const entries = [...failuresByOutputIndex].filter(([outputIndex]) => outputSentences[outputIndex] != null)
+  const settled = await Promise.allSettled(
+    entries.map(([outputIndex, verdicts]) => repairSentence(client, model, sourceText, outputSentences[outputIndex]!, verdicts, tone, domain)),
+  )
   const replacements = new Map<number, string>()
-  for (const [outputIndex, verdicts] of failuresByOutputIndex) {
-    const sentence = outputSentences[outputIndex]
-    if (sentence == null) continue
-    const repaired = await repairSentence(client, model, sourceText, sentence, verdicts, tone, domain)
-    if (repaired) replacements.set(outputIndex, repaired)
-  }
+  settled.forEach((result, i) => {
+    if (result.status === 'fulfilled' && result.value) replacements.set(entries[i]![0], result.value)
+  })
 
   if (replacements.size === 0) {
     return { attempted: true, strategy: 'restore_relations', succeeded: false, text: outputText, sentencesRepaired: 0 }

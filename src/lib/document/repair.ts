@@ -82,11 +82,16 @@ export async function repairTerminologyDrift(
     return { attempted: false, succeeded: false, text: outputText, sentencesRepaired: 0 }
   }
 
+  // Each flagged sentence is repaired independently — no data dependency
+  // between them — so they run concurrently rather than one LLM round-trip
+  // at a time. Promise.allSettled (not Promise.all): one sentence's repair
+  // failing must not discard another sentence's already-successful repair.
+  const entries = [...fixesByIndex]
+  const settled = await Promise.allSettled(entries.map(([index, fixes]) => repairSentence(client, model, sentences[index]!, fixes)))
   const replacements = new Map<number, string>()
-  for (const [index, fixes] of fixesByIndex) {
-    const repaired = await repairSentence(client, model, sentences[index]!, fixes)
-    if (repaired) replacements.set(index, repaired)
-  }
+  settled.forEach((result, i) => {
+    if (result.status === 'fulfilled' && result.value) replacements.set(entries[i]![0], result.value)
+  })
 
   if (replacements.size === 0) {
     return { attempted: true, succeeded: false, text: outputText, sentencesRepaired: 0 }

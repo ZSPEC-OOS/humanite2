@@ -46,7 +46,13 @@ describe('runDocumentConsistencyPass', () => {
 
     const result = await runDocumentConsistencyPass(client, 'gpt-4o-mini', postText, context, [postText])
 
-    expect(result.terminologyRepair).toEqual({ attempted: false, succeeded: false, sentencesRepaired: 0 })
+    // repairTerminologyDrift now reports `attempted: true` for this case
+    // (it DID try, via Promise.allSettled over the flagged sentences — see
+    // its own deep-audit fix) rather than letting the rejection propagate
+    // and silently reuse this function's `attempted: false` default, which
+    // is otherwise reserved for "no violations were ever found" (see the
+    // "nothing to fix" test above). Either way the pre-repair text ships.
+    expect(result.terminologyRepair).toEqual({ attempted: true, succeeded: false, sentencesRepaired: 0 })
     expect(result.text).toBe(postText)
   })
 

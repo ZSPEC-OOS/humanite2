@@ -70,6 +70,22 @@ describe('verifyClaims', () => {
     expect(result.failures[0]!.outputSentenceIndex).toBeNull()
   })
 
+  it('treats an explicit null sentence index as "not localized" — never coerces it to sentence 0 (deep-audit regression)', async () => {
+    // Number(null) === 0 in JS — normalizeVerdict must check for null
+    // explicitly before calling Number() on it, or a model correctly
+    // reporting "this failure isn't localized to one sentence" (exactly
+    // what the prompt asks for when a claim is simply missing rather than
+    // misstated somewhere specific) gets its failure wrongly pinned to
+    // sentence 0, misdirecting any downstream targeted repair.
+    const { client } = mockClient(JSON.stringify({
+      claims: [
+        { subject: 's', predicate: 'p', object: 'o', qualifiers: [], polarity: 'affirmative', modality: null, entailed: false, reason: 'claim missing entirely', output_sentence_index: null },
+      ],
+    }))
+    const result = await verifyClaims(client, 'gpt-4o-mini', 'src', 'First sentence. Second sentence.')
+    expect(result.failures[0]!.outputSentenceIndex).toBeNull()
+  })
+
   it('caps extracted claims at 12 even if the model returns more', async () => {
     const claims = Array.from({ length: 20 }, (_, i) => ({
       subject: `s${i}`, predicate: 'p', object: 'o', qualifiers: [], polarity: 'affirmative', modality: null, entailed: true, reason: '', output_sentence_index: null,
