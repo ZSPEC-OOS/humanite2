@@ -113,6 +113,7 @@ describe('resolveEntitlementFromSubscription', () => {
   it('derives tier from the CURRENT price, even when metadata.plan disagrees (a portal-driven plan change)', () => {
     process.env.STRIPE_PRICE_ID_PRO = 'price_pro'
     const subscription = {
+      status: 'active',
       metadata: { userId: 'user-1', plan: 'starter' }, // stale — created at checkout for Starter
       items: { data: [{ price: { id: 'price_pro' } }] }, // but since upgraded to Pro via the customer portal
     } as unknown as Stripe.Subscription
@@ -121,6 +122,7 @@ describe('resolveEntitlementFromSubscription', () => {
 
   it('falls back to metadata.plan when the current price matches no known tier', () => {
     const subscription = {
+      status: 'active',
       metadata: { userId: 'user-1', plan: 'starter' },
       items: { data: [{ price: { id: 'price_unrecognized' } }] },
     } as unknown as Stripe.Subscription
@@ -128,8 +130,34 @@ describe('resolveEntitlementFromSubscription', () => {
   })
 
   it('returns a null userId when the subscription carries no metadata.userId', () => {
-    const subscription = { metadata: {}, items: { data: [] } } as unknown as Stripe.Subscription
+    const subscription = { status: 'active', metadata: {}, items: { data: [] } } as unknown as Stripe.Subscription
     expect(resolveEntitlementFromSubscription(subscription).userId).toBeNull()
+  })
+
+  it("treats 'trialing' as entitled — a trial subscriber gets the tier they're trialing", () => {
+    process.env.STRIPE_PRICE_ID_PRO = 'price_pro'
+    const subscription = {
+      status: 'trialing',
+      metadata: { userId: 'user-1' },
+      items: { data: [{ price: { id: 'price_pro' } }] },
+    } as unknown as Stripe.Subscription
+    expect(resolveEntitlementFromSubscription(subscription)).toEqual({ userId: 'user-1', tier: 'pro' })
+  })
+
+  it("resolves to 'free' for a past_due subscription, regardless of its price — a failed payment downgrades immediately", () => {
+    process.env.STRIPE_PRICE_ID_PRO = 'price_pro'
+    const subscription = {
+      status: 'past_due',
+      metadata: { userId: 'user-1', plan: 'pro' },
+      items: { data: [{ price: { id: 'price_pro' } }] },
+    } as unknown as Stripe.Subscription
+    expect(resolveEntitlementFromSubscription(subscription)).toEqual({ userId: 'user-1', tier: 'free' })
+  })
+
+  it("resolves to 'free' for an unpaid or canceled subscription", () => {
+    const base = { metadata: { userId: 'user-1' }, items: { data: [{ price: { id: 'price_pro' } }] } }
+    expect(resolveEntitlementFromSubscription({ ...base, status: 'unpaid' } as unknown as Stripe.Subscription).tier).toBe('free')
+    expect(resolveEntitlementFromSubscription({ ...base, status: 'canceled' } as unknown as Stripe.Subscription).tier).toBe('free')
   })
 })
 

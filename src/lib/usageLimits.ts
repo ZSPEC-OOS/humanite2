@@ -84,9 +84,11 @@ function normalizeTier(tier: string): SelfServeTierId {
 }
 
 // Reads any env override fresh on every call rather than once at module
-// load, so a changed limit takes effect without a redeploy/restart.
-function limitsForTier(tier: string): TierLimits {
-  const key = normalizeTier(tier)
+// load, so a changed limit takes effect without a redeploy/restart. Takes
+// an already-normalized tier (see normalizeTier) — callers normalize once
+// and reuse the result, rather than each of limitsForTier/the caller
+// re-deriving it independently.
+function limitsForTier(key: SelfServeTierId): TierLimits {
   const wordFallback = TIER_WORD_LIMITS[key]
   const requestFallback = TIER_REQUEST_LIMITS[key]
   const prefix = key.toUpperCase()
@@ -200,7 +202,7 @@ async function checkAndRecordPoolUsage(
   }
 
   const normalizedTier = normalizeTier(tier)
-  const limits = limitsForTier(tier)[pool]
+  const limits = limitsForTier(normalizedTier)[pool]
   const requestField = `${pool}Requests`
   const wordField = `${pool}Words`
 
@@ -249,7 +251,7 @@ async function checkAndRecordPoolUsage(
 
       tx.set(
         monthlyRef,
-        { [wordField]: usedWords + words, [requestField]: (monthly?.[requestField] ?? 0) + 1, period, updatedAt: new Date() },
+        { [wordField]: usedWords + words, period, updatedAt: new Date() },
         { merge: true },
       )
       tx.set(
