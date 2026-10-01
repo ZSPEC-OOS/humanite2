@@ -28,6 +28,11 @@ export async function issueAccessToken(
   email: string,
   tier: string,
   region: string,
+  // The account's own creation timestamp (ISO 8601) — NOT when this
+  // particular token was issued. Signed into every token so usageLimits.ts
+  // can compute "has this account's 30-day Free trial ended?" from the
+  // trusted claim alone, without an extra Firestore read on every request.
+  createdAt: string,
 ): Promise<string> {
   return new SignJWT({
     email_hash: createHash('sha256').update(email).digest('hex'),
@@ -35,6 +40,7 @@ export async function issueAccessToken(
     scopes: scopesForTier(tier),
     region,
     a2h_admin: isA2HAdmin(email, tier),
+    created_at: createdAt,
   })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(userId)
@@ -42,6 +48,21 @@ export async function issueAccessToken(
     .setExpirationTime(`${ACCESS_EXPIRE_MINUTES}m`)
     .setJti(crypto.randomUUID())
     .sign(jwtSecret())
+}
+
+// Normalizes a Firestore-read `users/{id}.createdAt` field (a real
+// Timestamp, written via `new Date()` at registration — see
+// userRegistration.ts) into the ISO string issueAccessToken signs into the
+// token. Tolerant of a missing/malformed value (a pre-existing account from
+// before this field was relied on for anything) rather than throwing —
+// usageLimits.ts treats an empty result as "unknown, don't block on it".
+export function accountCreatedAtIso(createdAt: unknown): string {
+  if (createdAt && typeof (createdAt as { toDate?: unknown }).toDate === 'function') {
+    return (createdAt as { toDate: () => Date }).toDate().toISOString()
+  }
+  if (createdAt instanceof Date) return createdAt.toISOString()
+  if (typeof createdAt === 'string') return createdAt
+  return ''
 }
 
 export async function verifyAccessToken(token: string): Promise<Record<string, unknown>> {

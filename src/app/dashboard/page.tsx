@@ -18,12 +18,10 @@ import { RecentTransformations } from '@/components/history/RecentTransformation
 import { ThemeToggle }      from '@/components/theme/ThemeToggle'
 import { useTheme }         from '@/components/theme/ThemeProvider'
 import { restoreSession }   from '@/lib/api'
-import { ASYNC_MAX_CHARS, SYNC_MAX_CHARS } from '@/lib/limits'
+import { SYNC_MAX_CHARS, maxRequestCharsForTier } from '@/lib/limits'
 import { TierBadge } from '@/components/ui/TierBadge'
 import { Logo } from '@/components/ui/Logo'
 import { A2HMenuLink } from '@/components/nav/A2HMenuLink'
-
-const MAX_CHARS = ASYNC_MAX_CHARS
 
 function wordCount(s: string) {
   return s.trim() ? s.trim().split(/\s+/).length : 0
@@ -51,6 +49,12 @@ type MobileTab = 'input' | 'output' | 'scan'
 
 export default function Dashboard() {
   const { tier, isAuthenticated, clearAuth }                           = useUserStore()
+  // Free's own per-request cap (~300 words, see limits.ts) is far below
+  // every other tier's — bring your own key to use your own key's limits —
+  // computed per-render so it reacts immediately if tier changes (e.g. a
+  // Free trial expiring mid-session and the account refreshing to a token
+  // that still reports 'free').
+  const maxChars = maxRequestCharsForTier(tier ?? 'free')
   const { humanize, status: hStatus, reset: resetH, response, error, progressMessage } = useHumanizeStore()
   const { scan, status: sStatus, reset: resetS, response: scanResp }  = useScanStore()
   const { text, setText, clearText }                                   = useEditorStore()
@@ -148,7 +152,7 @@ export default function Dashboard() {
       </div>
       <textarea
         value={text}
-        onChange={e => setText(e.target.value.slice(0, MAX_CHARS))}
+        onChange={e => setText(e.target.value.slice(0, maxChars))}
         placeholder="Paste your AI-generated text here…"
         className="flex-1 bg-transparent resize-none text-sm text-gray-800 dark:text-gray-200 leading-relaxed
                    px-4 py-3 outline-none placeholder-gray-400 dark:placeholder-gray-600 font-sans"
@@ -648,7 +652,7 @@ export default function Dashboard() {
           <div className="h-full flex flex-col">
             <textarea
               value={text}
-              onChange={e => setText(e.target.value.slice(0, MAX_CHARS))}
+              onChange={e => setText(e.target.value.slice(0, maxChars))}
               placeholder="Paste your AI-generated text here…"
               className="flex-1 bg-transparent resize-none text-gray-800 dark:text-gray-200 leading-relaxed
                          px-5 pt-5 pb-3 outline-none placeholder-gray-400 dark:placeholder-gray-600 font-sans"

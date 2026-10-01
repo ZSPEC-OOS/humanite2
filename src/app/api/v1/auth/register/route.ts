@@ -24,7 +24,9 @@ export async function POST(req: NextRequest) {
   }
   const userId = registration.userId!
 
-  const accessToken = await issueAccessToken(userId, email, resolveEffectiveTier(email, 'free'), 'us-east1')
+  // A few milliseconds of skew against userRegistration.ts's own internally-
+  // generated `now` is immaterial against a 30-day trial window.
+  const accessToken = await issueAccessToken(userId, email, resolveEffectiveTier(email, 'free'), 'us-east1', new Date().toISOString())
   const { raw, hash } = generateRefreshToken()
   const familyId = randomUUID()
 

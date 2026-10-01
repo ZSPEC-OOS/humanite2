@@ -24,10 +24,11 @@ describe('PricingPage', () => {
     expect(screen.queryByText(/all three plans are paid/i)).toBeNull()
   })
 
-  it('states there is a real (non-trial) free plan in the FAQ', () => {
+  it('honestly describes Free as a 30-day trial that ends, in the FAQ', () => {
     renderPricingPage()
     expect(screen.getByText(/is there a free plan/i)).toBeTruthy()
-    expect(screen.getByText(/5,000 generated words and 5,000 scanned words/i)).toBeTruthy()
+    expect(screen.getByText(/1,200 generated words and 1,200 scanned words to use across 30 days/i)).toBeTruthy()
+    expect(screen.getByText(/it ends after 30 days/i)).toBeTruthy()
   })
 
   it('shows Free\'s $0 price and Starter\'s $5 price distinctly', () => {
