@@ -1,19 +1,34 @@
 'use client'
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { authRegister, APIError } from '@/lib/api'
+import { safeNextPath } from '@/lib/safeRedirect'
 import { Spinner } from '@/components/ui/Spinner'
 import { inputCls } from '@/components/ui/styles'
 import { Logo } from '@/components/ui/Logo'
 
+// See login/page.tsx's identical comment — useSearchParams() requires a
+// Suspense boundary for static prerendering to succeed.
 export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
+  )
+}
+
+function RegisterForm() {
   const [email, setEmail]     = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [error, setError]     = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  // Same generic, validated post-auth return destination login uses — a
+  // visitor sent to /developer while logged out who registers instead of
+  // signing in should still land on /developer, not /dashboard.
+  const next = safeNextPath(useSearchParams().get('next'))
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -26,7 +41,7 @@ export default function RegisterPage() {
     try {
       // authRegister adopts the session (userStore + refresh token) itself.
       await authRegister(email, password)
-      router.push('/dashboard')
+      router.push(next)
     } catch (e) {
       setError(e instanceof APIError ? e.message : 'Registration failed.')
     } finally {
@@ -97,7 +112,7 @@ export default function RegisterPage() {
 
         <p className="mt-5 text-xs text-center text-gray-400 dark:text-gray-500">
           Already have an account?{' '}
-          <a href="/auth/login" className="text-gray-900 dark:text-gray-100 font-medium hover:opacity-70">
+          <a href={`/auth/login?next=${encodeURIComponent(next)}`} className="text-gray-900 dark:text-gray-100 font-medium hover:opacity-70">
             Sign in
           </a>
         </p>

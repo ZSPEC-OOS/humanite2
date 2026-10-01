@@ -7,6 +7,11 @@ const NAV_LINKS = [
   { label: 'Solutions', href: '/solutions' },
   { label: 'Pricing', href: '/pricing' },
   { label: 'About', href: '/about' },
+  // Visible whether logged in or out — /developer itself handles the
+  // authenticated/unauthenticated split (see src/app/developer/page.tsx's
+  // own auth guard, which sends a logged-out visitor to
+  // /auth/login?next=/developer).
+  { label: 'Developer', href: '/developer' },
 ]
 
 const LOG_IN_LINK = { label: 'Log in', href: '/auth/login' }

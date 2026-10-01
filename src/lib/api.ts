@@ -465,3 +465,25 @@ export async function apiExport(
   }
   return resp.blob()
 }
+
+// ── Usage ─────────────────────────────────────────────────────────────────────
+
+export interface UsagePoolSummary {
+  used: number
+  /** null = no numeric ceiling (Gold / allowlisted accounts) — render as Unlimited. */
+  limit: number | null
+}
+
+export interface UsageSummary {
+  tier: string
+  planName: string
+  unlimited: boolean
+  /** False only if the server's own usage read failed — used/limit aren't meaningful then. */
+  available: boolean
+  generation: UsagePoolSummary
+  scan: UsagePoolSummary
+}
+
+export async function apiGetUsageSummary(): Promise<UsageSummary> {
+  return apiFetch<UsageSummary>('/v1/user/usage')
+}

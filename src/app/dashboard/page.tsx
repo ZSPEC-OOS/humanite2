@@ -320,6 +320,7 @@ export default function Dashboard() {
               )}
             </button>
             <TierBadge tier={tier} className="flex" />
+            <Link href="/developer" className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300 transition-colors">Developer</Link>
             <A2HMenuLink className="text-xs" />
             <button onClick={handleClear}
               className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300 transition-colors">Clear</button>
@@ -595,6 +596,15 @@ export default function Dashboard() {
         {/* Drawer footer actions */}
         <div className="shrink-0 px-5 py-5 border-t border-gray-200 dark:border-gray-800 space-y-1"
           style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}>
+          <Link
+            href="/developer"
+            onClick={() => setMenuOpen(false)}
+            className="block w-full text-left text-sm text-gray-500 hover:text-gray-800
+                       dark:text-gray-400 dark:hover:text-gray-100
+                       py-2.5 px-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
+          >
+            Developer
+          </Link>
           <A2HMenuLink
             onClick={() => setMenuOpen(false)}
             className="block w-full text-left py-2.5 px-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
