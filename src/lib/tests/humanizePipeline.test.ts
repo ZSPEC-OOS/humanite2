@@ -626,6 +626,41 @@ describe('humanizeChunk — Phase 8 candidate generation and selection', () => {
     expect(embedCreate.mock.calls[0]![0].input).toHaveLength(3)
   })
 
+  it('continues with the surviving candidate when ONE of several parallel generations rejects, rather than failing the whole chunk', async () => {
+    // Deep-audit regression test: generateCandidates used to fire its
+    // parallel completions with Promise.all, so a single transient provider
+    // error (rate limit, 500, timeout) discarded an already-successful
+    // sibling candidate and failed the entire chunk. It now uses
+    // Promise.allSettled and proceeds with whatever candidates fulfilled.
+    const source = 'The company reported strong quarterly earnings.'
+    const chatCreate = vi.fn()
+    chatCreate.mockRejectedValueOnce(new Error('rate limited')) // generation 0 — transient provider failure
+    chatCreate.mockResolvedValueOnce({ model: 'gpt-4o-mini', choices: [{ message: { content: 'Candidate B: the only surviving rewrite.' }, finish_reason: 'stop' }] }) // generation 1
+    chatCreate.mockResolvedValueOnce({ model: 'gpt-4o-mini', choices: [{ message: { content: judgeJson() }, finish_reason: 'stop' }] }) // judge for the sole survivor
+    chatCreate.mockResolvedValueOnce({ model: 'gpt-4o-mini', choices: [{ message: { content: '{"claims": []}' }, finish_reason: 'stop' }] }) // claim verification
+    const embedCreate = vi.fn().mockResolvedValue({ data: [[1, 0], [1, 0]].map(e => ({ embedding: e })) })
+    const client = { chat: { completions: { create: chatCreate } }, embeddings: { create: embedCreate } } as unknown as OpenAI
+
+    const result = await humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [], 4, 'balanced', 'general', 2)
+
+    expect(result.text).toBe('Candidate B: the only surviving rewrite.')
+    expect(result.gate?.passed).toBe(true)
+    // The original requested count is preserved for telemetry even though
+    // only one candidate actually survived to be judged.
+    expect(result.candidateSelection.candidateCount).toBe(2)
+    // 2 generation attempts (1 rejected) + 1 judge + 1 claim verification.
+    expect(chatCreate).toHaveBeenCalledTimes(4)
+  })
+
+  it('throws when EVERY parallel candidate generation rejects (a real, total failure)', async () => {
+    const source = 'The company reported strong quarterly earnings.'
+    const chatCreate = vi.fn().mockRejectedValue(new Error('provider unavailable'))
+    const client = { chat: { completions: { create: chatCreate } } } as unknown as OpenAI
+
+    await expect(humanizeChunk(client, 'gpt-4o-mini', 'fallback', source, [], 4, 'balanced', 'general', 2))
+      .rejects.toThrow('provider unavailable')
+  })
+
   it('spends one planning call at intensity 7 and shares its plan across every candidate prompt', async () => {
     const source = 'The company reported strong quarterly earnings this quarter.'
     const { client, chatCreate } = mockCandidateClient([
@@ -724,6 +759,24 @@ describe('humanizeChunk — Phase 9 provider capabilities', () => {
     expect(result.gate?.semantic_similarity).toBeNull()
     expect(result.gate?.gates_available.semantic_similarity).toBe(false)
     expect(chatCreate).toHaveBeenCalledTimes(3)
+  })
+
+  it('never attempts claim verification against a provider with no jsonOutput capability (deep-audit regression)', async () => {
+    // verifyClaims relies on response_format: json_object to parse
+    // reliably, the same requirement the structured/quality-gate judge
+    // calls are already gated on (which is why only the plain generation
+    // call fires here at all) — Anthropic/OpenRouter/generic-adapter
+    // configurations (jsonOutput: false) must never additionally pay for a
+    // claim-verification completion that's guaranteed to fail parsing.
+    const { client, chatCreate } = mockClientFor('https://api.anthropic.com/v1', [
+      { content: 'Revenue rose to 42 units.' },
+    ])
+
+    const result = await humanizeChunk(client, 'claude', 'fallback', 'Revenue rose to 42 units.', [], 3, 'balanced', 'general', 0)
+
+    expect(result.claimVerification).toBeNull()
+    // Only the generation call — no second call for claim verification.
+    expect(chatCreate).toHaveBeenCalledTimes(1)
   })
 
   it('the single-candidate retry path caps max_tokens to the provider ceiling, even at a requested intensity that would otherwise exceed it', async () => {

@@ -64,4 +64,22 @@ describe('restoreRelations', () => {
     expect(result.succeeded).toBe(false)
     expect(result.text).toBe('One sentence here.')
   })
+
+  it('still applies a surviving sentence repair when a DIFFERENT sentence\'s repair call rejects (deep-audit regression)', async () => {
+    const corrupted = 'First problem sentence. Second problem sentence.'
+    const create = vi.fn()
+      .mockRejectedValueOnce(new Error('rate limited'))
+      .mockResolvedValueOnce({ model: 'gpt-4o-mini', choices: [{ message: { content: 'Second corrected sentence.' } }] })
+    const client = { chat: { completions: { create } } } as unknown as OpenAI
+
+    const failures = [
+      verdict({ outputSentenceIndex: 0, reason: 'first problem' }),
+      verdict({ outputSentenceIndex: 1, reason: 'second problem' }),
+    ]
+    const result = await restoreRelations(client, 'gpt-4o-mini', 'source.', corrupted, failures, 'balanced', 'general')
+
+    expect(result.succeeded).toBe(true)
+    expect(result.sentencesRepaired).toBe(1)
+    expect(result.text).toBe('First problem sentence. Second corrected sentence.')
+  })
 })

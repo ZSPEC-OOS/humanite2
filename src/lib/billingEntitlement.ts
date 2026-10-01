@@ -41,6 +41,15 @@ export function resolveEntitlementFromCheckoutSession(session: Stripe.Checkout.S
   return { userId, tier }
 }
 
+// Subscription statuses that represent the customer actually holding the
+// entitlement right now. A subscription whose payment has failed
+// (past_due/unpaid) is NOT in this set — if a deployment's Stripe dunning
+// settings don't auto-cancel after retries exhaust, customer.subscription.
+// deleted may never fire, so entitlement must not wait for it: a lapsed
+// payment downgrades immediately rather than leaving the account on its
+// paid tier indefinitely.
+const ENTITLED_SUBSCRIPTION_STATUSES: ReadonlySet<Stripe.Subscription.Status> = new Set(['active', 'trialing'])
+
 // customer.subscription.updated fires on every change to an existing
 // subscription, including a plan change made through Stripe's customer
 // portal rather than this app's own checkout flow — so the subscription's
@@ -49,10 +58,17 @@ export function resolveEntitlementFromCheckoutSession(session: Stripe.Checkout.S
 // represents. `metadata.plan` (propagated from checkout/route.ts's
 // `subscription_data.metadata`) is used only as a fallback if the price
 // can't be matched to a known tier (e.g. a Price ID env var was rotated
-// without updating the still-active subscription).
+// without updating the still-active subscription). A subscription NOT in an
+// entitled status (see ENTITLED_SUBSCRIPTION_STATUSES above) always
+// resolves to 'free', regardless of which price it's still attached to.
 export function resolveEntitlementFromSubscription(subscription: Stripe.Subscription): ResolvedEntitlement {
   const metadata = (subscription.metadata ?? {}) as Record<string, string | undefined>
   const userId = metadata.userId ?? null
+
+  if (!ENTITLED_SUBSCRIPTION_STATUSES.has(subscription.status)) {
+    return { userId, tier: 'free' }
+  }
+
   const priceId = subscription.items?.data?.[0]?.price?.id ?? null
   const tier = tierForPriceId(priceId) ?? metadata.plan ?? null
   return { userId, tier }

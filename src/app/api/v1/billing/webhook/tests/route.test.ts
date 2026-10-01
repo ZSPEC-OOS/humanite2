@@ -121,7 +121,7 @@ describe('POST /api/v1/billing/webhook — entitlement application', () => {
     constructEvent.mockReturnValue({
       id: 'evt_2',
       type: 'customer.subscription.updated',
-      data: { object: { metadata: { userId: 'user-1', plan: 'starter' }, items: { data: [{ price: { id: 'price_pro' } }] } } },
+      data: { object: { status: 'active', metadata: { userId: 'user-1', plan: 'starter' }, items: { data: [{ price: { id: 'price_pro' } }] } } },
     })
 
     await POST(req('{}'))
@@ -135,7 +135,7 @@ describe('POST /api/v1/billing/webhook — entitlement application', () => {
     constructEvent.mockReturnValue({
       id: 'evt_3',
       type: 'customer.subscription.updated',
-      data: { object: { metadata: { userId: 'user-1' }, items: { data: [{ price: { id: 'price_max' } }] } } },
+      data: { object: { status: 'active', metadata: { userId: 'user-1' }, items: { data: [{ price: { id: 'price_max' } }] } } },
     })
 
     await POST(req('{}'))
@@ -150,6 +150,20 @@ describe('POST /api/v1/billing/webhook — entitlement application', () => {
       id: 'evt_4',
       type: 'customer.subscription.deleted',
       data: { object: { metadata: { userId: 'user-1' }, items: { data: [{ price: { id: 'price_pro' } }] } } },
+    })
+
+    await POST(req('{}'))
+    expect((await firestore.collection('users').doc('user-1').get()).data()?.tier).toBe('free')
+  })
+
+  it('customer.subscription.updated with status past_due downgrades to free immediately, without waiting for subscription.deleted', async () => {
+    const { firestore } = firestoreRef.current
+    await firestore.collection('users').doc('user-1').set({ tier: 'pro' })
+
+    constructEvent.mockReturnValue({
+      id: 'evt_pastdue',
+      type: 'customer.subscription.updated',
+      data: { object: { status: 'past_due', metadata: { userId: 'user-1', plan: 'pro' }, items: { data: [{ price: { id: 'price_pro' } }] } } },
     })
 
     await POST(req('{}'))

@@ -45,6 +45,19 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+// No real request cancellation exists here (apiHumanize/apiGetJob in
+// src/lib/api.ts take no AbortSignal) — this is a stale-write guard instead:
+// every call to humanize()/reset()/loadFromHistory() bumps this counter, and
+// an in-flight humanize() call checks it before every `set()` it makes after
+// an `await`. Without it, clicking "Clear" (or starting a new humanize, or
+// loading a past result from history) mid-flight doesn't stop the original
+// call's background polling loop, and its eventual result/error can land
+// AFTER the reset and silently overwrite whatever the user is now looking
+// at, up to ~5 minutes later (MAX_POLLS * POLL_INTERVAL_MS) for a long
+// document. The real HTTP work still completes server-side either way; this
+// only prevents a superseded call's result from being applied to the UI.
+let activeGeneration = 0
+
 export const useHumanizeStore = create<HumanizeState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   response: null,
@@ -56,6 +69,9 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
     set((state) => ({ settings: { ...state.settings, ...patch } })),
 
   humanize: async (text) => {
+    const myGeneration = ++activeGeneration
+    const isStale = () => myGeneration !== activeGeneration
+
     set({ status: 'loading', error: null, progressMessage: null })
     // Clear any detection result from a previous run — otherwise the AI
     // Detection stat would show a stale score from the last humanize while
@@ -63,6 +79,7 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
     useScanStore.getState().reset()
     try {
       const resp = await apiHumanize(text, get().settings)
+      if (isStale()) return
 
       if (resp.status !== 'pending') {
         if (resp.output) applyDetectionToScanStore(resp.output)
@@ -74,7 +91,9 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
 
       for (let i = 0; i < MAX_POLLS; i++) {
         await sleep(POLL_INTERVAL_MS)
+        if (isStale()) return
         const job = await apiGetJob(resp.job_id)
+        if (isStale()) return
 
         if (job.progress) {
           set({ progressMessage: `Processing your document — section ${job.progress.chunks_completed} of ${job.progress.chunks_total}…` })
@@ -129,6 +148,7 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
       // one last check for whatever partial progress was recorded before
       // giving up entirely.
       const lastJob = await apiGetJob(resp.job_id).catch(() => null)
+      if (isStale()) return
       if (lastJob?.partial_output) {
         applyDetectionToScanStore(lastJob.partial_output)
         set({
@@ -150,6 +170,7 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
 
       set({ status: 'error', error: 'Timed out waiting for your document to finish processing.', progressMessage: null })
     } catch (e) {
+      if (isStale()) return
       const msg = e instanceof Error ? e.message : 'Humanization failed.'
       set({ status: 'error', error: msg, progressMessage: null })
     }
@@ -160,6 +181,7 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
   // instead of a fresh API call, so every existing consumer (output panel,
   // stats bar, ScanReport) renders it identically with no branching.
   loadFromHistory: (output) => {
+    activeGeneration++ // supersede any in-flight humanize() the same way reset() does
     useScanStore.getState().reset()
     if (output.detection) applyDetectionToScanStore(output)
     set({
@@ -179,5 +201,8 @@ export const useHumanizeStore = create<HumanizeState>((set, get) => ({
     })
   },
 
-  reset: () => set({ response: null, status: 'idle', error: null, progressMessage: null }),
+  reset: () => {
+    activeGeneration++ // supersede any in-flight humanize() call — see the comment above activeGeneration's declaration
+    set({ response: null, status: 'idle', error: null, progressMessage: null })
+  },
 }))

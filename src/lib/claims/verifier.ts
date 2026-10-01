@@ -80,7 +80,13 @@ function normalizeVerdict(raw: RawClaim, outputSentenceCount: number): ClaimVerd
     polarity: raw.polarity === 'negative' ? 'negative' : 'affirmative',
     modality: raw.modality == null ? null : String(raw.modality),
   }
-  const rawIndex = Number(raw.output_sentence_index)
+  // `raw.output_sentence_index == null` must be checked BEFORE calling
+  // Number() on it — Number(null) is 0, not NaN, so a model that correctly
+  // follows the prompt's instruction to report null (the claim isn't
+  // localized to one sentence) would otherwise be coerced into "sentence 0",
+  // misdirecting a targeted repair at the wrong — or an entirely
+  // unrelated — sentence while the real problem goes unaddressed.
+  const rawIndex = raw.output_sentence_index == null ? NaN : Number(raw.output_sentence_index)
   const outputSentenceIndex = Number.isInteger(rawIndex) && rawIndex >= 0 && rawIndex < outputSentenceCount ? rawIndex : null
 
   return {

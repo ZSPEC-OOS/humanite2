@@ -15,8 +15,13 @@ vi.mock('@/lib/firestore', () => ({
     // caught despite the "fails open" doc comment above.
     if (dbShouldThrow.value) throw new Error('Missing Firebase credentials')
     return {
-      collection: () => ({
-        doc: (key: string) => ({ __key: key }),
+      // Incorporates the collection name into the stored key so
+      // usage_monthly and usage_daily (real, distinct collections in
+      // production) can never share state in this mock even if their doc
+      // ids ever happened to collide in format — a regression guard for a
+      // test-fidelity gap, not a production behavior.
+      collection: (name: string) => ({
+        doc: (key: string) => ({ __key: `${name}/${key}` }),
       }),
       runTransaction: async (
         fn: (tx: {
