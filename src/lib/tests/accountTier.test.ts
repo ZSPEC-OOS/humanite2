@@ -14,6 +14,11 @@ describe('accountTier', () => {
     expect(ACCOUNT_TIERS).toContain(GOLD_TIER)
   })
 
+  it('ACCOUNT_TIERS contains exactly free, starter, pro, enterprise, gold — no duplicates', () => {
+    expect(ACCOUNT_TIERS).toEqual(['free', 'starter', 'pro', 'enterprise', 'gold'])
+    expect(new Set(ACCOUNT_TIERS).size).toBe(ACCOUNT_TIERS.length)
+  })
+
   describe('isGoldTier', () => {
     it('is true only for the gold tier', () => {
       expect(isGoldTier('gold')).toBe(true)
@@ -22,6 +27,7 @@ describe('accountTier', () => {
 
     it('is false for every purchasable tier, null, undefined, and an unrecognized string', () => {
       expect(isGoldTier('free')).toBe(false)
+      expect(isGoldTier('starter')).toBe(false)
       expect(isGoldTier('pro')).toBe(false)
       expect(isGoldTier('enterprise')).toBe(false)
       expect(isGoldTier(null)).toBe(false)

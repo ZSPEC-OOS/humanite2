@@ -46,6 +46,11 @@ describe('registerUser', () => {
 
     const userDoc = docStore.get(result.userId!)
     expect(userDoc).toMatchObject({ email: 'new@example.com', tier: 'free' })
+    // "Pricing Cleanup" patch §11/§34: 'free' now means the real $0 Free
+    // plan — every new registration gets it, and NEVER the paid 'starter'
+    // tier merely by signing up (a paid tier requires a verified Stripe
+    // entitlement — see billingEntitlement.ts).
+    expect(userDoc?.tier).not.toBe('starter')
     // Password is hashed, not stored raw.
     expect(userDoc?.passwordHash).not.toBe('password123')
   })

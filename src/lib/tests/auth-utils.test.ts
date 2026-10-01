@@ -56,6 +56,17 @@ describe('issueAccessToken / verifyAccessToken — tier and scope claims', () =>
     expect(payload.scopes).not.toContain('user:read')
   })
 
+  it('does not grant the elevated scope to a starter-tier account, but does keep base humanize/scan scopes', async () => {
+    // "Pricing Cleanup" patch §19: Starter is a distinct paid tier from
+    // free, but still gets ONLY the base scopes — never admin/internal
+    // access just for being a paid plan below Pro.
+    const token = await issueAccessToken('user-1', 'user@example.com', 'starter', 'us-east1')
+    const payload = await verifyAccessToken(token)
+    expect(payload.scopes).not.toContain('user:read')
+    expect(payload.scopes).toContain('humanize:write')
+    expect(payload.scopes).toContain('scan:write')
+  })
+
   it('rejects a token whose payload was tampered with client-side to forge tier "gold"', async () => {
     // Gold privileges cannot be enabled through client-side manipulation
     // alone: a real free-tier token, edited to claim tier: 'gold' without

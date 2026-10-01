@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const { docStore, txShouldThrow, dbShouldThrow } = vi.hoisted(() => ({
-  docStore: new Map<string, Record<string, number>>(),
+  docStore: new Map<string, Record<string, number | string>>(),
   txShouldThrow: { value: false },
   dbShouldThrow: { value: false },
 }))
@@ -66,9 +66,9 @@ describe('checkAndRecordGenerationUsage', () => {
     expect(result.allowed).toBe(true)
   })
 
-  it('blocks once the daily request count is exhausted', async () => {
+  it('blocks once the daily request-rate ceiling is exhausted (abuse backstop, not the monthly quota)', async () => {
     process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '2'
-    process.env.FREE_TIER_GENERATION_WORDS_PER_DAY = '1000000'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_MONTH = '1000000'
     expect((await checkAndRecordGenerationUsage('user-1', 'free', 10)).allowed).toBe(true)
     expect((await checkAndRecordGenerationUsage('user-1', 'free', 10)).allowed).toBe(true)
     const third = await checkAndRecordGenerationUsage('user-1', 'free', 10)
@@ -77,18 +77,18 @@ describe('checkAndRecordGenerationUsage', () => {
     expect(third.reason).toMatch(/daily generation request limit/i)
   })
 
-  it('blocks once the daily word budget is exhausted, even under the request-count cap', async () => {
+  it('blocks once the MONTHLY word budget is exhausted, even under the daily request-rate ceiling', async () => {
     process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1000'
-    process.env.FREE_TIER_GENERATION_WORDS_PER_DAY = '500'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_MONTH = '500'
     expect((await checkAndRecordGenerationUsage('user-1', 'free', 300)).allowed).toBe(true)
     const second = await checkAndRecordGenerationUsage('user-1', 'free', 300)
     expect(second.allowed).toBe(false)
-    expect(second.reason).toMatch(/daily generation word limit/i)
+    expect(second.reason).toMatch(/monthly generated-word allowance/i)
   })
 
-  it('a request that would exceed the word budget does not get partially recorded', async () => {
+  it('a request that would exceed the monthly word budget does not get partially recorded', async () => {
     process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1000'
-    process.env.FREE_TIER_GENERATION_WORDS_PER_DAY = '500'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_MONTH = '500'
     await checkAndRecordGenerationUsage('user-1', 'free', 300)
     const rejected = await checkAndRecordGenerationUsage('user-1', 'free', 300) // would total 600 > 500
     expect(rejected.allowed).toBe(false)
@@ -106,12 +106,18 @@ describe('checkAndRecordGenerationUsage', () => {
     expect((await checkAndRecordGenerationUsage('user-b', 'free', 10)).allowed).toBe(true)
   })
 
-  it('applies a higher limit for the pro tier than free', async () => {
+  it('applies a higher limit for the starter tier than free, and higher still for pro', async () => {
     process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1'
+    process.env.STARTER_TIER_GENERATION_REQUESTS_PER_DAY = '3'
     process.env.PRO_TIER_GENERATION_REQUESTS_PER_DAY = '5'
+    expect((await checkAndRecordGenerationUsage('starter-user', 'starter', 10)).allowed).toBe(true)
+    expect((await checkAndRecordGenerationUsage('starter-user', 'starter', 10)).allowed).toBe(true)
+    expect((await checkAndRecordGenerationUsage('starter-user', 'starter', 10)).allowed).toBe(true)
+    // Would already be blocked at free's limit of 1, but starter's limit is 3.
+    expect((await checkAndRecordGenerationUsage('starter-user', 'starter', 10)).allowed).toBe(false)
+
     expect((await checkAndRecordGenerationUsage('pro-user', 'pro', 10)).allowed).toBe(true)
     expect((await checkAndRecordGenerationUsage('pro-user', 'pro', 10)).allowed).toBe(true)
-    // Would already be blocked at free's limit of 1, but pro's limit is 5.
     expect((await checkAndRecordGenerationUsage('pro-user', 'pro', 10)).allowed).toBe(true)
   })
 
@@ -119,6 +125,13 @@ describe('checkAndRecordGenerationUsage', () => {
     process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1'
     expect((await checkAndRecordGenerationUsage('user-x', 'not-a-real-tier', 10)).allowed).toBe(true)
     expect((await checkAndRecordGenerationUsage('user-x', 'not-a-real-tier', 10)).allowed).toBe(false)
+  })
+
+  it("'starter' never silently falls through to the free quota", async () => {
+    process.env.FREE_TIER_GENERATION_WORDS_PER_MONTH = '1'
+    process.env.STARTER_TIER_GENERATION_WORDS_PER_MONTH = '100000'
+    const result = await checkAndRecordGenerationUsage('starter-user', 'starter', 50_000)
+    expect(result.allowed).toBe(true)
   })
 
   it('fails closed (rejects the request) if the transaction itself fails', async () => {
@@ -133,7 +146,7 @@ describe('checkAndRecordGenerationUsage', () => {
   })
 
   it('fails closed even when db() itself throws synchronously (e.g. missing Firebase credentials)', async () => {
-    // The doc reference is built inside the try/catch specifically so this
+    // The doc references are built inside the try/catch specifically so this
     // failure mode (db() throwing before any Firestore call is even
     // attempted) is caught the same way a rejected transaction is.
     dbShouldThrow.value = true
@@ -144,7 +157,7 @@ describe('checkAndRecordGenerationUsage', () => {
 
   it('bypasses the quota entirely for an allowlisted email hash, without touching Firestore', async () => {
     process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1'
-    process.env.FREE_TIER_GENERATION_WORDS_PER_DAY = '1'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_MONTH = '1'
     process.env.UNLIMITED_USAGE_EMAIL_HASHES = 'admin-hash-1,admin-hash-2'
     const result = await checkAndRecordGenerationUsage('user-1', 'free', 999999, 'admin-hash-2')
     expect(result.allowed).toBe(true)
@@ -156,11 +169,22 @@ describe('checkAndRecordGenerationUsage', () => {
 
   it('does not bypass the quota for a non-allowlisted email hash', async () => {
     process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1000'
-    process.env.FREE_TIER_GENERATION_WORDS_PER_DAY = '1'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_MONTH = '1'
     process.env.UNLIMITED_USAGE_EMAIL_HASHES = 'admin-hash-1'
     const result = await checkAndRecordGenerationUsage('user-1', 'free', 10, 'some-other-hash')
     expect(result.allowed).toBe(false)
     expect(result.code).toBe('LIMIT_EXCEEDED')
+  })
+
+  it('names the next tier up and its allowance when a monthly quota is exhausted, never suggesting a tier above Max', async () => {
+    process.env.FREE_TIER_GENERATION_WORDS_PER_MONTH = '100'
+    const free = await checkAndRecordGenerationUsage('free-user', 'free', 200)
+    expect(free.reason).toMatch(/upgrade to starter/i)
+    expect(free.reason).toMatch(/50,000/)
+
+    process.env.ENTERPRISE_TIER_GENERATION_WORDS_PER_MONTH = '100'
+    const max = await checkAndRecordGenerationUsage('max-user', 'enterprise', 200)
+    expect(max.reason).not.toMatch(/upgrade/i)
   })
 })
 
@@ -171,7 +195,7 @@ describe('checkAndRecordScanUsage', () => {
     // current numbers, so it forces zero explicitly via env override rather
     // than relying on a tier that happens to default to it.
     process.env.FREE_TIER_SCAN_REQUESTS_PER_DAY = '0'
-    process.env.FREE_TIER_SCAN_WORDS_PER_DAY = '0'
+    process.env.FREE_TIER_SCAN_WORDS_PER_MONTH = '0'
     const result = await checkAndRecordScanUsage('user-1', 'free', 10)
     expect(result.allowed).toBe(false)
     expect(result.code).toBe('LIMIT_EXCEEDED')
@@ -184,25 +208,25 @@ describe('checkAndRecordScanUsage', () => {
 
   it('allows scanning on a plan with real scan quota', async () => {
     process.env.PRO_TIER_SCAN_REQUESTS_PER_DAY = '10'
-    process.env.PRO_TIER_SCAN_WORDS_PER_DAY = '1000'
+    process.env.PRO_TIER_SCAN_WORDS_PER_MONTH = '1000'
     const result = await checkAndRecordScanUsage('pro-user', 'pro', 500)
     expect(result.allowed).toBe(true)
   })
 
-  it('blocks once the scan word budget is exhausted', async () => {
+  it('blocks once the monthly scan word budget is exhausted', async () => {
     process.env.PRO_TIER_SCAN_REQUESTS_PER_DAY = '10'
-    process.env.PRO_TIER_SCAN_WORDS_PER_DAY = '1000'
+    process.env.PRO_TIER_SCAN_WORDS_PER_MONTH = '1000'
     expect((await checkAndRecordScanUsage('pro-user', 'pro', 700)).allowed).toBe(true)
     const second = await checkAndRecordScanUsage('pro-user', 'pro', 700)
     expect(second.allowed).toBe(false)
-    expect(second.reason).toMatch(/daily scan word limit/i)
+    expect(second.reason).toMatch(/monthly scanned-word allowance/i)
   })
 
   it('tracks generation and scan as fully independent pools for the same user', async () => {
     process.env.PRO_TIER_GENERATION_REQUESTS_PER_DAY = '1'
-    process.env.PRO_TIER_GENERATION_WORDS_PER_DAY = '10'
+    process.env.PRO_TIER_GENERATION_WORDS_PER_MONTH = '10'
     process.env.PRO_TIER_SCAN_REQUESTS_PER_DAY = '1'
-    process.env.PRO_TIER_SCAN_WORDS_PER_DAY = '10'
+    process.env.PRO_TIER_SCAN_WORDS_PER_MONTH = '10'
 
     // Exhaust generation entirely.
     expect((await checkAndRecordGenerationUsage('pro-user', 'pro', 10)).allowed).toBe(true)
@@ -215,7 +239,7 @@ describe('checkAndRecordScanUsage', () => {
 
   it('fails closed if the transaction itself fails', async () => {
     process.env.PRO_TIER_SCAN_REQUESTS_PER_DAY = '10'
-    process.env.PRO_TIER_SCAN_WORDS_PER_DAY = '1000'
+    process.env.PRO_TIER_SCAN_WORDS_PER_MONTH = '1000'
     txShouldThrow.value = true
     const result = await checkAndRecordScanUsage('pro-user', 'pro', 10)
     expect(result.allowed).toBe(false)
@@ -223,24 +247,80 @@ describe('checkAndRecordScanUsage', () => {
   })
 })
 
+// "Pricing Cleanup" patch §14/§36: the advertised quota is MONTHLY, not
+// daily — a user must be able to spend their allowance unevenly across the
+// month (heavy on day 1, nothing for weeks) and still be under budget, which
+// a daily word cap could never express. These tests pin that behavior down
+// directly against the real system clock via vi.setSystemTime.
+describe('monthly accounting semantics (§14/§36)', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('allows usage spread unevenly across a month, up to the monthly cap, denying only once truly exhausted', async () => {
+    process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1000'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_MONTH = '5000'
+
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-01T00:00:00.000Z'))
+    expect((await checkAndRecordGenerationUsage('user-1', 'free', 4000)).allowed).toBe(true)
+
+    vi.setSystemTime(new Date('2026-10-20T00:00:00.000Z'))
+    expect((await checkAndRecordGenerationUsage('user-1', 'free', 1000)).allowed).toBe(true) // 4000 + 1000 = 5000, exactly at cap
+
+    vi.setSystemTime(new Date('2026-10-25T00:00:00.000Z'))
+    const overBudget = await checkAndRecordGenerationUsage('user-1', 'free', 1)
+    expect(overBudget.allowed).toBe(false)
+    expect(overBudget.code).toBe('LIMIT_EXCEEDED')
+  })
+
+  it('resets automatically at the start of the next calendar month, with no manual cleanup', async () => {
+    process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1000'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_MONTH = '5000'
+
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-25T00:00:00.000Z'))
+    expect((await checkAndRecordGenerationUsage('user-1', 'free', 5000)).allowed).toBe(true)
+    expect((await checkAndRecordGenerationUsage('user-1', 'free', 1)).allowed).toBe(false) // exhausted for October
+
+    vi.setSystemTime(new Date('2026-11-01T00:00:00.000Z'))
+    const nextMonth = await checkAndRecordGenerationUsage('user-1', 'free', 5000)
+    expect(nextMonth.allowed).toBe(true) // a brand-new period key, no manual reset needed
+  })
+
+  it('still enforces the DAILY request-rate ceiling independently of the monthly word reset', async () => {
+    process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '2'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_MONTH = '1000000'
+
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-15T00:00:00.000Z'))
+    expect((await checkAndRecordGenerationUsage('user-1', 'free', 10)).allowed).toBe(true)
+    expect((await checkAndRecordGenerationUsage('user-1', 'free', 10)).allowed).toBe(true)
+    expect((await checkAndRecordGenerationUsage('user-1', 'free', 10)).allowed).toBe(false) // daily ceiling hit, same day
+
+    vi.setSystemTime(new Date('2026-10-16T00:00:00.000Z'))
+    expect((await checkAndRecordGenerationUsage('user-1', 'free', 10)).allowed).toBe(true) // new day, request-rate pool reset
+  })
+})
+
 describe('gold tier — unrestricted access (no daily limits, no quotas, no feature gates)', () => {
   it('is never blocked by the daily generation request limit, however low', async () => {
     process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1'
-    process.env.FREE_TIER_GENERATION_WORDS_PER_DAY = '1'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_MONTH = '1'
     for (let i = 0; i < 5; i++) {
       expect((await checkAndRecordGenerationUsage('gold-user', 'gold', 10)).allowed).toBe(true)
     }
   })
 
-  it('is never blocked by the daily generation word limit, even for a huge submission', async () => {
-    process.env.FREE_TIER_GENERATION_WORDS_PER_DAY = '1'
+  it('is never blocked by the monthly generation word limit, even for a huge submission', async () => {
+    process.env.FREE_TIER_GENERATION_WORDS_PER_MONTH = '1'
     const result = await checkAndRecordGenerationUsage('gold-user', 'gold', 10_000_000)
     expect(result.allowed).toBe(true)
   })
 
-  it('is never blocked by the daily scan request or word limit', async () => {
+  it('is never blocked by the daily scan request or monthly word limit', async () => {
     process.env.FREE_TIER_SCAN_REQUESTS_PER_DAY = '1'
-    process.env.FREE_TIER_SCAN_WORDS_PER_DAY = '1'
+    process.env.FREE_TIER_SCAN_WORDS_PER_MONTH = '1'
     for (let i = 0; i < 5; i++) {
       expect((await checkAndRecordScanUsage('gold-user', 'gold', 10_000)).allowed).toBe(true)
     }
@@ -248,7 +328,7 @@ describe('gold tier — unrestricted access (no daily limits, no quotas, no feat
 
   it('bypasses even a zero-quota feature gate — scanning stays available where a Free-tier plan would have it disabled entirely', async () => {
     process.env.FREE_TIER_SCAN_REQUESTS_PER_DAY = '0'
-    process.env.FREE_TIER_SCAN_WORDS_PER_DAY = '0'
+    process.env.FREE_TIER_SCAN_WORDS_PER_MONTH = '0'
     // A Free-tier account is correctly gated out (regression guard for the
     // behavior this test is contrasting against).
     const free = await checkAndRecordScanUsage('free-user', 'free', 10)
@@ -274,7 +354,7 @@ describe('gold tier — unrestricted access (no daily limits, no quotas, no feat
 
   it('leaves Free-tier restrictions completely unchanged', async () => {
     process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1'
-    process.env.FREE_TIER_GENERATION_WORDS_PER_DAY = '1000000'
+    process.env.FREE_TIER_GENERATION_WORDS_PER_MONTH = '1000000'
     expect((await checkAndRecordGenerationUsage('free-user', 'free', 10)).allowed).toBe(true)
     const second = await checkAndRecordGenerationUsage('free-user', 'free', 10)
     expect(second.allowed).toBe(false)

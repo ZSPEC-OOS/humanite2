@@ -1,15 +1,18 @@
 import { PRICING_TIERS } from '@/lib/pricing'
 import { isGoldTier } from '@/lib/accountTier'
 
-// Capitalizing the internal tier id directly (free/pro/enterprise) used to
-// coincidentally match its display name — it no longer does now that the
-// pricing page shows Starter/Pro/Max, so this resolves through the same
-// PRICING_TIERS list the pricing page itself renders from. Gold isn't in
-// that list at all (it's not a purchasable plan — see accountTier.ts), so
-// it's handled separately below rather than added there.
+// Capitalizing the internal tier id directly (free/starter/pro/enterprise)
+// used to coincidentally match its display name — it no longer does now
+// that the pricing page shows Free/Starter/Pro/Max, so this resolves
+// through the same PRICING_TIERS list the pricing page itself renders from.
+// Gold isn't in that list at all (it's not a purchasable plan — see
+// accountTier.ts), so it's handled separately below rather than added
+// there. An unrecognized/missing tier falls back to 'Free' — the actual
+// default every new registration receives (see userRegistration.ts) — never
+// to a paid plan's name.
 function tierDisplayName(tier: string | null | undefined): string {
   const match = PRICING_TIERS.find(t => t.id === tier)
-  return match?.name ?? 'Starter'
+  return match?.name ?? 'Free'
 }
 
 interface TierBadgeProps {

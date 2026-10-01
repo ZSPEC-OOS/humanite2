@@ -1,19 +1,27 @@
 import { db } from './firestore'
 import { isGoldTier } from './accountTier'
+import { PRICING_TIERS, type PricingTier } from './pricing'
 
-// Two independent daily quotas per authenticated user — generation
-// (humanize) and scan (AI-detection) — so one account can't run up this
-// deployment's own paid OpenAI-compatible/GPTZero usage unbounded. Split
-// into separate pools (rather than one shared word count) because the two
-// costs are wildly different per word (GPTZero runs roughly two orders of
-// magnitude more per word than generation) — a plan can offer generous
-// generation while still metering scanning tightly, and vice versa. This is
-// an abuse backstop, not the primary monetization lever; the pricing page's
-// advertised limits should stay comfortably under these. Override any of
-// these via env if the defaults turn out wrong in practice.
+// Two kinds of limits, kept conceptually and operationally separate
+// ("Final Polish" pricing patch, §14/§16):
+//
+//  - MONTHLY WORD QUOTAS are the advertised subscription allowance (what the
+//    /pricing page promises: "50,000 words/month"). They reset on a
+//    calendar-month boundary (a YYYY-MM period key), not daily — a user who
+//    writes 10,000 words on day 1 and 0 for the rest of the month must still
+//    have budget left on day 2, which a daily word cap cannot express.
+//  - DAILY REQUEST-RATE limits are an abuse backstop only (burst/scripting
+//    protection against this deployment's own paid OpenAI-compatible/GPTZero
+//    keys), unrelated to the advertised monthly quota. They reset at UTC
+//    midnight, same as before this patch.
+//
+// A request is checked against BOTH pools in one atomic transaction (two
+// Firestore documents: a per-user-per-month word-usage doc and a
+// per-user-per-day request-rate doc) so a request that fails either check
+// never partially records against the other.
 export interface UsagePoolLimits {
   requestsPerDay: number
-  wordsPerDay: number
+  wordsPerMonth: number
 }
 
 export interface TierLimits {
@@ -21,28 +29,29 @@ export interface TierLimits {
   scan: UsagePoolLimits
 }
 
-// Numbers below track the locked $5 / $10 / $15 plan design (free/pro/
-// enterprise are the existing internal tier keys — see
-// auth-utils.ts/userRegistration.ts — not renamed to match, since real
-// accounts already carry these values in their stored `tier` field; only the
-// pricing page's display name/price changed). Each tier advertises equal
-// generated and scanned word quotas per month — 50,000 / 100,000 / 150,000
-// — at a ~70% cost margin against DeepSeek generation + Sapling scanning
-// rates. wordsPerDay is that monthly figure divided by 30 (Sapling costs far
-// more per word than generation, hence the two pools staying independent).
-const FALLBACK_LIMITS: Record<'free' | 'pro' | 'enterprise', TierLimits> = {
-  free: {
-    generation: { requestsPerDay: 100, wordsPerDay: 1_667 },   // 50,000 words/month
-    scan:       { requestsPerDay: 20,  wordsPerDay: 1_667 },   // 50,000 words/month
-  },
-  pro: {
-    generation: { requestsPerDay: 150, wordsPerDay: 3_333 },   // 100,000 words/month
-    scan:       { requestsPerDay: 40,  wordsPerDay: 3_333 },   // 100,000 words/month
-  },
-  enterprise: {
-    generation: { requestsPerDay: 300, wordsPerDay: 5_000 },   // 150,000 words/month
-    scan:       { requestsPerDay: 60,  wordsPerDay: 5_000 },   // 150,000 words/month
-  },
+type SelfServeTierId = 'free' | 'starter' | 'pro' | 'enterprise'
+
+// Canonical monthly word allowances — must match the /pricing page's
+// advertised numbers exactly (see pricing.ts's PRICING_TIERS features).
+// Equal generated/scanned quotas per tier; scan is metered independently
+// because GPTZero costs roughly two orders of magnitude more per word than
+// generation (see checkAndRecordPoolUsage below).
+const TIER_WORD_LIMITS: Record<SelfServeTierId, { generationWordsPerMonth: number; scanWordsPerMonth: number }> = {
+  free: { generationWordsPerMonth: 5_000, scanWordsPerMonth: 5_000 },
+  starter: { generationWordsPerMonth: 50_000, scanWordsPerMonth: 50_000 },
+  pro: { generationWordsPerMonth: 100_000, scanWordsPerMonth: 100_000 },
+  enterprise: { generationWordsPerMonth: 150_000, scanWordsPerMonth: 150_000 },
+}
+
+// Daily request-rate ceilings — an abuse/burst backstop, not the advertised
+// plan quota (§16). Deliberately generous relative to what a legitimate
+// workflow needs in a day; their purpose is bounding worst-case spend on a
+// compromised/scripted account, not shaping normal usage.
+const TIER_REQUEST_LIMITS: Record<SelfServeTierId, { generationRequestsPerDay: number; scanRequestsPerDay: number }> = {
+  free: { generationRequestsPerDay: 25, scanRequestsPerDay: 10 },
+  starter: { generationRequestsPerDay: 100, scanRequestsPerDay: 20 },
+  pro: { generationRequestsPerDay: 150, scanRequestsPerDay: 40 },
+  enterprise: { generationRequestsPerDay: 300, scanRequestsPerDay: 60 },
 }
 
 function envOverride(name: string): number | null {
@@ -56,34 +65,85 @@ function envOverride(name: string): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
 }
 
+// Explicit, exhaustive mapping — an unrecognized tier (a stale JWT from
+// before a tier was renamed, a typo, a tier that was retired) always falls
+// through to 'free', and 'starter' never silently collapses into it ("Final
+// Polish" pricing patch, §18). Gold bypasses this function entirely (see
+// isGoldTier check in checkAndRecordPoolUsage) — it is not one of these four
+// self-serve tiers.
+function normalizeTier(tier: string): SelfServeTierId {
+  switch (tier) {
+    case 'free':
+    case 'starter':
+    case 'pro':
+    case 'enterprise':
+      return tier
+    default:
+      return 'free'
+  }
+}
+
 // Reads any env override fresh on every call rather than once at module
 // load, so a changed limit takes effect without a redeploy/restart.
 function limitsForTier(tier: string): TierLimits {
-  const key = tier === 'pro' || tier === 'enterprise' ? tier : 'free'
-  const fallback = FALLBACK_LIMITS[key]
+  const key = normalizeTier(tier)
+  const wordFallback = TIER_WORD_LIMITS[key]
+  const requestFallback = TIER_REQUEST_LIMITS[key]
   const prefix = key.toUpperCase()
   return {
     generation: {
-      requestsPerDay: envOverride(`${prefix}_TIER_GENERATION_REQUESTS_PER_DAY`) ?? fallback.generation.requestsPerDay,
-      wordsPerDay: envOverride(`${prefix}_TIER_GENERATION_WORDS_PER_DAY`) ?? fallback.generation.wordsPerDay,
+      requestsPerDay: envOverride(`${prefix}_TIER_GENERATION_REQUESTS_PER_DAY`) ?? requestFallback.generationRequestsPerDay,
+      wordsPerMonth: envOverride(`${prefix}_TIER_GENERATION_WORDS_PER_MONTH`) ?? wordFallback.generationWordsPerMonth,
     },
     scan: {
-      requestsPerDay: envOverride(`${prefix}_TIER_SCAN_REQUESTS_PER_DAY`) ?? fallback.scan.requestsPerDay,
-      wordsPerDay: envOverride(`${prefix}_TIER_SCAN_WORDS_PER_DAY`) ?? fallback.scan.wordsPerDay,
+      requestsPerDay: envOverride(`${prefix}_TIER_SCAN_REQUESTS_PER_DAY`) ?? requestFallback.scanRequestsPerDay,
+      wordsPerMonth: envOverride(`${prefix}_TIER_SCAN_WORDS_PER_MONTH`) ?? wordFallback.scanWordsPerMonth,
     },
   }
 }
 
 function todayKey(): string {
-  return new Date().toISOString().slice(0, 10) // YYYY-MM-DD, UTC
+  return new Date().toISOString().slice(0, 10) // YYYY-MM-DD, UTC — daily request-rate pool only
+}
+
+function monthKey(): string {
+  return new Date().toISOString().slice(0, 7) // YYYY-MM, UTC — monthly word-quota pool
+}
+
+// The next tier up the public pricing ladder, in PRICING_TIERS' own order
+// (Free -> Starter -> Pro -> Max) — null for the top tier, so a Max account
+// hitting its limit is never told to "upgrade to Enterprise" (§30/§40).
+function nextTier(tier: SelfServeTierId): PricingTier | null {
+  const idx = PRICING_TIERS.findIndex(t => t.id === tier)
+  if (idx === -1 || idx === PRICING_TIERS.length - 1) return null
+  return PRICING_TIERS[idx + 1] ?? null
+}
+
+function publicName(tier: SelfServeTierId): string {
+  return PRICING_TIERS.find(t => t.id === tier)?.name ?? 'current'
+}
+
+// "You've reached your Free monthly word allowance. Upgrade to Starter for
+// 50,000 generated and scanned words per month." (§30) — never suggests a
+// tier above Max, and always names the concrete next-tier allowance rather
+// than a generic "upgrade for more".
+function monthlyLimitMessage(tier: SelfServeTierId, pool: UsagePool, limit: number): string {
+  const poolLabel = pool === 'scan' ? 'scanned' : 'generated'
+  const base = `You've reached your ${publicName(tier)} monthly ${poolLabel}-word allowance (${limit.toLocaleString()} words/month).`
+  const next = nextTier(tier)
+  if (!next) return base
+  const nextLimits = TIER_WORD_LIMITS[next.id as SelfServeTierId]
+  if (!nextLimits) return base
+  return `${base} Upgrade to ${next.name} for ${nextLimits.generationWordsPerMonth.toLocaleString()} generated and ${nextLimits.scanWordsPerMonth.toLocaleString()} scanned words per month.`
 }
 
 // Sha256(email) hashes (matching auth-utils.ts's issueAccessToken, which is
 // the only producer of the email_hash JWT claim callers pass in here) that
 // bypass both pools' quotas entirely — an operator/owner allowlist for
 // accounts that shouldn't be metered against this deployment's own paid
-// keys, distinct from the free/pro/enterprise tiers above. Comma-separated;
-// re-read on every call like the tier overrides, for the same reason.
+// keys, distinct from the free/starter/pro/enterprise tiers above.
+// Comma-separated; re-read on every call like the tier overrides, for the
+// same reason.
 function unlimitedEmailHashes(): Set<string> {
   const raw = process.env.UNLIMITED_USAGE_EMAIL_HASHES ?? ''
   return new Set(
@@ -102,18 +162,20 @@ export interface UsageCheckResult {
 
 type UsagePool = 'generation' | 'scan'
 
-// Atomically checks today's usage against the caller's tier limits for the
-// given pool and, if still under budget, records this request's
-// contribution in the same Firestore transaction — so two concurrent
-// requests can't both read "under budget" and both slip through. Fails
-// CLOSED (rejects the request) if Firestore itself is unavailable — unlike
-// jobs/presets/config sync elsewhere in this app, which fail open because a
-// degraded UX is the only cost. This function is only ever called on the
-// path that spends this deployment's own paid key for that pool (callers
-// skip it entirely for a caller's own BYOK key — see humanize/route.ts,
-// scan/route.ts, and tryClassifyOutput in humanizeOutput.ts), so failing
-// open here would mean one Firestore outage removes all spend protection on
-// keys this deployment pays for.
+// Atomically checks this month's word quota AND today's request-rate budget
+// against the caller's tier limits for the given pool and, if both are still
+// under budget, records this request's contribution to both in the same
+// Firestore transaction — so two concurrent requests can't both read "under
+// budget" and both slip through, and a request that fails one pool never
+// partially records against the other. Fails CLOSED (rejects the request)
+// if Firestore itself is unavailable — unlike jobs/presets/config sync
+// elsewhere in this app, which fail open because a degraded UX is the only
+// cost. This function is only ever called on the path that spends this
+// deployment's own paid key for that pool (callers skip it entirely for a
+// caller's own BYOK key — see humanize/route.ts, scan/route.ts, and
+// tryClassifyOutput in humanizeOutput.ts), so failing open here would mean
+// one Firestore outage removes all spend protection on keys this deployment
+// pays for.
 async function checkAndRecordPoolUsage(
   userId: string,
   tier: string,
@@ -137,14 +199,15 @@ async function checkAndRecordPoolUsage(
     return { allowed: true }
   }
 
+  const normalizedTier = normalizeTier(tier)
   const limits = limitsForTier(tier)[pool]
-  const reqField = `${pool}Requests`
+  const requestField = `${pool}Requests`
   const wordField = `${pool}Words`
 
   // A plan with zero scan quota doesn't have the feature at all — "limit
   // reached (0/day)" would misleadingly read as "you used it up" rather
   // than "your plan doesn't include this."
-  if (limits.requestsPerDay <= 0 || limits.wordsPerDay <= 0) {
+  if (limits.requestsPerDay <= 0 || limits.wordsPerMonth <= 0) {
     return {
       allowed: false,
       code: 'LIMIT_EXCEEDED',
@@ -154,32 +217,44 @@ async function checkAndRecordPoolUsage(
     }
   }
 
-  try {
-    const docRef = db().collection('usage').doc(`${userId}_${todayKey()}`)
-    return await db().runTransaction(async (tx) => {
-      const snap = await tx.get(docRef)
-      const current = (snap.exists ? snap.data() : null) as Record<string, number> | null
-      const requests = current?.[reqField] ?? 0
-      const usedWords = current?.[wordField] ?? 0
+  const period = monthKey()
 
-      if (requests + 1 > limits.requestsPerDay) {
+  try {
+    // Built inside the try/catch specifically so db() throwing synchronously
+    // (e.g. missing Firebase credentials) is caught the same way a rejected
+    // transaction is, rather than escaping this function uncaught.
+    const monthlyRef = db().collection('usage_monthly').doc(`${userId}_${period}`)
+    const dailyRef = db().collection('usage_daily').doc(`${userId}_${todayKey()}`)
+    return await db().runTransaction(async (tx) => {
+      const [monthlySnap, dailySnap] = await Promise.all([tx.get(monthlyRef), tx.get(dailyRef)])
+      const monthly = (monthlySnap.exists ? monthlySnap.data() : null) as Record<string, number> | null
+      const daily = (dailySnap.exists ? dailySnap.data() : null) as Record<string, number> | null
+      const usedWords = monthly?.[wordField] ?? 0
+      const dailyRequests = daily?.[requestField] ?? 0
+
+      if (dailyRequests + 1 > limits.requestsPerDay) {
         return {
           allowed: false,
           code: 'LIMIT_EXCEEDED',
           reason: `Daily ${pool} request limit reached (${limits.requestsPerDay}/day). Resets at UTC midnight.`,
         }
       }
-      if (usedWords + words > limits.wordsPerDay) {
+      if (usedWords + words > limits.wordsPerMonth) {
         return {
           allowed: false,
           code: 'LIMIT_EXCEEDED',
-          reason: `Daily ${pool} word limit reached (${limits.wordsPerDay.toLocaleString()} words/day). Resets at UTC midnight.`,
+          reason: monthlyLimitMessage(normalizedTier, pool, limits.wordsPerMonth),
         }
       }
 
       tx.set(
-        docRef,
-        { [reqField]: requests + 1, [wordField]: usedWords + words, updatedAt: new Date() },
+        monthlyRef,
+        { [wordField]: usedWords + words, [requestField]: (monthly?.[requestField] ?? 0) + 1, period, updatedAt: new Date() },
+        { merge: true },
+      )
+      tx.set(
+        dailyRef,
+        { [requestField]: dailyRequests + 1, updatedAt: new Date() },
         { merge: true },
       )
       return { allowed: true }
