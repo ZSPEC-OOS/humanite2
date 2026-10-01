@@ -19,12 +19,15 @@ describe('TierBadge', () => {
 
   it('renders the plan label for a free-tier account, using the neutral (non-gold) treatment', () => {
     render(<TierBadge tier="free" />)
-    expect(screen.getByText('Starter Plan')).toBeTruthy()
-    const badge = screen.getByText('Starter Plan')
+    expect(screen.getByText('Free Plan')).toBeTruthy()
+    const badge = screen.getByText('Free Plan')
     expect(badge.className).not.toMatch(/amber/)
   })
 
-  it('renders the plan label for pro/enterprise, unaffected by the Gold treatment', () => {
+  it('renders the plan label for starter/pro/enterprise, unaffected by the Gold treatment', () => {
+    render(<TierBadge tier="starter" />)
+    expect(screen.getByText('Starter Plan')).toBeTruthy()
+
     render(<TierBadge tier="pro" />)
     expect(screen.getByText('Pro Plan')).toBeTruthy()
 
@@ -32,11 +35,11 @@ describe('TierBadge', () => {
     expect(screen.getByText('Max Plan')).toBeTruthy()
   })
 
-  it('falls back to the Starter label for an unrecognized or missing tier, rather than showing Gold', () => {
+  it('falls back to the Free label for an unrecognized or missing tier, rather than showing Gold or a paid plan', () => {
     render(<TierBadge tier={null} />)
-    expect(screen.getByText('Starter Plan')).toBeTruthy()
+    expect(screen.getByText('Free Plan')).toBeTruthy()
 
     render(<TierBadge tier="not-a-real-tier" />)
-    expect(screen.getAllByText('Starter Plan').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Free Plan').length).toBeGreaterThan(0)
   })
 })

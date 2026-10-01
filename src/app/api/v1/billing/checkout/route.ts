@@ -8,13 +8,19 @@ import { PRICING_TIERS } from '@/lib/pricing'
 // once STRIPE_SECRET_KEY and the tier's Price ID env var are set in the
 // deployment, this works end-to-end with no further code changes needed.
 //
-// What this deliberately does NOT do: unlock the purchased tier for the
-// buyer. requireAuth() currently treats every request as the same fixed
-// "local" identity (see src/lib/require-auth.ts) — there is no real
-// per-user account yet to attach a subscription to. The webhook route
-// (../webhook/route.ts) records the raw Stripe events for later
-// reconciliation once real auth exists; wiring a completed checkout to an
-// actual tier upgrade is follow-up work, not something this endpoint fakes.
+// This DOES unlock the purchased tier for the buyer: `metadata.userId`/
+// `metadata.plan` are stamped on both the Checkout Session AND the
+// subscription it creates (`subscription_data.metadata`), which is what the
+// webhook route (../webhook/route.ts) reads to resolve `checkout.session.
+// completed`/`customer.subscription.updated`/`customer.subscription.deleted`
+// events back to a real `users/{userId}.tier` change via
+// billingEntitlement.ts. `client_reference_id` is also set for visibility in
+// the Stripe dashboard, but the metadata fields are what entitlement
+// resolution actually reads.
+//
+// Free has no Stripe price at all and is never checked out through here —
+// a Free account is created by ordinary registration (see
+// src/lib/userRegistration.ts / POST /api/v1/auth/register).
 
 export async function POST(req: NextRequest) {
   const auth = await requireAuth(req)
@@ -26,6 +32,18 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json(
       { error: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.' } },
+      { status: 400 },
+    )
+  }
+
+  if (body.plan === 'free') {
+    return NextResponse.json(
+      {
+        error: {
+          code: 'FREE_PLAN_NO_CHECKOUT',
+          message: 'Free has no checkout — create an account via registration to start on the Free plan.',
+        },
+      },
       { status: 400 },
     )
   }
@@ -55,6 +73,8 @@ export async function POST(req: NextRequest) {
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
       client_reference_id: auth.claims.sub,
+      metadata: { userId: auth.claims.sub, plan: tier.id },
+      subscription_data: { metadata: { userId: auth.claims.sub, plan: tier.id } },
       success_url: `${appUrl}/dashboard?checkout=success`,
       cancel_url: `${appUrl}/pricing?checkout=cancelled`,
     })

@@ -2,16 +2,27 @@
 // this, and the Stripe checkout route (src/app/api/v1/billing/checkout)
 // looks up each paid tier's Price ID by `stripePriceEnvVar`. Add a tier here
 // and both stay in sync.
+//
+// Internal id -> public name:
+//   free       -> Free        ($0, no checkout — see registerUser)
+//   starter    -> Starter     ($5)
+//   pro        -> Pro         ($10)
+//   enterprise -> Max         ($15 — kept as 'enterprise' internally for
+//                               backward compatibility; never displayed to
+//                               users as "Enterprise")
+// 'gold' is a distinct, administratively-assigned tier (see accountTier.ts)
+// and deliberately does not appear in this list — it has no price, is never
+// self-serve, and is never shown on the public pricing page.
 
 export interface PricingTier {
-  id: 'free' | 'pro' | 'enterprise'
+  id: 'free' | 'starter' | 'pro' | 'enterprise'
   name: string
   price: string
   period: string
   description: string
   features: string[]
   cta: string
-  /** Static destination — used by tiers with no checkout (Free, Enterprise). */
+  /** Static destination — used by tiers with no checkout (Free). */
   ctaHref?: string
   /** Env var holding this tier's Stripe Price ID — used by tiers that checkout. */
   stripePriceEnvVar?: string
@@ -21,11 +32,30 @@ export interface PricingTier {
 export const PRICING_TIERS: PricingTier[] = [
   {
     id: 'free',
+    name: 'Free',
+    price: '$0',
+    period: '/month',
+    description: 'Try Humanite with a smaller monthly allowance.',
+    features: [
+      '5,000 generated words / month',
+      '5,000 scanned words / month',
+      'Humanize up to 24,000 characters per request',
+      'All tones & domains',
+      'Standard quality gates',
+      'Export to TXT, Markdown, or Word',
+      'Bring your own compatible AI model',
+    ],
+    cta: 'Start Free',
+    ctaHref: '/auth/register',
+  },
+  {
+    id: 'starter',
     name: 'Starter',
     price: '$5',
     period: '/month',
     description: 'For everyday writing with real detection coverage.',
     features: [
+      'Everything in Free',
       '50,000 generated words / month',
       '50,000 scanned words / month',
       'Humanize up to 24,000 characters per request',
@@ -33,7 +63,7 @@ export const PRICING_TIERS: PricingTier[] = [
       'Standard quality gates (fact preservation, meaning check)',
       'Export to TXT, Markdown, or Word',
     ],
-    cta: 'Get Started',
+    cta: 'Upgrade to Starter',
     stripePriceEnvVar: 'STRIPE_PRICE_ID_STARTER',
   },
   {
