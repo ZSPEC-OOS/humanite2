@@ -416,3 +416,91 @@ export async function checkAndRecordGenerationUsage(userId: string, tier: string
 export async function checkAndRecordScanUsage(userId: string, tier: string, words: number, emailHash = '', accountCreatedAt = ''): Promise<UsageCheckResult> {
   return checkAndRecordPoolUsage(userId, tier, words, 'scan', emailHash, accountCreatedAt)
 }
+
+export interface UsagePoolSummary {
+  used: number
+  // null means "no numeric ceiling" (Gold / allowlisted accounts) — render
+  // as Unlimited rather than a fraction.
+  limit: number | null
+}
+
+export interface UsageSummary {
+  tier: string
+  planName: string
+  unlimited: boolean
+  // False only when the underlying Firestore read itself failed — used/limit
+  // are not meaningful in that case and the caller should show an
+  // "unavailable" state rather than treating zeros as real usage.
+  available: boolean
+  generation: UsagePoolSummary
+  scan: UsagePoolSummary
+}
+
+function unlimitedSummary(tier: string, planName: string): UsageSummary {
+  return {
+    tier,
+    planName,
+    unlimited: true,
+    available: true,
+    generation: { used: 0, limit: null },
+    scan: { used: 0, limit: null },
+  }
+}
+
+// Read-only reporting counterpart to checkAndRecordPoolUsage above — reads
+// the SAME documents that function writes (usage_trial for Free's lifetime
+// pool, usage_monthly/{userId}_{period} for the recurring tiers) without
+// recording anything itself, so a page like the Developer dashboard can show
+// real "12,480 / 50,000 words" figures instead of inventing placeholder
+// data. Never throws: a Firestore failure comes back as available: false
+// with zeroed pools rather than propagating, since a usage display is
+// informational, unlike the hard-fail-closed spend gate above.
+export async function getUsageSummary(userId: string, tier: string, emailHash = ''): Promise<UsageSummary> {
+  if (isGoldTier(tier)) return unlimitedSummary(tier, 'Gold')
+  if (emailHash && unlimitedEmailHashes().has(emailHash.toLowerCase())) {
+    return unlimitedSummary(tier, publicName(normalizeTier(tier)))
+  }
+
+  const normalizedTier = normalizeTier(tier)
+  const planName = publicName(normalizedTier)
+
+  try {
+    if (normalizedTier === 'free') {
+      const snap = await db().collection('usage_trial').doc(userId).get()
+      const data = (snap.exists ? snap.data() : null) as Record<string, number> | null
+      const limits = freeTrialWordLimits()
+      return {
+        tier: normalizedTier,
+        planName,
+        unlimited: false,
+        available: true,
+        generation: { used: data?.generationWords ?? 0, limit: limits.generation.wordsTotal },
+        scan: { used: data?.scanWords ?? 0, limit: limits.scan.wordsTotal },
+      }
+    }
+
+    const snap = await db().collection('usage_monthly').doc(`${userId}_${monthKey()}`).get()
+    const data = (snap.exists ? snap.data() : null) as Record<string, number> | null
+    const limits = monthlyWordLimitsForTier(normalizedTier)
+    return {
+      tier: normalizedTier,
+      planName,
+      unlimited: false,
+      available: true,
+      generation: { used: data?.generationWords ?? 0, limit: limits.generation.wordsPerMonth },
+      scan: { used: data?.scanWords ?? 0, limit: limits.scan.wordsPerMonth },
+    }
+  } catch (err) {
+    console.warn('Usage summary unavailable — Firestore read failed', {
+      type: err instanceof Error ? err.constructor.name : typeof err,
+    })
+    return {
+      tier: normalizedTier,
+      planName,
+      unlimited: false,
+      available: false,
+      generation: { used: 0, limit: null },
+      scan: { used: 0, limit: null },
+    }
+  }
+}

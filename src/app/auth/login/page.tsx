@@ -1,18 +1,37 @@
 'use client'
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { authLogin, APIError } from '@/lib/api'
+import { safeNextPath } from '@/lib/safeRedirect'
 import { Spinner } from '@/components/ui/Spinner'
 import { inputCls } from '@/components/ui/styles'
 import { Logo } from '@/components/ui/Logo'
 
+// useSearchParams() opts this page out of static prerendering unless the
+// component that calls it sits inside a Suspense boundary — see
+// https://nextjs.org/docs/messages/missing-suspense-with-csr-bailout. The
+// fallback is never visible in practice (the search params are already
+// known client-side on first paint), but Next requires one regardless.
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  )
+}
+
+function LoginForm() {
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
   const [error, setError]       = useState<string | null>(null)
   const [loading, setLoading]   = useState(false)
   const router = useRouter()
+  // Generic post-login return destination (?next=/developer, ?next=/account,
+  // …) — validated so an attacker can't turn this into an open redirect
+  // (?next=https://malicious-site.com). Falls back to the normal
+  // authenticated landing page when absent or unsafe.
+  const next = safeNextPath(useSearchParams().get('next'))
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -21,7 +40,7 @@ export default function LoginPage() {
     try {
       // authLogin adopts the session (userStore + refresh token) itself.
       await authLogin(email, password)
-      router.push('/dashboard')
+      router.push(next)
     } catch (e) {
       setError(e instanceof APIError ? e.message : 'Login failed.')
     } finally {
@@ -84,7 +103,7 @@ export default function LoginPage() {
 
         <p className="mt-5 text-xs text-center text-gray-400 dark:text-gray-500">
           Don&apos;t have an account?{' '}
-          <a href="/auth/register" className="text-gray-900 dark:text-gray-100 font-medium hover:opacity-70">
+          <a href={`/auth/register?next=${encodeURIComponent(next)}`} className="text-gray-900 dark:text-gray-100 font-medium hover:opacity-70">
             Create one
           </a>
         </p>

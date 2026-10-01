@@ -21,7 +21,15 @@ vi.mock('@/lib/firestore', () => ({
       // ids ever happened to collide in format — a regression guard for a
       // test-fidelity gap, not a production behavior.
       collection: (name: string) => ({
-        doc: (key: string) => ({ __key: `${name}/${key}` }),
+        doc: (key: string) => ({
+          __key: `${name}/${key}`,
+          // getUsageSummary reads a doc directly (no transaction) — the
+          // recording path above never needs this, only tx.get() below.
+          get: async () => ({
+            exists: docStore.has(`${name}/${key}`),
+            data: () => docStore.get(`${name}/${key}`),
+          }),
+        }),
       }),
       runTransaction: async (
         fn: (tx: {
@@ -46,7 +54,7 @@ vi.mock('@/lib/firestore', () => ({
   },
 }))
 
-const { checkAndRecordGenerationUsage, checkAndRecordScanUsage } = await import('../usageLimits')
+const { checkAndRecordGenerationUsage, checkAndRecordScanUsage, getUsageSummary } = await import('../usageLimits')
 
 const ORIGINAL_ENV = { ...process.env }
 
@@ -454,5 +462,66 @@ describe('gold tier — unrestricted access (no daily limits, no quotas, no feat
     const second = await checkAndRecordGenerationUsage('free-user', 'free', 10, '', RECENT_SIGNUP)
     expect(second.allowed).toBe(false)
     expect(second.code).toBe('LIMIT_EXCEEDED')
+  })
+})
+
+describe('getUsageSummary', () => {
+  it('reports a Free account\'s lifetime trial usage against the trial total, not a monthly figure', async () => {
+    await checkAndRecordGenerationUsage('free-user', 'free', 120, '', RECENT_SIGNUP)
+    await checkAndRecordScanUsage('free-user', 'free', 40, '', RECENT_SIGNUP)
+
+    const summary = await getUsageSummary('free-user', 'free')
+    expect(summary.tier).toBe('free')
+    expect(summary.planName).toBe('Free')
+    expect(summary.unlimited).toBe(false)
+    expect(summary.available).toBe(true)
+    expect(summary.generation).toEqual({ used: 120, limit: 1_200 })
+    expect(summary.scan).toEqual({ used: 40, limit: 1_200 })
+  })
+
+  it('reports zero usage for an account with no recorded activity yet, rather than throwing', async () => {
+    const summary = await getUsageSummary('brand-new-user', 'free')
+    expect(summary.generation).toEqual({ used: 0, limit: 1_200 })
+    expect(summary.scan).toEqual({ used: 0, limit: 1_200 })
+  })
+
+  it('reports a paid tier\'s usage against its monthly allowance', async () => {
+    await checkAndRecordGenerationUsage('starter-user', 'starter', 500)
+
+    const summary = await getUsageSummary('starter-user', 'starter')
+    expect(summary.planName).toBe('Starter')
+    expect(summary.generation).toEqual({ used: 500, limit: 50_000 })
+    expect(summary.scan).toEqual({ used: 0, limit: 50_000 })
+  })
+
+  it('reports Gold as unlimited without touching Firestore', async () => {
+    const summary = await getUsageSummary('gold-user', 'gold')
+    expect(summary.unlimited).toBe(true)
+    expect(summary.planName).toBe('Gold')
+    expect(summary.generation.limit).toBeNull()
+    expect(docStore.size).toBe(0)
+  })
+
+  it('reports an allowlisted email hash as unlimited', async () => {
+    process.env.UNLIMITED_USAGE_EMAIL_HASHES = 'allowed-hash'
+    const summary = await getUsageSummary('free-user', 'free', 'allowed-hash')
+    expect(summary.unlimited).toBe(true)
+  })
+
+  it('does not advance or expire the trial — a summary read never records a request', async () => {
+    // A plain read must never consume the daily request-rate budget that
+    // checkAndRecordGenerationUsage enforces.
+    process.env.FREE_TIER_GENERATION_REQUESTS_PER_DAY = '1'
+    await getUsageSummary('free-user', 'free')
+    await getUsageSummary('free-user', 'free')
+    const result = await checkAndRecordGenerationUsage('free-user', 'free', 10, '', RECENT_SIGNUP)
+    expect(result.allowed).toBe(true)
+  })
+
+  it('fails open with available: false (not a thrown error) when Firestore is unavailable', async () => {
+    dbShouldThrow.value = true
+    const summary = await getUsageSummary('free-user', 'free')
+    expect(summary.available).toBe(false)
+    expect(summary.generation).toEqual({ used: 0, limit: null })
   })
 })
