@@ -12,7 +12,7 @@ import { toValidDomain } from '@/lib/style'
 import { runDocumentConsistencyPass } from '@/lib/document'
 import { effectiveIntensity } from '@/lib/intensity'
 import { runHumaniteDocument, buildDocumentContextSafely } from '@/lib/runHumaniteDocument'
-import { SYNC_MAX_CHARS, ASYNC_MAX_CHARS } from '@/lib/limits'
+import { SYNC_MAX_CHARS, FREE_TIER_MAX_REQUEST_WORDS, maxRequestCharsForTier } from '@/lib/limits'
 import { buildOutput, tryClassifyOutput } from '@/lib/humanizeOutput'
 import { checkAndRecordGenerationUsage } from '@/lib/usageLimits'
 import { getUserApiConfig } from '@/lib/userApiConfig'
@@ -60,6 +60,7 @@ async function processHumanizeJobAsync(
   userId: string,
   tier: string,
   originalText: string,
+  accountCreatedAt: string,
 ) {
   try {
     const { apiKey, baseURL, model, usingByok } = resolveProvider(userConfig)
@@ -100,7 +101,7 @@ async function processHumanizeJobAsync(
     const postText = consistency.text
     const modelUsed = results.at(-1)?.modelUsed ?? model
     const watermark = generateWatermark(jobId, modelUsed)
-    const detection = await tryClassifyOutput(postText, userId, tier, userConfig?.gptzeroApiKey || undefined)
+    const detection = await tryClassifyOutput(postText, userId, tier, accountCreatedAt, userConfig?.gptzeroApiKey || undefined)
     const output = buildOutput(postText, results, watermark, detection, consistency)
     const durationMs = Date.now() - start
 
@@ -184,12 +185,20 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     )
   }
-  if (text.length > ASYNC_MAX_CHARS) {
+  // Free's own per-request ceiling (~300 words, derived into its character
+  // equivalent — see limits.ts) is far below ASYNC_MAX_CHARS, so a Free
+  // request is always rejected here rather than ever reaching the async
+  // long-document path at all. Every other tier keeps today's shared
+  // ASYNC_MAX_CHARS ceiling.
+  const maxRequestChars = maxRequestCharsForTier(auth.claims.tier)
+  if (text.length > maxRequestChars) {
     return NextResponse.json(
       {
         error: {
           code: 'VALIDATION_MAX_LENGTH',
-          message: `Text exceeds the ${ASYNC_MAX_CHARS.toLocaleString()} character limit.`,
+          message: auth.claims.tier === 'free'
+            ? `Free trial requests are limited to about ${FREE_TIER_MAX_REQUEST_WORDS.toLocaleString()} words (~${maxRequestChars.toLocaleString()} characters). Upgrade to Starter for up to ${SYNC_MAX_CHARS.toLocaleString()} characters per request.`
+            : `Text exceeds the ${maxRequestChars.toLocaleString()} character limit.`,
         },
       },
       { status: 422 },
@@ -208,7 +217,7 @@ export async function POST(req: NextRequest) {
   // quota exists to protect this deployment's own paid OPENAI_API_KEY, not
   // to restrict usage of a key that isn't this deployment's to pay for.
   if (!userConfig?.apiKey) {
-    const usage = await checkAndRecordGenerationUsage(auth.claims.sub, auth.claims.tier, prep.word_count, auth.claims.email_hash)
+    const usage = await checkAndRecordGenerationUsage(auth.claims.sub, auth.claims.tier, prep.word_count, auth.claims.email_hash, auth.claims.createdAt)
     if (!usage.allowed) {
       return NextResponse.json(
         { error: { code: usage.code === 'UNAVAILABLE' ? 'USAGE_TRACKING_UNAVAILABLE' : 'USAGE_LIMIT_EXCEEDED', message: usage.reason } },
@@ -249,7 +258,7 @@ export async function POST(req: NextRequest) {
         { status: 503 },
       )
     }
-    waitUntil(processHumanizeJobAsync(jobId, prep.sanitized_text, prep.fact_locks, settings, userConfig, auth.claims.sub, auth.claims.tier, text))
+    waitUntil(processHumanizeJobAsync(jobId, prep.sanitized_text, prep.fact_locks, settings, userConfig, auth.claims.sub, auth.claims.tier, text, auth.claims.createdAt))
     return NextResponse.json({
       job_id: jobId,
       status: 'pending',
@@ -285,7 +294,7 @@ export async function POST(req: NextRequest) {
     const durationMs = Date.now() - start
 
     const watermark = generateWatermark(jobId, run.modelUsed)
-    const detection = await tryClassifyOutput(finalText, auth.claims.sub, auth.claims.tier, userConfig?.gptzeroApiKey || undefined)
+    const detection = await tryClassifyOutput(finalText, auth.claims.sub, auth.claims.tier, auth.claims.createdAt, userConfig?.gptzeroApiKey || undefined)
     const output = buildOutput(finalText, [run.chunkResult], watermark, detection, run.consistency)
 
     await saveTransformation({ jobId, userId: auth.claims.sub, inputText: text, output, modelUsed: run.modelUsed })

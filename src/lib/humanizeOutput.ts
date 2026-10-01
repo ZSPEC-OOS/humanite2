@@ -144,12 +144,12 @@ export function buildOutput(
 // A plan with no scan quota (or one that's exhausted for today) simply gets
 // no auto-scan on this humanize call, same as any other detection failure:
 // output is never blocked on it.
-export async function tryClassifyOutput(text: string, userId: string, tier: string, gptzeroApiKey?: string): Promise<DetectionResult | null> {
+export async function tryClassifyOutput(text: string, userId: string, tier: string, accountCreatedAt: string, gptzeroApiKey?: string): Promise<DetectionResult | null> {
   const words = text.trim() ? text.trim().split(/\s+/).length : 0
   recordScanTelemetry({ event: 'scan_requested', trigger: 'auto', words, chars: text.length })
 
   if (!gptzeroApiKey) {
-    const usage = await checkAndRecordScanUsage(userId, tier, words)
+    const usage = await checkAndRecordScanUsage(userId, tier, words, '', accountCreatedAt)
     if (!usage.allowed) {
       recordScanTelemetry({ event: 'scan_failed', trigger: 'auto', error_code: usage.code ?? 'LIMIT_EXCEEDED' })
       return null

@@ -36,7 +36,7 @@ export function TierBadge({ tier, className = 'inline-flex' }: TierBadgeProps) {
           : 'border-gray-200 bg-gray-100 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400'
       }`}
     >
-      {gold ? 'Gold User' : `${tierDisplayName(tier)} Plan`}
+      {gold ? 'Gold User' : tierDisplayName(tier) === 'Free' ? 'Free Trial' : `${tierDisplayName(tier)} Plan`}
     </span>
   )
 }

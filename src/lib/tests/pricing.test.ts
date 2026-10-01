@@ -32,18 +32,27 @@ describe('PRICING_TIERS', () => {
     expect(max.stripePriceEnvVar).toBe('STRIPE_PRICE_ID_MAX')
   })
 
-  it('advertises the canonical monthly word allowances for each tier', () => {
+  it('advertises the canonical monthly word allowances for the recurring paid tiers', () => {
     const allowances: Record<string, string> = {
-      free: '5,000',
       starter: '50,000',
       pro: '100,000',
       enterprise: '150,000',
     }
-    for (const tier of PRICING_TIERS) {
-      const expected = allowances[tier.id]!
+    for (const [id, expected] of Object.entries(allowances)) {
+      const tier = PRICING_TIERS.find(t => t.id === id)!
       expect(tier.features.some(f => f.includes(`${expected} generated words`))).toBe(true)
       expect(tier.features.some(f => f.includes(`${expected} scanned words`))).toBe(true)
     }
+  })
+
+  it('advertises Free\'s one-time 30-day trial allowance distinctly from the recurring monthly tiers', () => {
+    const free = PRICING_TIERS.find(t => t.id === 'free')!
+    expect(free.period).toMatch(/30-day trial/i)
+    expect(free.features.some(f => f.includes('1,200 generated words'))).toBe(true)
+    expect(free.features.some(f => f.includes('1,200 scanned words'))).toBe(true)
+    // Never phrased as a recurring "/ month" allowance like the paid tiers.
+    expect(free.features.some(f => /generated words \/ month/i.test(f))).toBe(false)
+    expect(free.features.some(f => f.includes('300 words per request'))).toBe(true)
   })
 
   it('prices strictly increase from Free through Max', () => {

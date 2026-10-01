@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/firestore'
-import { hashRefreshToken, issueAccessToken } from '@/lib/auth-utils'
+import { hashRefreshToken, issueAccessToken, accountCreatedAtIso } from '@/lib/auth-utils'
 import { resolveEffectiveTier } from '@/lib/accountTier'
 import { rotateRefreshToken } from '@/lib/refreshTokenRotation'
 
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: { code: 'USER_NOT_FOUND', message: 'User not found.' } }, { status: 401 })
   }
 
-  const accessToken = await issueAccessToken(userDoc.id, user.email, resolveEffectiveTier(user.email, user.tier), user.region)
+  const accessToken = await issueAccessToken(userDoc.id, user.email, resolveEffectiveTier(user.email, user.tier), user.region, accountCreatedAtIso(user.createdAt))
 
   return NextResponse.json({
     access_token: accessToken,

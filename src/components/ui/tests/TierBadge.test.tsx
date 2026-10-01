@@ -17,10 +17,13 @@ describe('TierBadge', () => {
     expect(badge.className).not.toMatch(/\bgray-100\b/)
   })
 
-  it('renders the plan label for a free-tier account, using the neutral (non-gold) treatment', () => {
+  it('renders "Free Trial" (not "Free Plan") for a free-tier account, using the neutral (non-gold) treatment', () => {
+    // Free is a one-time 30-day trial that ends, not a permanent plan —
+    // "Free Plan" would misleadingly imply it never expires.
     render(<TierBadge tier="free" />)
-    expect(screen.getByText('Free Plan')).toBeTruthy()
-    const badge = screen.getByText('Free Plan')
+    expect(screen.getByText('Free Trial')).toBeTruthy()
+    expect(screen.queryByText('Free Plan')).toBeNull()
+    const badge = screen.getByText('Free Trial')
     expect(badge.className).not.toMatch(/amber/)
   })
 
@@ -35,11 +38,11 @@ describe('TierBadge', () => {
     expect(screen.getByText('Max Plan')).toBeTruthy()
   })
 
-  it('falls back to the Free label for an unrecognized or missing tier, rather than showing Gold or a paid plan', () => {
+  it('falls back to "Free Trial" for an unrecognized or missing tier, rather than showing Gold or a paid plan', () => {
     render(<TierBadge tier={null} />)
-    expect(screen.getByText('Free Plan')).toBeTruthy()
+    expect(screen.getByText('Free Trial')).toBeTruthy()
 
     render(<TierBadge tier="not-a-real-tier" />)
-    expect(screen.getAllByText('Free Plan').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Free Trial').length).toBeGreaterThan(0)
   })
 })

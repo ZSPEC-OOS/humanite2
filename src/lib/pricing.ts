@@ -4,7 +4,10 @@
 // and both stay in sync.
 //
 // Internal id -> public name:
-//   free       -> Free        ($0, no checkout — see registerUser)
+//   free       -> Free        ($0, no checkout — see registerUser). A
+//                               one-time 30-day trial from account creation,
+//                               not a recurring monthly plan — see
+//                               usageLimits.ts's checkAndRecordFreeTrialUsage.
 //   starter    -> Starter     ($5)
 //   pro        -> Pro         ($10)
 //   enterprise -> Max         ($15 — kept as 'enterprise' internally for
@@ -34,18 +37,18 @@ export const PRICING_TIERS: PricingTier[] = [
     id: 'free',
     name: 'Free',
     price: '$0',
-    period: '/month',
-    description: 'Try Humanite with a smaller monthly allowance.',
+    period: '30-day trial',
+    description: 'Try Humanite free for 30 days.',
     features: [
-      '5,000 generated words / month',
-      '5,000 scanned words / month',
-      'Humanize up to 24,000 characters per request',
+      '1,200 generated words (one-time, over 30 days)',
+      '1,200 scanned words (one-time, over 30 days)',
+      'Humanize up to 300 words per request',
       'All tones & domains',
       'Standard quality gates',
       'Export to TXT, Markdown, or Word',
       'Bring your own compatible AI model',
     ],
-    cta: 'Start Free',
+    cta: 'Start Free Trial',
     ctaHref: '/auth/register',
   },
   {

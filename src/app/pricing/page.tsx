@@ -8,23 +8,23 @@ import { PRICING_TIERS } from '@/lib/pricing'
 const FAQS = [
   {
     q: 'Can I use my own AI model instead of the built-in one?',
-    a: 'Yes — every plan, including Free, supports bringing your own OpenAI-compatible API key (OpenAI, DeepSeek, or a self-hosted model). Generation through your own key doesn\'t count against your plan\'s generated-word quota. Pro and Max sync that configuration across your devices.',
+    a: 'Yes — every plan, including the Free trial, supports bringing your own OpenAI-compatible API key (OpenAI, DeepSeek, or a self-hosted model). Generation through your own key doesn\'t count against your plan\'s generated-word quota. Pro and Max sync that configuration across your devices.',
   },
   {
     q: 'What happens to text longer than my plan’s limit?',
-    a: 'Free and Starter process documents synchronously up to 24,000 characters per request. Pro and Max raise that to 200,000 characters, processed as a background job with automatic progress recovery if it runs long.',
+    a: 'The Free trial processes up to 300 words (about 1,800 characters) per request. Starter raises that to 24,000 characters. Pro and Max raise it further to 200,000 characters, processed as a background job with automatic progress recovery if it runs long.',
   },
   {
     q: 'What are generated and scanned words?',
-    a: 'Generated words are what Humanize rewrites for you each month. Scanned words are what our AI-detection check can review each month — every plan gets an equal amount of both, so you can always verify what you generate.',
+    a: 'Generated words are what Humanize rewrites for you. Scanned words are what our AI-detection check can review. Starter, Pro, and Max get an equal amount of both every month; the Free trial gets an equal one-time amount of both to use across its 30 days.',
   },
   {
     q: 'Is there a free plan?',
-    a: 'Yes. Free includes 5,000 generated words and 5,000 scanned words per month, with no expiration — it\'s a real plan, not a trial. Upgrade to Starter, Pro, or Max whenever you need more capacity.',
+    a: 'There\'s a free 30-day trial: 1,200 generated words and 1,200 scanned words to use across 30 days from when you sign up, no credit card required. It ends after 30 days — upgrade to Starter, Pro, or Max any time to keep going with a recurring monthly allowance.',
   },
   {
     q: 'Can I cancel anytime?',
-    a: 'Yes — every paid plan is billed monthly with no long-term contract. Cancelling returns your account to the Free plan at the end of the current billing period.',
+    a: 'Yes — every paid plan is billed monthly with no long-term contract. Cancelling returns your account to the Free tier at the end of the current billing period, subject to the same 30-day trial window as any other Free account.',
   },
 ]
 
@@ -44,7 +44,7 @@ export default function PricingPage() {
               Pay for what you write
             </h1>
             <p className="mx-auto mt-4 max-w-lg text-base leading-relaxed text-gray-600 dark:text-gray-400 md:text-lg">
-              Start free, then upgrade when you need more words, longer documents, and advanced workflow features. Every plan includes equal generated and scanned words each month.
+              Start with a free 30-day trial, then upgrade when you need more words, longer documents, and advanced workflow features. Every plan includes equal generated and scanned words.
             </p>
           </div>
 

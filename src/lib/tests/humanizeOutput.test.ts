@@ -58,7 +58,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
   // (see usageLimits.test.ts for that), so it shouldn't need a Firestore mock.
   it('humanization succeeds even when detection fails — never propagates the failure', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'rate-limit'
-    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free', '2026-01-01T00:00:00.000Z')
     expect(detection).toBeNull()
 
     const watermark = generateWatermark('job-1', 'gpt-4o-mini')
@@ -78,7 +78,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
 
   it('an ai-generated detection result threads through with no warning', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'ai'
-    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free', '2026-01-01T00:00:00.000Z')
     const output = buildOutput('Some humanized output text.', [chunk()], generateWatermark('job-2', 'gpt-4o-mini'), detection)
 
     expect(output.detection?.classification).toBe('ai-generated')
@@ -87,7 +87,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
 
   it('a human-written detection result threads through with no warning', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'human'
-    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free', '2026-01-01T00:00:00.000Z')
     const output = buildOutput('Some humanized output text.', [chunk()], generateWatermark('job-3', 'gpt-4o-mini'), detection)
 
     expect(output.detection?.classification).toBe('human-written')
@@ -96,7 +96,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
 
   it('a mixed detection result threads through with no warning', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'mixed'
-    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free', '2026-01-01T00:00:00.000Z')
     const output = buildOutput('Some humanized output text.', [chunk()], generateWatermark('job-4', 'gpt-4o-mini'), detection)
 
     expect(output.detection?.classification).toBe('mixed')
@@ -105,7 +105,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
 
   it('large document: aggregates multiple chunks alongside a single whole-document detection result', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'human'
-    const detection = await tryClassifyOutput('Chunk one. Chunk two. Chunk three.', 'test-user', 'free')
+    const detection = await tryClassifyOutput('Chunk one. Chunk two. Chunk three.', 'test-user', 'free', '2026-01-01T00:00:00.000Z')
 
     const chunks = [
       chunk({ text: 'Chunk one.', substitutions: 2, retryCount: 1 }),
@@ -134,7 +134,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
 
   it('populates real style scores and folds them into overall.validated once every chunk\'s gate reports them', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'human'
-    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free', '2026-01-01T00:00:00.000Z')
     const styledChunk = chunk({
       intensityAlignment: 0.9,
       gate: {
@@ -157,7 +157,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
 
   it('a failing style dimension pulls overall.validated down even when fidelity alone passed', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'human'
-    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free', '2026-01-01T00:00:00.000Z')
     const offToneChunk = chunk({
       intensityAlignment: 0.9,
       gate: {
@@ -175,7 +175,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
 
   it('surfaces the repair summary when a chunk needed a targeted fact repair', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'human'
-    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free', '2026-01-01T00:00:00.000Z')
     const repairedChunk = chunk({ repair: { attempted: true, strategy: 'sentence_repair', succeeded: true, sentencesRepaired: 2 } })
     const output = buildOutput('Some humanized output text.', [repairedChunk], generateWatermark('job-8', 'gpt-4o-mini'), detection)
 
@@ -184,7 +184,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
 
   it('surfaces claim_verification and relation_repair from Phase 7', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'human'
-    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free', '2026-01-01T00:00:00.000Z')
     const claimCheckedChunk = chunk({
       claimVerification: { checked: 3, failed: 1, issues: ['causal direction reversed'] },
       relationRepair: { attempted: true, strategy: 'restore_relations', succeeded: true, sentencesRepaired: 1 },
@@ -197,7 +197,7 @@ describe('humanize route: detection integration (spec §30, §48)', () => {
 
   it('reports claim_verification as all-zero when the check never ran for any chunk', async () => {
     process.env.MOCK_DETECTION_FIXTURE = 'human'
-    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free')
+    const detection = await tryClassifyOutput('Some humanized output text.', 'test-user', 'free', '2026-01-01T00:00:00.000Z')
     const output = buildOutput('Some humanized output text.', [chunk()], generateWatermark('job-10', 'gpt-4o-mini'), detection)
 
     expect(output.quality_scores.fidelity.claim_verification).toEqual({ checked: 0, failed: 0, issues: [] })
