@@ -6,6 +6,7 @@ import path from 'path'
 const benchmarkr = process.env['BENCHMARKR_PATH'] ?? path.resolve(__dirname, '../../benchmarkr')
 
 export default defineConfig({
+  css: { postcss: { plugins: [] } },
   test: { environment: 'node', globals: false, include: ['tests/**/*.test.ts'] },
   resolve: {
     alias: {
