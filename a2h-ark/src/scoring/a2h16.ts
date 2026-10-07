@@ -1,6 +1,6 @@
 // PORTED from humanite2 src/lib/a2h/a2h16.ts @ 141e366: the pure scoring core only (Firestore reporting rows/reports removed).
 // NOT PORTED: the verifier-calibration subtest (CLAIM_VERIFIER_CALIBRATION_SET, runClaimVerifierCalibration,
-// computeCalibrationResult) and the `verifyClaims` import from '@/lib/claims': they measure the model-based
+// computeCalibrationResult) and the claim verifier import (verifyClaims): they measure the model-based
 // claim verifier, which stays in Humanite. The ark scores only the deterministic literal classification below.
 import type { BenchmarkFixture, DeterministicEvaluation } from '../shared/types'
 
