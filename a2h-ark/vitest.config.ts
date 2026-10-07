@@ -12,6 +12,8 @@ export default defineConfig({
     alias: {
       '@benchmarkr/core': path.join(benchmarkr, 'packages/core/src/index.ts'),
       '@benchmarkr/contracts': path.join(benchmarkr, 'packages/contracts/src/index.ts'),
+      '@benchmarkr/datasets': path.join(benchmarkr, 'packages/datasets/src/index.ts'),
+      '@benchmarkr/generator': path.join(benchmarkr, 'packages/generator/src/index.ts'),
     },
   },
 })

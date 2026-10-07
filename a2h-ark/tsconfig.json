@@ -12,7 +12,14 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "types": ["node"]
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@benchmarkr/core": ["../../benchmarkr/packages/core/src/index.ts"],
+      "@benchmarkr/contracts": ["../../benchmarkr/packages/contracts/src/index.ts"],
+      "@benchmarkr/datasets": ["../../benchmarkr/packages/datasets/src/index.ts"],
+      "@benchmarkr/generator": ["../../benchmarkr/packages/generator/src/index.ts"]
+    }
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts", "tools/**/*.ts"]
 }
