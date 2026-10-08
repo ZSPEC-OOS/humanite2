@@ -171,12 +171,12 @@ export async function repairChunk(
   }
 }
 
-// ── Grammar repair (A2H-06) ──────────────────────────────────────────────
+// ── Grammar repair ──────────────────────────────────────────────
 //
 // repairChunk above is deliberately fact-ledger-gated — it no-ops on text
 // whose facts already validate, which is exactly what a purely
-// grammatical defect looks like (no fact is missing or misbound). A2H-06's
-// controlled grammar-corruption fixtures need a repair call that always
+// grammatical defect looks like (no fact is missing or misbound). controlled
+// grammar-corruption benchmarks need a repair call that always
 // attempts a correction given known-corrupted text, without that gate —
 // this sibling function reuses this module's calling conventions (a single
 // targeted completion, minimal-change instruction) for that purpose.

@@ -82,12 +82,11 @@ interface JWTClaims {
   tier: string
   region: string
   scopes: string[]
-  a2h_admin?: boolean
 }
 
 function adoptSession(data: TokenResponse) {
   const claims = jwtDecode<JWTClaims>(data.access_token)
-  useUserStore.getState().setAuth(data.access_token, claims.sub, claims.tier, claims.region, claims.scopes, Boolean(claims.a2h_admin))
+  useUserStore.getState().setAuth(data.access_token, claims.sub, claims.tier, claims.region, claims.scopes)
   sessionStorage.setItem(REFRESH_TOKEN_KEY, data.refresh_token)
 }
 
@@ -119,7 +118,7 @@ export async function restoreSession(): Promise<string | null> {
 // Downloads a raw (non-JSON) file from an authenticated endpoint — the same
 // auth-header pattern apiFetch uses, but returning a Blob instead of
 // parsing JSON, for endpoints that stream a CSV/attachment response (see
-// apiExport below, and the A2H benchmark's export-package routes).
+// apiExport below).
 export async function apiFetchBlob(path: string): Promise<Blob> {
   const token = useUserStore.getState().accessToken
   const url = path.startsWith('http') ? path : `${API_BASE}/api${path}`

@@ -10,8 +10,7 @@ interface UserState {
   // Signed server-side into the access token (see auth-utils.ts's
   // issueAccessToken) from the account's own email + tier — never derived
   // client-side, since the client never holds the plaintext email.
-  isA2HAdmin: boolean
-  setAuth: (token: string, userId: string, tier: string, region: string, scopes: string[], isA2HAdmin: boolean) => void
+  setAuth: (token: string, userId: string, tier: string, region: string, scopes: string[]) => void
   clearAuth: () => void
   isAuthenticated: () => boolean
   hasScope: (scope: string) => boolean
@@ -23,11 +22,10 @@ export const useUserStore = create<UserState>((set, get) => ({
   tier: null,
   region: null,
   scopes: [],
-  isA2HAdmin: false,
-  setAuth: (accessToken, userId, tier, region, scopes, isA2HAdmin) =>
-    set({ accessToken, userId, tier, region, scopes, isA2HAdmin }),
+  setAuth: (accessToken, userId, tier, region, scopes) =>
+    set({ accessToken, userId, tier, region, scopes }),
   clearAuth: () =>
-    set({ accessToken: null, userId: null, tier: null, region: null, scopes: [], isA2HAdmin: false }),
+    set({ accessToken: null, userId: null, tier: null, region: null, scopes: [] }),
   isAuthenticated: () => !!get().accessToken,
   hasScope: (scope) => get().scopes.includes(scope),
 }))

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/require-auth', () => ({
-  requireAuth: vi.fn().mockResolvedValue({ claims: { sub: 'user-1', tier: 'free', region: 'us-east1', scopes: [], email_hash: 'hash', a2h_admin: false } }),
+  requireAuth: vi.fn().mockResolvedValue({ claims: { sub: 'user-1', tier: 'free', region: 'us-east1', scopes: [], email_hash: 'hash' } }),
   isAuthFailure: (result: unknown) => result instanceof Response,
 }))
 

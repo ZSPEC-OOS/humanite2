@@ -42,7 +42,7 @@ export interface RunHumaniteDocumentParams {
   domain: Domain
   genre?: string | null
   audience?: string | null
-  // A2H-15's single-candidate arm needs to force candidateCount=1 regardless
+  // A single-candidate benchmark arm needs to force candidateCount=1 regardless
   // of what the (capped) applied intensity would otherwise select — see
   // humanizeChunk's own candidateCountOverride parameter.
   candidateCountOverride?: number | null
@@ -68,9 +68,8 @@ export interface RunHumaniteDocumentResult {
 // preprocess -> effectiveIntensity -> document context -> humanizeChunk ->
 // document consistency pass. This is exactly the sequence
 // /api/v1/humanize's synchronous branch already ran inline; it is now
-// factored out here so that branch AND every ordinary/experimental A2H
-// benchmark transformation call the exact same code, instead of two
-// hand-maintained copies that can silently drift (see the Phase "Final
+// factored out here so that branch AND the internal benchmark service call
+// the exact same code, instead of two hand-maintained copies that can silently drift (see the Phase "Final
 // Polish" patch's blocker #1/#4: the benchmark was previously sending the
 // RAW requested intensity straight to humanizeChunk, bypassing production's
 // domain intensity caps entirely).

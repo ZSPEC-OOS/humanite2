@@ -29,7 +29,7 @@ beforeEach(() => {
   resetEnv()
   sessionsCreate.mockReset()
   requireAuthMock.mockReset()
-  requireAuthMock.mockResolvedValue({ claims: { sub: 'user-1', tier: 'free', region: 'us-east1', scopes: [], email_hash: 'hash', a2h_admin: false } })
+  requireAuthMock.mockResolvedValue({ claims: { sub: 'user-1', tier: 'free', region: 'us-east1', scopes: [], email_hash: 'hash' } })
   process.env.STRIPE_PRICE_ID_STARTER = 'price_starter'
   process.env.STRIPE_PRICE_ID_PRO = 'price_pro'
   process.env.STRIPE_PRICE_ID_MAX = 'price_max'

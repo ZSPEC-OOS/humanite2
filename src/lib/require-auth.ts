@@ -7,7 +7,6 @@ export type AuthClaims = {
   region: string
   scopes: string[]
   email_hash: string
-  a2h_admin: boolean
   // The account's creation timestamp (ISO 8601) — see issueAccessToken's
   // own comment. Used by usageLimits.ts to compute Free-trial expiration.
   createdAt: string
@@ -39,7 +38,6 @@ export async function requireAuth(req: NextRequest): Promise<AuthSuccess | AuthF
         region: payload.region as string,
         scopes: payload.scopes as string[],
         email_hash: payload.email_hash as string,
-        a2h_admin: Boolean(payload.a2h_admin),
         // Absent only on a token issued before this claim existed (a
         // pre-existing refresh token's next access token) — treated as
         // "unknown, assume not expired" by usageLimits.ts rather than

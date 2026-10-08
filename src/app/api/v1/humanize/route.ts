@@ -283,9 +283,9 @@ export async function POST(req: NextRequest) {
     const start = Date.now()
 
     // The same preprocess -> effectiveIntensity -> document-context ->
-    // humanizeChunk -> document-consistency sequence the A2H benchmark's
-    // ordinary/experimental transformations now also run through, so
-    // production and benchmark share one transformation semantics instead
+    // humanizeChunk -> document-consistency sequence the internal benchmark
+    // service also runs through, so production and benchmark share one
+    // transformation semantics instead
     // of two hand-maintained copies that can drift.
     const run = await runHumaniteDocument({
       client, model, sourceText: text, requestedIntensity, tone, domain: toValidDomain(domain), genre, audience,

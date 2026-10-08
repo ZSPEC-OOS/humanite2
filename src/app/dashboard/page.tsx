@@ -21,7 +21,6 @@ import { restoreSession }   from '@/lib/api'
 import { SYNC_MAX_CHARS, maxRequestCharsForTier } from '@/lib/limits'
 import { TierBadge } from '@/components/ui/TierBadge'
 import { Logo } from '@/components/ui/Logo'
-import { A2HMenuLink } from '@/components/nav/A2HMenuLink'
 
 function wordCount(s: string) {
   return s.trim() ? s.trim().split(/\s+/).length : 0
@@ -321,7 +320,6 @@ export default function Dashboard() {
             </button>
             <TierBadge tier={tier} className="flex" />
             <Link href="/developer" className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300 transition-colors">Developer</Link>
-            <A2HMenuLink className="text-xs" />
             <button onClick={handleClear}
               className="text-xs text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300 transition-colors">Clear</button>
             <button onClick={handleSignOut}
@@ -605,10 +603,6 @@ export default function Dashboard() {
           >
             Developer
           </Link>
-          <A2HMenuLink
-            onClick={() => setMenuOpen(false)}
-            className="block w-full text-left py-2.5 px-3 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
-          />
           <button
             onClick={() => { setMenuOpen(false); handleClear() }}
             className="w-full text-left text-sm text-gray-500 hover:text-gray-800

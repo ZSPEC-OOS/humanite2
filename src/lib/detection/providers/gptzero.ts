@@ -28,9 +28,7 @@ export class GPTZeroProvider implements DetectionProvider {
 
   // Same call as detect(), but also returns the untouched raw provider
   // response — needed by callers that must retain the complete raw response
-  // for auditability (the A2H benchmark's baseline/post-score acquisition;
-  // see its spec's "Immutable raw text + raw detector responses" data
-  // strategy). Ordinary product code (scan/humanize) has no use for the raw
+  // for auditability (benchmark baseline/post-score acquisition). Ordinary product code (scan/humanize) has no use for the raw
   // payload and should keep calling detect().
   async detectWithRaw(text: string, _options?: DetectionOptions): Promise<{ result: DetectionProviderResult; raw: unknown }> {
     if (!this.apiKey) {
