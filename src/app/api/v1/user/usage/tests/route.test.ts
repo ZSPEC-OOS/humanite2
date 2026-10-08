@@ -8,7 +8,6 @@ const { claims } = vi.hoisted(() => ({
     region: 'us-east1',
     scopes: [],
     email_hash: 'hash',
-    a2h_admin: false,
     createdAt: '2026-01-01T00:00:00.000Z',
   },
 }))

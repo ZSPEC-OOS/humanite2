@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   }
   try {
     const claims = await verifyAccessToken(authHeader.slice(7))
-    return NextResponse.json({ user_id: claims.sub, email_hash: claims.email_hash, tier: claims.tier, region: claims.region, scopes: claims.scopes, a2h_admin: Boolean(claims.a2h_admin) })
+    return NextResponse.json({ user_id: claims.sub, email_hash: claims.email_hash, tier: claims.tier, region: claims.region, scopes: claims.scopes })
   } catch {
     return NextResponse.json({ error: { code: 'TOKEN_INVALID', message: 'Token is invalid or expired.' } }, { status: 401 })
   }

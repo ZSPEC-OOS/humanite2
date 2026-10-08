@@ -214,8 +214,8 @@ export interface ChunkResult {
   modelUsed: string
   gate: QualityScores | null
   gatesUnavailable: boolean
-  // Telemetry for the A2H benchmark's operational-efficiency measurements
-  // (A2H-15/A2H-17). Known partial-measurement gap, documented rather than
+  // Telemetry for the benchmark service's operational-efficiency measurements.
+  // Known partial-measurement gap, documented rather than
   // fabricated: counts only the PRIMARY generation-phase completions below
   // (generateCandidates / the single-candidate retry loop) — internal gate,
   // judge, targeted-repair, and claim-verification calls each live in their
@@ -680,7 +680,7 @@ export async function humanizeChunk(
   audience?: string | null,
   documentContext?: DocumentContext | null,
   // Benchmark-only override: forces single-candidate mode (1) regardless of
-  // candidateCountForIntensity(intensity), so A2H-15 can generate a genuine
+  // candidateCountForIntensity(intensity), so a benchmark can generate a genuine
   // single-candidate baseline arm at an intensity that would otherwise engage
   // candidate search. Omitted (every production caller and pre-Phase-4 test)
   // preserves the normal intensity-driven candidate count exactly.

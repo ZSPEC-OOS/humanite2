@@ -50,16 +50,6 @@ export function isGoldTier(tier: string | null | undefined): boolean {
   return tier === GOLD_TIER
 }
 
-// Gates access to internal benchmark tooling (A2H) — deliberately checks
-// GOLD_EMAILS directly rather than trusting isGoldTier(tier) alone, because
-// `tier` can independently be set to GOLD_TIER on any account via
-// scripts/setAccountTier.ts, which does not by itself mean that account
-// should see internal benchmark tooling. Both conditions must hold.
-export function isA2HAdmin(email: string | null | undefined, tier: string | null | undefined): boolean {
-  if (!email) return false
-  return GOLD_EMAILS.has(email.trim().toLowerCase()) && isGoldTier(tier)
-}
-
 // The tier to actually sign into an access token for this account — call
 // this at every token-issuance site (login, register, refresh), passing
 // the account's own stored `tier`. Both arguments must come from a

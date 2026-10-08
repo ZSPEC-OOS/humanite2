@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { GOLD_TIER, ACCOUNT_TIERS, isGoldTier, resolveEffectiveTier, isA2HAdmin } from '../accountTier'
+import { GOLD_TIER, ACCOUNT_TIERS, isGoldTier, resolveEffectiveTier } from '../accountTier'
 import { PRICING_TIERS } from '../pricing'
 
 describe('accountTier', () => {
@@ -56,35 +56,6 @@ describe('accountTier', () => {
       expect(resolveEffectiveTier('someone-else@example.com', 'free')).toBe('free')
       expect(resolveEffectiveTier('someone-else@example.com', 'pro')).toBe('pro')
       expect(resolveEffectiveTier('someone-else@example.com', 'enterprise')).toBe('enterprise')
-    })
-  })
-
-  describe('isA2HAdmin', () => {
-    it('is true only for the hardcoded Gold email when its tier is also gold', () => {
-      expect(isA2HAdmin('jdzelazny@gmail.com', 'gold')).toBe(true)
-      expect(isA2HAdmin('  JDZelazny@Gmail.com  ', 'gold')).toBe(true)
-    })
-
-    it('is false for the admin email if its tier is not gold', () => {
-      // Guards against a stale/never-refreshed token issued before this
-      // account was resolved to Gold, or any other path that could produce
-      // that mismatch.
-      expect(isA2HAdmin('jdzelazny@gmail.com', 'free')).toBe(false)
-      expect(isA2HAdmin('jdzelazny@gmail.com', null)).toBe(false)
-    })
-
-    it('is false for a different gold-tier account, even though isGoldTier alone would be true', () => {
-      // scripts/setAccountTier.ts can set tier='gold' on any Firestore user
-      // independent of the GOLD_EMAILS allowlist — that must not by itself
-      // grant access to internal benchmark tooling.
-      expect(isGoldTier('gold')).toBe(true)
-      expect(isA2HAdmin('someone-else@example.com', 'gold')).toBe(false)
-    })
-
-    it('is false for null/undefined/empty email', () => {
-      expect(isA2HAdmin(null, 'gold')).toBe(false)
-      expect(isA2HAdmin(undefined, 'gold')).toBe(false)
-      expect(isA2HAdmin('', 'gold')).toBe(false)
     })
   })
 })

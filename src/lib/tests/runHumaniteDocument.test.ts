@@ -5,7 +5,7 @@ import { effectiveIntensity } from '../intensity'
 import { candidateCountForIntensity } from '../selection'
 
 // "Final Polish" patch, §21: proves the ONE shared transformation wrapper
-// production's /v1/humanize synchronous path and the A2H benchmark both now
+// production's /v1/humanize synchronous path and the benchmark service both now
 // call produces the exact same CONFIGURATION decisions for a given request
 // — never asserting identical stochastic text (the model's actual rewrite),
 // only the deterministic decisions that must never diverge between what a
@@ -58,7 +58,7 @@ describe('runHumaniteDocument — shared production/benchmark transformation sem
     expect(result.modelUsed).toBe('gpt-4o-mini')
   })
 
-  it('honors candidateCountOverride (A2H-15\'s single-candidate arm) without changing the applied intensity', async () => {
+  it('honors candidateCountOverride (a single-candidate benchmark arm) without changing the applied intensity', async () => {
     const client = stubClient()
     const withOverride = await runHumaniteDocument({
       client, model: 'gpt-4o-mini', sourceText: SOURCE_TEXT, requestedIntensity: 8, tone: 'balanced', domain: 'technical', candidateCountOverride: 1,

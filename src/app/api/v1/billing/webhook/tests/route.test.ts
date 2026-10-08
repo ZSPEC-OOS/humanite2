@@ -21,7 +21,7 @@ vi.mock('@/lib/firestore', () => ({
 const { POST } = await import('../route')
 
 // Same per-collection-map fake used throughout this codebase's other
-// transactional tests (e.g. src/lib/a2h/tests/execution.test.ts).
+// transactional tests.
 function makeFirestore() {
   const collections = new Map<string, Map<string, Record<string, unknown>>>()
   let counter = 0
