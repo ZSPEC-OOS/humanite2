@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { SiteNav } from '@/components/marketing/SiteNav'
 import { SiteFooter } from '@/components/marketing/SiteFooter'
 import { ArrowIcon } from '@/components/marketing/icons'
+import { TempPurgeButton } from '@/components/temp/TempPurgeButton'
 
 function AIIcon() {
   return (
@@ -38,6 +39,7 @@ export default function LandingPage() {
     <main className="bg-rock relative min-h-screen bg-white dark:bg-gray-950">
       <div className="flex min-h-screen flex-col">
         <SiteNav />
+        <TempPurgeButton />
 
         {/* Hero */}
         <div className="flex flex-1 flex-col items-center px-6 pb-16 pt-4 text-center md:pt-6">
