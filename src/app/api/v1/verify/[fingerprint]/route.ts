@@ -19,7 +19,7 @@ async function findJob(fingerprint: string) {
 // particular text is what it produced. Kept for backward compatibility with
 // existing verification_url links; POST is the one that actually verifies
 // content, see below.
-export async function GET(req: NextRequest, { params }: { params: { fingerprint: string } }) {
+export async function GET(_req: NextRequest, { params }: { params: { fingerprint: string } }) {
   const job = await findJob(params.fingerprint)
   if (!job) {
     return NextResponse.json({ verified: false }, { status: 404 })
