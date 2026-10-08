@@ -10,7 +10,7 @@ export const maxDuration = 300
 export async function POST(req: Request) {
   let body: Record<string, unknown> = {}
   try { body = (await req.json()) as Record<string, unknown> } catch { /* handled below as a bad action */ }
-  const decision = decidePurge({ token: body['token'], action: body['action'], collection: body['collection'] }, process.env.TEMP_PURGE_TOKEN)
+  const decision = decidePurge({ action: body['action'], collection: body['collection'] })
   if (!decision.ok) return NextResponse.json({ error: decision.message }, { status: decision.status })
   try {
     const firestore = db()
