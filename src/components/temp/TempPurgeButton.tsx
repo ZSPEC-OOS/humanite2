@@ -8,28 +8,24 @@ export function TempPurgeButton() {
   const [log, setLog] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
 
-  async function call(token: string, payload: Record<string, unknown>) {
-    const res = await fetch('/api/temp-purge', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, ...payload }) })
+  async function call(payload: Record<string, unknown>) {
+    const res = await fetch('/api/temp-purge', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
     if (!res.ok) throw new Error(String(data['error'] ?? res.status))
     return data
   }
 
   async function run() {
-    const token = window.prompt('Temporary purge token:')
-    if (!token) return
     setBusy(true)
     setLog([])
     try {
-      const { counts } = (await call(token, { action: 'count' })) as { counts: Record<string, number> }
+      const { counts } = (await call({ action: 'count' })) as { counts: Record<string, number> }
       const total = Object.values(counts).reduce((a, b) => a + b, 0)
       const lines = Object.entries(counts).map(([k, v]) => `${k}: ${v}`)
       setLog([`Found ${total} documents of ${COLLECTIONS_HINT}:`, ...lines])
       if (total === 0) return
-      const typed = window.prompt(`This permanently deletes ${total} documents and cannot be undone.\nType DELETE to continue:`)
-      if (typed !== 'DELETE') { setLog((l) => [...l, 'Cancelled. Nothing was deleted.']); return }
       for (const name of Object.keys(counts)) {
-        const r = (await call(token, { action: 'delete', collection: name })) as { remaining: number }
+        const r = (await call({ action: 'delete', collection: name })) as { remaining: number }
         setLog((l) => [...l, `deleted ${name} (remaining: ${r.remaining})`])
       }
       setLog((l) => [...l, 'Done.'])
